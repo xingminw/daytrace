@@ -18,7 +18,7 @@ class TraceEvent:
     sensitivity: str
     evidence: dict[str, Any] = field(default_factory=dict)
     raw_ref: str | None = None
-    device_id: str = "mac-hermes"
+    device_id: str = "Mac"
     location_id: str = "unknown"
     collector_id: str = "hub-local"
 
@@ -66,9 +66,11 @@ class TraceEvent:
         # Backward compatible with prototype JSONL events created before
         # device/location became first-class single-machine dimensions.
         data = {
-            "device_id": "mac-hermes",
+            "device_id": "Mac",
             "location_id": "unknown",
             "collector_id": "hub-local",
             **data,
         }
+        if data.get("device_id") in {"mac-hermes", "mac"}:
+            data["device_id"] = "Mac"
         return cls(**data)

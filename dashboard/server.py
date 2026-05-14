@@ -8,6 +8,7 @@ import json
 from datetime import date as dt_date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -36,22 +37,29 @@ body.events-page form { height:100%; }
 .donut-row { display:grid; grid-template-columns:120px 1fr; gap:12px; align-items:center; }.donut { width:112px; height:112px; border-radius:50%; display:grid; place-items:center; background:conic-gradient(var(--accent) 0 40%, var(--purple) 40% 70%, var(--orange) 70% 88%, #cbd5e1 88% 100%); }.donut:after { content:attr(data-label); width:70px; height:70px; border-radius:50%; background:var(--card); display:grid; place-items:center; font-size:13px; font-weight:800; color:var(--muted); text-align:center; }
 .table-wrap { max-height:none; min-height:calc(100vh - 86px); overflow:auto; border:1px solid var(--line); border-radius:16px; background:var(--card); }
 body.events-page .table-wrap { height:100%; min-height:0; max-height:100%; overflow:hidden; overscroll-behavior:contain; }
-table { width:100%; min-width:1180px; border-collapse:separate; border-spacing:0; background:var(--card); table-layout:fixed; }
-body.events-page table { height:100%; display:flex; flex-direction:column; }
+table { width:100%; min-width:0; border-collapse:separate; border-spacing:0; background:var(--card); table-layout:fixed; }
+body.events-page table { height:100%; min-width:0; display:flex; flex-direction:column; }
 body.events-page thead, body.events-page tbody { display:block; }
-body.events-page tbody { flex:1; min-height:0; overflow:auto; overscroll-behavior:contain; }
+body.events-page tbody { flex:1; min-height:0; overflow-y:auto; overflow-x:hidden; overscroll-behavior:contain; }
 body.events-page tr { display:table; width:100%; table-layout:fixed; }
 th,td { padding:7px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; font-size:12px; }
 th { position:sticky; top:0; background:#fff7e8; z-index:3; color:#4d4438; box-shadow:0 1px 0 var(--line); } tr:last-child td { border-bottom:none; }
 th .th-title { display:flex; align-items:center; justify-content:space-between; gap:6px; font-weight:750; margin-bottom:5px; } th .sort { color:var(--muted); font-size:11px; } th input, th select { width:100%; min-width:0; padding:4px 5px; font-size:11px; } th select + select { margin-top:4px; } .header-filter { margin:0; display:flex; align-items:center; gap:5px; white-space:nowrap; } .header-filter select { max-width:132px; }
-.col-time { width:150px; }.col-source { width:140px; }.col-device { width:95px; }.col-location { width:85px; }.col-project { width:125px; }.col-title { width:520px; }.col-evidence { width:50px; }
-body.events-page th:nth-child(1), body.events-page td:nth-child(1) { width:150px; }
-body.events-page th:nth-child(2), body.events-page td:nth-child(2) { width:140px; }
-body.events-page th:nth-child(3), body.events-page td:nth-child(3) { width:95px; }
-body.events-page th:nth-child(4), body.events-page td:nth-child(4) { width:85px; }
-body.events-page th:nth-child(5), body.events-page td:nth-child(5) { width:125px; }
-body.events-page th:nth-child(6), body.events-page td:nth-child(6) { width:520px; }
-body.events-page th:nth-child(7), body.events-page td:nth-child(7) { width:50px; }
+.col-time { width:190px; }.col-source { width:78px; }.col-device { width:70px; }.col-location { width:76px; }.col-project { width:130px; }.col-title { width:auto; }
+body.events-page th:nth-child(1), body.events-page td:nth-child(1) { width:190px; }
+body.events-page th:nth-child(2), body.events-page td:nth-child(2) { width:78px; }
+body.events-page th:nth-child(3), body.events-page td:nth-child(3) { width:70px; }
+body.events-page th:nth-child(4), body.events-page td:nth-child(4) { width:76px; }
+body.events-page th:nth-child(5), body.events-page td:nth-child(5) { width:130px; }
+body.events-page th:nth-child(6), body.events-page td:nth-child(6) { width:auto; }
+.time-range { display:grid; grid-template-columns:1fr; gap:4px; }
+.time-range .header-filter { display:block; }
+.time-range .date-picker summary { width:100%; justify-content:space-between; padding:4px 6px; font-size:11px; border-color:#d3c5ad; }
+.time-range .calendar-pop { width:176px; padding:8px; }
+.time-range .date-picker.end-date .calendar-pop { left:0; right:auto; }
+.cal-day.no-data { color:#b4aa9c; background:#f8f5ee; border-color:#eee6d8; }
+.cal-day.disabled { pointer-events:none; opacity:.34; background:#f3eee5; color:#a79b8b; border-color:#eadfcd; }
+.cal-day.active.has-data, .cal-day.active.no-data, .cal-day.active.disabled { background:var(--ink); color:white; border-color:var(--ink); opacity:1; box-shadow:0 0 0 2px #f6d365 inset; }
 body.events-page tbody tr.source-git td { background:#fff8e7; }
 body.events-page tbody tr.source-github td { background:#f0f7ff; }
 body.events-page tbody tr.source-docs td { background:#f3f8ff; }
@@ -70,7 +78,7 @@ a { color:var(--accent); text-decoration:none; }
 .date-picker summary::-webkit-details-marker { display:none; }
 .calendar-pop { position:absolute; top:34px; left:0; width:238px; background:white; border:1px solid var(--line); border-radius:14px; padding:10px; box-shadow:0 14px 32px rgba(40,30,10,.14); z-index:20; }
 .cal-head { display:flex; justify-content:space-between; align-items:center; font-weight:800; margin-bottom:8px; }
-.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:4px; }
+.cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
 .cal-dow,.cal-day { text-align:center; font-size:11px; padding:5px 0; border-radius:8px; color:var(--muted); }
 .cal-day { color:#3b352e; text-decoration:none; border:1px solid transparent; }
 .cal-day.has-data { background:#e8f0ff; color:#174ea6; font-weight:800; border-color:#c7d7ff; }
@@ -81,6 +89,8 @@ a { color:var(--accent); text-decoration:none; }
 """
 
 COLORS = ["#2f6fed", "#7b61ff", "#f59e0b", "#16a34a", "#ef4444", "#64748b"]
+VISIBLE_EVENT_SOURCES = ["codex", "github", "hermes"]
+SOURCE_LABELS = {"codex": "Codex", "github": "GitHub", "hermes": "Hermes"}
 
 
 def esc(x) -> str:
@@ -90,6 +100,84 @@ def esc(x) -> str:
 def source_row_class(source: str | None) -> str:
     normalized = "".join(ch if ch.isalnum() else "-" for ch in (source or "").lower()).strip("-")
     return f"source-{normalized or 'unknown'}"
+
+
+def format_date_input(value: str | None) -> str:
+    if not value:
+        return ""
+    return value[:10]
+
+
+def normalize_date_bound(value: str | None, end_of_day: bool = False) -> str | None:
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+    date_part = value[:10]
+    try:
+        dt_date.fromisoformat(date_part)
+    except ValueError:
+        return None
+    return date_part + ("T23:59:59" if end_of_day else "T00:00:00")
+
+
+def resolve_date_range(start_value: str | None, end_value: str | None) -> tuple[str | None, str | None]:
+    """Resolve date inputs into effective timestamp bounds.
+
+    UX rule for the database page:
+    - start only: filter that single local day
+    - start + end: filter the inclusive day range
+    - end only: filter up to that local day end
+    Invalid date strings are ignored instead of widening the query silently.
+    """
+    start = normalize_date_bound(start_value)
+    end = normalize_date_bound(end_value, end_of_day=True)
+    if end:
+        return start, end
+    if start:
+        return start, normalize_date_bound(start[:10], end_of_day=True)
+    return None, None
+
+
+def format_event_time(value: str | None) -> str:
+    if not value:
+        return ""
+    value = value.strip()
+    if "T" in value and len(value) >= 19:
+        return value[:19].replace("T", " ")
+    if "T" in value and len(value) >= 16:
+        return value[:16].replace("T", " ")
+    if len(value) >= 19:
+        return value[:19]
+    return value.replace("T", " ")
+
+
+def display_source(source: str | None) -> str:
+    return SOURCE_LABELS.get(source or "", source or "")
+
+
+EVENT_LIMIT_OPTIONS = ["100", "500", "1000", "all"]
+
+
+def parse_event_limit(value: str | None) -> int | None:
+    if value == "all":
+        return None
+    try:
+        limit = int(value or "500")
+    except ValueError:
+        return 500
+    return limit if limit in {100, 500, 1000} else 500
+
+
+def event_limit_control(selected: str | None) -> str:
+    value = selected if selected in EVENT_LIMIT_OPTIONS else "500"
+    labels = {"100": "100", "500": "500", "1000": "1000", "all": "All"}
+    opts = "".join(
+        f'<option value="{esc(option)}"{" selected" if option == value else ""}>{esc(labels[option])}</option>'
+        for option in EVENT_LIMIT_OPTIONS
+    )
+    return f'<select name="limit" onchange="this.form.submit()" title="Rows to show">{opts}</select>'
 
 
 def json_response(handler: BaseHTTPRequestHandler, obj, status=200):
@@ -148,6 +236,98 @@ def select_control(name: str, options: list[dict[str, str]], selected: str | boo
 
 def available_dates(con) -> list[str]:
     return [row["date"] for row in con.execute("SELECT DISTINCT date FROM events ORDER BY date DESC").fetchall()]
+
+
+def available_event_date_counts(con, source_in: list[str] | None = None) -> dict[str, int]:
+    where = ""
+    params: list[str] = []
+    if source_in:
+        placeholders = ",".join("?" for _ in source_in)
+        where = f"WHERE source IN ({placeholders})"
+        params.extend(source_in)
+    rows = con.execute(
+        f"""
+        SELECT substr(start, 1, 10) AS event_date, COUNT(*) AS count
+        FROM events
+        {where}
+        GROUP BY substr(start, 1, 10)
+        ORDER BY event_date DESC
+        """,
+        params,
+    ).fetchall()
+    return {row["event_date"]: int(row["count"]) for row in rows}
+
+
+def available_event_date_options(con, source_in: list[str] | None = None) -> list[dict[str, str]]:
+    return [
+        {"value": day, "label": f"{day} · {count} events"}
+        for day, count in available_event_date_counts(con, source_in).items()
+    ]
+
+
+def end_date_options(start_date: str | None, date_options: list[dict[str, str]]) -> list[dict[str, str]]:
+    start = format_date_input(start_date)
+    if not start:
+        return date_options
+    return [item for item in date_options if item["value"] >= start]
+
+
+def date_filter_calendar_control(
+    action: str,
+    name: str,
+    selected: str | None,
+    date_counts: dict[str, int],
+    hidden: dict[str, str | None] | None = None,
+    label_text: str = "Date",
+    empty_label: str = "All dates",
+    min_date: str | None = None,
+    allow_empty: bool = True,
+    picker_class: str = "",
+) -> str:
+    hidden = hidden or {}
+    selected_date = format_date_input(selected)
+    min_date = format_date_input(min_date)
+    try:
+        base = dt_date.fromisoformat(
+            selected_date or (max(date_counts) if date_counts else dt_date.today().isoformat())
+        )
+    except ValueError:
+        base = dt_date.today()
+    cal = calendar.Calendar(firstweekday=0)
+    days = []
+    for day in cal.itermonthdates(base.year, base.month):
+        if day.month != base.month:
+            days.append('<span class="cal-day empty">·</span>')
+            continue
+        value = day.isoformat()
+        has_data = value in date_counts
+        disabled = bool(min_date and value < min_date)
+        cls = "cal-day"
+        cls += " has-data" if has_data else " no-data"
+        if disabled:
+            cls += " disabled"
+        if value == selected_date:
+            cls += " active"
+        title_bits = [value, f"{date_counts.get(value, 0)} events"]
+        if disabled:
+            title_bits.append(f"before Start Date {min_date}")
+        title = esc(" · ".join(title_bits))
+        if disabled:
+            days.append(f'<span class="{cls}" title="{title}">{day.day}</span>')
+            continue
+        params = {k: v for k, v in hidden.items() if v and k != name}
+        params[name] = value
+        days.append(f'<a class="{cls}" href="{esc(action)}?{esc(urlencode(params))}" title="{title}">{day.day}</a>')
+    empty_link = ""
+    if allow_empty:
+        params = {k: v for k, v in hidden.items() if v and k != name}
+        suffix = "?" + esc(urlencode(params)) if params else ""
+        empty_link = f'<a class="cal-all" href="{esc(action)}{suffix}">{esc(empty_label)}</a>'
+    label = selected_date or empty_label
+    label_html = f'<span>{esc(label_text)}</span>' if label_text else ""
+    dows = "".join(f'<div class="cal-dow">{d}</div>' for d in ['M', 'T', 'W', 'T', 'F', 'S', 'S'])
+    klass = f'date-picker {picker_class}'.strip()
+    return f"""<div class="header-filter">{label_html}<details class="{esc(klass)}"><summary>📅 {esc(label)} ▾</summary><div class="calendar-pop"><div class="cal-head"><span>{base.year}-{base.month:02d}</span></div><div class="cal-grid">{dows}{''.join(days)}</div>{empty_link}</div></details></div>"""
 
 
 def calendar_control(action: str, selected: str | None, dates: list[str], hidden: dict[str, str | None] | None = None, allow_all: bool = False, label_text: str = "Date") -> str:
@@ -266,20 +446,18 @@ def sources_page(db_path: Path, date: str | None):
     return layout("DayTrace · 来源是啥", f"{summary['total_events']} events", "sources", content, date_control=date_control)
 
 
-def events_table(events, filters: dict[str, str | None], options: dict[str, list[dict[str, str]]]):
+def events_table(events, filters: dict[str, str | None], options: dict[str, Any]):
     rows=[]
     for e in events:
-        evidence_preview = json.dumps(e.get("evidence", {}), ensure_ascii=False, indent=2)
         row_class = source_row_class(e.get("source"))
         rows.append(f"""
 <tr class="{row_class}">
-  <td><span class="time">{esc(e['start'])}</span></td>
-  <td class="db-cell"><strong>{esc(e['source'])}</strong></td>
+  <td><span class="time" title="{esc(e['start'])}">{esc(format_event_time(e['start']))}</span></td>
+  <td class="db-cell"><strong>{esc(display_source(e['source']))}</strong></td>
   <td class="db-cell">{esc(e['device_id'])}</td>
   <td class="db-cell">{esc(e['location_id'])}</td>
   <td class="db-cell">{esc(e['project'])}</td>
   <td><strong class="title-text">{esc(e['title'])}</strong><div class="summary">{esc(e['summary'])}</div></td>
-  <td><details class="evidence"><summary>查看</summary><pre>{esc(evidence_preview)}</pre></details></td>
 </tr>""")
     hidden_order = f'<input type="hidden" name="order" value="{esc(filters.get("order") or "desc")}">'
     order = "asc" if filters.get("order") == "asc" else "desc"
@@ -291,46 +469,100 @@ def events_table(events, filters: dict[str, str | None], options: dict[str, list
             "device_id": filters.get("device_id"),
             "location_id": filters.get("location_id"),
             "project": filters.get("project"),
+            "start_from": filters.get("start_from"),
+            "start_to": filters.get("start_to"),
             "search": filters.get("search"),
+            "limit": filters.get("limit"),
             "order": next_order,
         }.items() if v
     }
     sort_href = "/events?" + urlencode(sort_params)
+    date_counts = options.get("date_counts", {})
+    date_hidden = {
+        "source": filters.get("source"),
+        "device_id": filters.get("device_id"),
+        "location_id": filters.get("location_id"),
+        "project": filters.get("project"),
+        "search": filters.get("search"),
+        "limit": filters.get("limit"),
+        "order": filters.get("order"),
+        "start_from": format_date_input(filters.get("start_from")),
+        "start_to": format_date_input(filters.get("start_to")),
+    }
+    time_filter = f"""<div class=\"time-range\">{date_filter_calendar_control('/events', 'start_from', filters.get('start_from'), date_counts, date_hidden, 'Start', 'All dates')}{date_filter_calendar_control('/events', 'start_to', filters.get('start_to') or filters.get('start_from'), date_counts, date_hidden, 'End', 'Same day' if filters.get('start_from') else 'No end', min_date=filters.get('start_from'), picker_class='end-date')}</div>"""
     return f"""
 <form method="get" action="/events">
   {hidden_order}
-  <div class="table-wrap"><table><colgroup><col class="col-time"><col class="col-source"><col class="col-device"><col class="col-location"><col class="col-project"><col class="col-title"><col class="col-evidence"></colgroup>
+  <div class="table-wrap"><table><colgroup><col class="col-time"><col class="col-source"><col class="col-device"><col class="col-location"><col class="col-project"><col class="col-title"></colgroup>
   <thead><tr>
-    <th><div class="th-title"><a class="sort-link" href="{esc(sort_href)}">Time {sort_arrow}</a></div></th>
+    <th><div class="th-title"><a class="sort-link" href="{esc(sort_href)}">Time {sort_arrow}</a></div>{time_filter}</th>
     <th><div class="th-title"><span>Source</span></div>{select_control('source', options['source'], filters.get('source'))}</th>
     <th><div class="th-title"><span>Device</span></div>{select_control('device_id', options['device_id'], filters.get('device_id'))}</th>
     <th><div class="th-title"><span>Location</span></div>{select_control('location_id', options['location_id'], filters.get('location_id'))}</th>
     <th><div class="th-title"><span>Project</span></div>{select_control('project', options['project'], filters.get('project'))}</th>
-    <th><div class="th-title"><span>Title / Summary</span></div><input name="search" value="{esc(filters.get('search') or '')}" placeholder="Search title/summary/evidence"></th>
-    <th><div class="th-title"><span>Evidence</span></div></th>
-  </tr></thead><tbody>{''.join(rows) or '<tr><td colspan="7">暂无事件</td></tr>'}</tbody></table></div>
+    <th><div class="th-title"><span>Title / Content</span><label class="header-filter"><span>Rows</span>{event_limit_control(filters.get('limit'))}</label></div><input name="search" value="{esc(filters.get('search') or '')}" placeholder="Search title/content"></th>
+  </tr></thead><tbody>{''.join(rows) or '<tr><td colspan="6">暂无事件</td></tr>'}</tbody></table></div>
 </form>"""
 
 def events_page(db_path: Path, qs: dict[str, list[str]]):
     con = connect(db_path)
     source = qs.get("source", [None])[0] or None
+    if source and source not in VISIBLE_EVENT_SOURCES:
+        source = None
     project = qs.get("project", [None])[0] or None
     device_id = qs.get("device_id", [None])[0] or None
     location_id = qs.get("location_id", [None])[0] or None
     search = qs.get("search", [None])[0] or None
+    raw_limit = qs.get("limit", ["500"])[0]
+    event_limit = parse_event_limit(raw_limit)
+    raw_start_from = qs.get("start_from", [None])[0] or None
+    raw_start_to = qs.get("start_to", [None])[0] or None
+    display_start_from = normalize_date_bound(raw_start_from)
+    display_start_to = normalize_date_bound(raw_start_to, end_of_day=True)
+    if display_start_from and display_start_to and display_start_to < display_start_from:
+        raw_start_to = None
+        display_start_to = None
+    effective_start_from, effective_start_to = resolve_date_range(raw_start_from, raw_start_to)
     order = qs.get("order", ["desc"])[0]
     if order not in {"asc", "desc"}:
         order = "desc"
-    events = query_events(con, date=None, source=source, project=project, device_id=device_id, location_id=location_id, search=search, order=order, limit=500)
     filters = {
         "source": source,
         "project": project,
         "device_id": device_id,
         "location_id": location_id,
         "search": search,
+        "start_from": display_start_from,
+        "start_to": display_start_to,
+        "source_in": VISIBLE_EVENT_SOURCES,
+        "limit": raw_limit if raw_limit in EVENT_LIMIT_OPTIONS else "500",
         "order": order,
     }
-    options = query_filter_options(con)
+    option_filters = {
+        **filters,
+        "start_from": effective_start_from,
+        "start_to": effective_start_to,
+    }
+    events = query_events(
+        con,
+        date=None,
+        source=source,
+        project=project,
+        device_id=device_id,
+        location_id=location_id,
+        search=search,
+        source_in=None if source else VISIBLE_EVENT_SOURCES,
+        start_from=effective_start_from,
+        start_to=effective_start_to,
+        order=order,
+        limit=event_limit,
+    )
+    options: dict[str, Any] = query_filter_options(con, option_filters)
+    options["date_counts"] = available_event_date_counts(con, VISIBLE_EVENT_SOURCES)
+    options["source"] = [{"value": "", "label": "All"}] + [
+        {"value": source_value, "label": SOURCE_LABELS[source_value]}
+        for source_value in VISIBLE_EVENT_SOURCES
+    ]
     content = events_table(events, filters, options)
     return layout("DayTrace · 数据库", f"{len(events)} events", "events", content)
 
@@ -369,16 +601,27 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, query_today(con, date) if date else {})
             elif parsed.path == "/api/events":
                 con = connect(self.db_path)
-                limit = int(qs.get("limit", [500])[0])
+                raw_api_limit = qs.get("limit", ["500"])[0]
+                limit = parse_event_limit(raw_api_limit)
+                api_source = qs.get("source", [None])[0] or None
+                if api_source and api_source not in VISIBLE_EVENT_SOURCES:
+                    api_source = None
+                api_start_from, api_start_to = resolve_date_range(
+                    qs.get("start_from", [None])[0] or None,
+                    qs.get("start_to", [None])[0] or None,
+                )
                 json_response(self, {"events": query_events(
                     con,
                     date=date,
-                    source=qs.get("source", [None])[0] or None,
+                    source=api_source,
                     project=qs.get("project", [None])[0] or None,
                     kind=qs.get("kind", [None])[0] or None,
                     device_id=qs.get("device_id", [None])[0] or None,
                     location_id=qs.get("location_id", [None])[0] or None,
                     search=qs.get("search", [None])[0] or None,
+                    source_in=None if api_source else VISIBLE_EVENT_SOURCES,
+                    start_from=api_start_from,
+                    start_to=api_start_to,
                     order=qs.get("order", ["desc"])[0],
                     limit=limit,
                 )})

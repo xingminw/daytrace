@@ -8,7 +8,7 @@ from typing import Iterable, Any
 from .schema import TraceEvent
 
 SCHEMA_VERSION = 4
-DEFAULT_DEVICE_ID = "mac-hermes"
+DEFAULT_DEVICE_ID = "Mac"
 DEFAULT_LOCATION_ID = "unknown"
 DEFAULT_COLLECTOR_ID = "hub-local"
 
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS events (
   sensitivity TEXT NOT NULL,
   evidence_json TEXT NOT NULL,
   raw_ref TEXT,
-  device_id TEXT NOT NULL DEFAULT 'mac-hermes',
+  device_id TEXT NOT NULL DEFAULT 'Mac',
   location_id TEXT NOT NULL DEFAULT 'unknown',
   collector_id TEXT NOT NULL DEFAULT 'hub-local',
   inserted_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -96,9 +96,10 @@ def _drop_column_if_exists(con: sqlite3.Connection, table: str, column: str) -> 
 
 
 def seed_single_machine_defaults(con: sqlite3.Connection) -> None:
+    con.execute("DELETE FROM devices WHERE id IN (?, ?)", ("mac-hermes", "mac"))
     con.execute(
-        "INSERT OR IGNORE INTO devices(id, name, type, status) VALUES (?, ?, ?, ?)",
-        (DEFAULT_DEVICE_ID, "Hermes Mac", "mac", "active"),
+        "INSERT OR REPLACE INTO devices(id, name, type, status) VALUES (?, ?, ?, ?)",
+        (DEFAULT_DEVICE_ID, "Mac", "mac", "active"),
     )
     con.execute(
         "INSERT OR IGNORE INTO locations(id, name, kind, status) VALUES (?, ?, ?, ?)",
@@ -129,6 +130,10 @@ def init_db(con: sqlite3.Connection) -> None:
     )
     con.execute("CREATE INDEX IF NOT EXISTS idx_events_device ON events(device_id)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_events_location ON events(location_id)")
+    con.execute(
+        "UPDATE events SET device_id = ? WHERE device_id IN (?, ?)",
+        (DEFAULT_DEVICE_ID, "mac-hermes", "mac"),
+    )
     _drop_column_if_exists(con, "events", "category")
     _drop_column_if_exists(con, "events", "confidence")
     seed_single_machine_defaults(con)
@@ -206,6 +211,19 @@ def _where(filters: dict[str, Any]) -> tuple[str, list[Any]]:
         if value:
             clauses.append(f"{key} = ?")
             params.append(value)
+    source_in = filters.get("source_in")
+    if source_in:
+        placeholders = ",".join("?" for _ in source_in)
+        clauses.append(f"source IN ({placeholders})")
+        params.extend(source_in)
+    start_from = filters.get("start_from")
+    if start_from:
+        clauses.append("start >= ?")
+        params.append(start_from)
+    start_to = filters.get("start_to")
+    if start_to:
+        clauses.append("start <= ?")
+        params.append(start_to)
     project = filters.get("project")
     if project:
         if project == "未归因":
@@ -268,7 +286,10 @@ def query_events(
     location_id: str | None = None,
     low_confidence: bool = False,
     search: str | None = None,
-    limit: int = 500,
+    source_in: list[str] | None = None,
+    start_from: str | None = None,
+    start_to: str | None = None,
+    limit: int | None = 500,
     order: str = "desc",
 ) -> list[dict[str, Any]]:
     where, params = _where(
@@ -280,20 +301,22 @@ def query_events(
             "device_id": device_id,
             "location_id": location_id,
             "low_confidence": low_confidence,
+            "source_in": source_in,
+            "start_from": start_from,
+            "start_to": start_to,
             "search": search,
         }
     )
     direction = "ASC" if order.lower() == "asc" else "DESC"
-    rows = con.execute(
-        f"""
+    sql = f"""
         SELECT id, date, source, kind, start, end, title, summary, project_guess, sensitivity, evidence_json, raw_ref, device_id, location_id, collector_id
         FROM events
         {where}
         ORDER BY start {direction}, source, kind
-        LIMIT ?
-        """,
-        (*params, limit),
-    ).fetchall()
+        {"LIMIT ?" if limit is not None else ""}
+        """
+    query_params = (*params, limit) if limit is not None else tuple(params)
+    rows = con.execute(sql, query_params).fetchall()
     out = []
     for row in rows:
         d = dict(row)
@@ -306,7 +329,11 @@ def query_events(
     return out
 
 
-def query_filter_options(con: sqlite3.Connection) -> dict[str, list[dict[str, str]]]:
+def query_filter_options(
+    con: sqlite3.Connection, filters: dict[str, Any] | None = None
+) -> dict[str, list[dict[str, str]]]:
+    filters = filters or {}
+
     def options(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, str]]:
         rows = con.execute(sql, params).fetchall()
         return [{"value": "", "label": "All"}] + [
@@ -315,9 +342,33 @@ def query_filter_options(con: sqlite3.Connection) -> dict[str, list[dict[str, st
             if row[0] is not None and str(row[0]) != ""
         ]
 
+    project_filters = {
+        "date": filters.get("date"),
+        "source": filters.get("source"),
+        "source_in": filters.get("source_in"),
+        "device_id": filters.get("device_id"),
+        "location_id": filters.get("location_id"),
+        "start_from": filters.get("start_from"),
+        "start_to": filters.get("start_to"),
+        "search": filters.get("search"),
+    }
+    project_where, project_params = _where(project_filters)
+    source_filters = {
+        "date": filters.get("date"),
+        "source_in": filters.get("source_in"),
+        "start_from": filters.get("start_from"),
+        "start_to": filters.get("start_to"),
+        "project": filters.get("project"),
+        "search": filters.get("search"),
+    }
+    source_where, source_params = _where(source_filters)
+
     return {
         "date": options("SELECT DISTINCT date FROM events ORDER BY date DESC"),
-        "source": options("SELECT DISTINCT source FROM events ORDER BY source"),
+        "source": options(
+            f"SELECT DISTINCT source FROM events {source_where} ORDER BY source",
+            tuple(source_params),
+        ),
         "device_id": options(
             "SELECT DISTINCT device_id FROM events ORDER BY device_id"
         ),
@@ -325,7 +376,8 @@ def query_filter_options(con: sqlite3.Connection) -> dict[str, list[dict[str, st
             "SELECT DISTINCT location_id FROM events ORDER BY location_id"
         ),
         "project": options(
-            "SELECT DISTINCT COALESCE(project_guess, '未归因') AS project FROM events ORDER BY project"
+            f"SELECT DISTINCT COALESCE(project_guess, '未归因') AS project FROM events {project_where} ORDER BY project",
+            tuple(project_params),
         ),
     }
 
