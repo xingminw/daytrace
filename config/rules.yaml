@@ -1,0 +1,8 @@
+# DayTrace prototype rules
+project_aliases:
+  daily-briefing: Daily Briefing
+  daytrace: DayTrace
+privacy:
+  include_window_titles: false
+  include_browser_history: false
+  include_full_hermes_transcripts: false

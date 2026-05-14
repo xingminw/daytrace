@@ -1,0 +1,12 @@
+# DayTrace prototype source configuration
+roots:
+  projects:
+    - ~/Projects
+sources:
+  local_git: enabled
+  local_docs: enabled
+  hermes_sessions: enabled
+  macos_activity_basic: enabled
+  github_api: optional
+  feishu_calendar: needs_scope
+  browser_history: rich_mode_disabled
