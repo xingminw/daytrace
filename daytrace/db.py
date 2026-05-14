@@ -7,16 +7,44 @@ from typing import Iterable, Any
 
 from .schema import TraceEvent
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DEFAULT_DEVICE_ID = "Mac"
 DEFAULT_LOCATION_ID = "unknown"
 DEFAULT_COLLECTOR_ID = "hub-local"
+DEFAULT_SOURCES = {
+    "codex": "Codex",
+    "docs": "Docs",
+    "git": "Git",
+    "github": "GitHub",
+    "hermes": "Hermes",
+    "ios_shortcuts": "iOS Shortcuts",
+    "macos-activity": "macOS Activity",
+    "macos_activity": "macOS Activity",
+}
 
 SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
 CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sources (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  connection_type TEXT,
+  upload_path TEXT,
+  last_ingest_at TEXT,
+  notes TEXT
+);
+CREATE TABLE IF NOT EXISTS source_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_id TEXT NOT NULL,
+  rule_type TEXT NOT NULL,
+  rule_json TEXT NOT NULL DEFAULT '{}',
+  status TEXT NOT NULL DEFAULT 'active',
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY(source_id) REFERENCES sources(id)
 );
 CREATE TABLE IF NOT EXISTS devices (
   id TEXT PRIMARY KEY,
@@ -61,6 +89,34 @@ CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
 CREATE INDEX IF NOT EXISTS idx_events_source ON events(source);
 CREATE INDEX IF NOT EXISTS idx_events_project ON events(project_guess);
 CREATE INDEX IF NOT EXISTS idx_events_start ON events(start);
+CREATE TABLE IF NOT EXISTS ingest_runs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  finished_at TEXT,
+  file_count INTEGER NOT NULL DEFAULT 0,
+  event_count INTEGER NOT NULL DEFAULT 0,
+  error_count INTEGER NOT NULL DEFAULT 0,
+  notes TEXT
+);
+CREATE TABLE IF NOT EXISTS imported_files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  path TEXT NOT NULL,
+  archive_path TEXT,
+  sha256 TEXT NOT NULL,
+  source_device TEXT,
+  batch_date TEXT,
+  status TEXT NOT NULL,
+  event_count INTEGER NOT NULL DEFAULT 0,
+  ingest_run_id INTEGER,
+  error TEXT,
+  imported_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(sha256),
+  FOREIGN KEY(ingest_run_id) REFERENCES ingest_runs(id)
+);
+CREATE INDEX IF NOT EXISTS idx_imported_files_sha256 ON imported_files(sha256);
+CREATE INDEX IF NOT EXISTS idx_imported_files_status ON imported_files(status);
 CREATE TABLE IF NOT EXISTS runs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   date TEXT NOT NULL,
@@ -96,6 +152,14 @@ def _drop_column_if_exists(con: sqlite3.Connection, table: str, column: str) -> 
 
 
 def seed_single_machine_defaults(con: sqlite3.Connection) -> None:
+    for source_id, name in DEFAULT_SOURCES.items():
+        con.execute(
+            """
+            INSERT OR IGNORE INTO sources(id, name, status, connection_type)
+            VALUES (?, ?, ?, ?)
+            """,
+            (source_id, name, "active", "local"),
+        )
     con.execute("DELETE FROM devices WHERE id IN (?, ?)", ("mac-hermes", "mac"))
     con.execute(
         "INSERT OR REPLACE INTO devices(id, name, type, status) VALUES (?, ?, ?, ?)",
@@ -149,10 +213,26 @@ def event_date(event: TraceEvent) -> str:
 
 
 def upsert_events(
-    con: sqlite3.Connection, events: Iterable[TraceEvent], run_date: str | None = None
+    con: sqlite3.Connection,
+    events: Iterable[TraceEvent],
+    run_date: str | None = None,
+    *,
+    commit: bool = True,
 ) -> int:
     rows = []
     for event in events:
+        con.execute(
+            "INSERT OR IGNORE INTO sources(id, name, status, connection_type) VALUES (?, ?, ?, ?)",
+            (event.source, event.source, "active", "batch"),
+        )
+        con.execute(
+            "INSERT OR IGNORE INTO devices(id, name, type, status) VALUES (?, ?, ?, ?)",
+            (event.device_id, event.device_id, "branch", "active"),
+        )
+        con.execute(
+            "INSERT OR IGNORE INTO locations(id, name, kind, status) VALUES (?, ?, ?, ?)",
+            (event.location_id, event.location_id, "branch", "active"),
+        )
         rows.append(
             (
                 event.id,
@@ -199,7 +279,8 @@ def upsert_events(
             "INSERT INTO runs(date, event_count, notes) VALUES (?, ?, ?)",
             (run_date, len(rows), "prototype import"),
         )
-    con.commit()
+    if commit:
+        con.commit()
     return len(rows)
 
 

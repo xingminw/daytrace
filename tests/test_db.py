@@ -18,6 +18,28 @@ def event(id="e1", source="git", project="daytrace"):
     )
 
 
+def test_init_db_creates_source_and_import_ledger_tables(tmp_path):
+    con = connect(tmp_path / "daytrace.sqlite")
+    init_db(con)
+
+    tables = {
+        row["name"]
+        for row in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    }
+    assert {
+        "sources",
+        "source_rules",
+        "ingest_runs",
+        "imported_files",
+        "devices",
+        "locations",
+        "event_corrections",
+    } <= tables
+    assert con.execute("SELECT name FROM devices WHERE id = 'Mac'").fetchone()["name"] == "Mac"
+    assert con.execute("SELECT name FROM locations WHERE id = 'unknown'").fetchone()["name"] == "Unknown"
+    assert con.execute("SELECT name FROM sources WHERE id = 'hermes'").fetchone()["name"] == "Hermes"
+
+
 def test_sqlite_event_store_roundtrip(tmp_path):
     con = connect(tmp_path / "daytrace.sqlite")
     init_db(con)
