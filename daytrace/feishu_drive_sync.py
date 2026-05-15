@@ -10,16 +10,126 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
+from urllib.parse import quote
 
 DEFAULT_INBOX_TOKEN_ENV = "DAYTRACE_FEISHU_INBOX_TOKEN"
 DEFAULT_INBOX_TOKEN = os.environ.get(DEFAULT_INBOX_TOKEN_ENV, "")
 DEFAULT_STATE_PATH = Path(".daytrace/feishu_drive_state.json")
+REQUIRED_MACHINE_SCOPES = [
+    "space:document:retrieve",
+    "space:folder:create",
+    "drive:drive",
+    "drive:drive:readonly",
+    "drive:file:upload",
+    "drive:file",
+    "drive:file:readonly",
+    "drive:drive.metadata:readonly",
+    "space:document:delete",
+    "docs:permission.member:create",
+]
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 SAFE_SEGMENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 class FeishuDriveSyncError(RuntimeError):
     pass
+
+
+def build_scope_apply_url(client_id: str, scopes: list[str] | None = None) -> str:
+    if not client_id:
+        raise FeishuDriveSyncError("client_id is required")
+    selected = scopes or REQUIRED_MACHINE_SCOPES
+    encoded = quote(",".join(selected), safe="")
+    return f"https://open.feishu.cn/page/scope-apply?clientID={client_id}&scopes={encoded}"
+
+
+def build_machine_onboarding_bundle(
+    *,
+    machine_id: str,
+    inbox_token: str,
+    client_id: str | None = None,
+    bot_open_id: str | None = None,
+    config_path: str = "config/devices/omen-wsl.yaml",
+    date_value: str = "2026-05-14",
+    upload_identity: str = "user",
+) -> dict[str, Any]:
+    machine = ensure_safe_segment(machine_id, "machine_id")
+    token = require_inbox_token(inbox_token)
+    if upload_identity not in {"user", "bot"}:
+        raise FeishuDriveSyncError("upload_identity must be 'user' or 'bot'")
+    bundle: dict[str, Any] = {
+        "machine_id": machine,
+        "protocol": "daytrace.cli_upload.v1",
+        "machine_declaration": {
+            "machine_id": machine,
+            "config_path": config_path,
+            "remote_path_template": "inbox/<machine>/<date>/",
+            "target_path": f"inbox/{machine}/{date_value}/",
+            "responsibility": "collect local events and upload only; Hub owns pull/import/cleanup",
+        },
+        "upload_identity": upload_identity,
+        "client_id": client_id,
+        "bot_open_id": bot_open_id,
+        "scope_url": build_scope_apply_url(client_id) if client_id else None,
+        "scopes": REQUIRED_MACHINE_SCOPES if client_id else [],
+        "feishu_cli_authorization": {
+            "default_identity": "user",
+            "selected_identity": upload_identity,
+            "folder_token": token,
+            "folder_url": f"https://my.feishu.cn/drive/folder/{token}",
+            "rule": "Authorize lark-cli on this machine with an identity that can edit the shared inbox. Machine identity comes from config/path, not the Drive uploader.",
+        },
+        "optional_bot_folder_acl": {
+            "grant_endpoint": f"POST /open-apis/drive/v1/permissions/{token}/members?type=folder&need_notification=false",
+            "grant_app_member": {
+                "member_type": "appid",
+                "member_id": client_id,
+                "perm": "edit",
+                "type": "user",
+            },
+            "grant_bot_member": {
+                "member_type": "openid",
+                "member_id": bot_open_id,
+                "perm": "edit",
+                "type": "user",
+            }
+            if bot_open_id
+            else None,
+            "fallback": "Only needed for bot/app upload identities. CLI-first machines should prefer --as user or a service user.",
+        }
+        if client_id or bot_open_id
+        else None,
+        "smoke_test_command": "\n".join(
+            [
+                "lark-cli drive files list \\",
+                f"  --params '{{\"folder_token\":\"{token}\",\"page_size\":5}}' \\",
+                f"  --as {upload_identity} \\",
+                "  --page-all",
+            ]
+        ),
+        "upload_command": "\n".join(
+            [
+                f"{DEFAULT_INBOX_TOKEN_ENV}='{token}' \\",
+                f"python scripts/feishu_drive_sync.py --as {upload_identity} upload-date \\",
+                f"  --config {config_path} \\",
+                f"  --date {date_value} \\",
+                "  --lookback-days 1",
+            ]
+        ),
+        "hub_responsibilities": [
+            "pull from shared inbox",
+            "import into data/daytrace.sqlite",
+            "deduplicate imported files/events",
+            "archive or quarantine local files",
+            "check missing machines/dates/sources",
+            "apply retention cleanup to remote inbox",
+        ],
+        "error_interpretation": {
+            "99991672": "Open Platform scope missing or not effective; mostly relevant for app/bot identities.",
+            "1061004": "The selected lark-cli identity cannot access the inbox folder; authorize/share the inbox to that user/service identity.",
+        },
+    }
+    return bundle
 
 
 @dataclass(frozen=True)

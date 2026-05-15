@@ -8,6 +8,7 @@ import pytest
 from daytrace.feishu_drive_sync import (
     DriveEntry,
     FeishuDriveSyncError,
+    build_machine_onboarding_bundle,
     collect_remote_files,
     cleanup_old_date_folders,
     ensure_date,
@@ -23,6 +24,39 @@ def test_require_inbox_token_rejects_empty_value():
     with pytest.raises(FeishuDriveSyncError):
         require_inbox_token("")
     assert require_inbox_token("folder-token") == "folder-token"
+
+
+def test_machine_onboarding_bundle_generates_scope_link_acl_guidance_and_smoke_commands():
+    bundle = build_machine_onboarding_bundle(
+        machine_id="omen-wsl",
+        inbox_token="folder-token",
+    )
+
+    assert bundle["machine_id"] == "omen-wsl"
+    assert bundle["protocol"] == "daytrace.cli_upload.v1"
+    assert bundle["machine_declaration"]["target_path"] == "inbox/omen-wsl/2026-05-14/"
+    assert bundle["upload_identity"] == "user"
+    assert bundle["scope_url"] is None
+    assert bundle["feishu_cli_authorization"]["folder_token"] == "folder-token"
+    assert bundle["optional_bot_folder_acl"] is None
+    assert "lark-cli drive files list" in bundle["smoke_test_command"]
+    assert "--as user" in bundle["smoke_test_command"]
+    assert "upload-date" in bundle["upload_command"]
+
+
+def test_machine_onboarding_bundle_can_include_optional_bot_scope_guidance():
+    bundle = build_machine_onboarding_bundle(
+        machine_id="omen-wsl",
+        client_id="cli_aa88cce2d7389bb5",
+        inbox_token="folder-token",
+        bot_open_id="ou_bot",
+        upload_identity="bot",
+    )
+
+    assert bundle["scope_url"].startswith("https://open.feishu.cn/page/scope-apply?clientID=cli_aa88cce2d7389bb5")
+    assert "space%3Adocument%3Aretrieve" in bundle["scope_url"]
+    assert bundle["optional_bot_folder_acl"]["grant_app_member"]["member_type"] == "appid"
+    assert "--as bot" in bundle["smoke_test_command"]
 
 
 class FakeCli:
