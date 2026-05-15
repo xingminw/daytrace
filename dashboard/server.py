@@ -70,7 +70,7 @@ body.events-page tbody tr.source-macos-activity td { background:#f3fbf6; }
 body.events-page tbody tr.source-outcome td { background:#fff7ed; }
 body.events-page tbody tr.source-milestone td { background:#f0fdf4; }
 body.events-page tbody tr:hover td { filter:brightness(.985); }
-.time { white-space:nowrap; font-variant-numeric:tabular-nums; }.summary { color:#3b352e; overflow-wrap:anywhere; margin-top:2px; }.title-text { overflow-wrap:anywhere; }.db-cell { color:#2f2a24; overflow-wrap:anywhere; }.sort-link { color:#2f2a24; font-weight:800; cursor:pointer; }
+.time { white-space:nowrap; font-variant-numeric:tabular-nums; }.summary { color:#3b352e; overflow-wrap:anywhere; margin-top:2px; }.title-text { overflow-wrap:anywhere; }.more-note { color:var(--muted); font-weight:650; font-size:11px; white-space:nowrap; }.db-cell { color:#2f2a24; overflow-wrap:anywhere; }.sort-link { color:#2f2a24; font-weight:800; cursor:pointer; }
 details.evidence { color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; } details.evidence summary { cursor:pointer; color:var(--accent); font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; } details.evidence pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:220px; max-width:100%; overflow:auto; margin:8px 0 0; padding:8px; border-radius:10px; background:#fff; border:1px solid var(--line); }
 a { color:var(--accent); text-decoration:none; }
 .date-picker { position:relative; display:inline-block; }
@@ -89,8 +89,8 @@ a { color:var(--accent); text-decoration:none; }
 """
 
 COLORS = ["#2f6fed", "#7b61ff", "#f59e0b", "#16a34a", "#ef4444", "#64748b"]
-VISIBLE_EVENT_SOURCES = ["codex", "github", "hermes"]
-SOURCE_LABELS = {"codex": "Codex", "github": "GitHub", "hermes": "Hermes"}
+VISIBLE_EVENT_SOURCES = ["codex", "git", "hermes"]
+SOURCE_LABELS = {"codex": "Codex", "git": "GitHub", "github": "GitHub", "hermes": "Hermes"}
 
 
 def esc(x) -> str:
@@ -151,6 +151,32 @@ def format_event_time(value: str | None) -> str:
     if len(value) >= 19:
         return value[:19]
     return value.replace("T", " ")
+
+
+def truncate_display_text(text: str | None, max_chars: int = 260) -> tuple[str, int]:
+    value = "" if text is None else str(text)
+    if len(value) <= max_chars:
+        return value, 0
+    return value[:max_chars].rstrip(), len(value) - max_chars
+
+
+def display_title_content(title: str | None, summary: str | None) -> str:
+    title_text, title_remaining = truncate_display_text(title, 120)
+    summary_text, summary_remaining = truncate_display_text(summary, 320)
+    title_suffix = (
+        f'<span class="more-note"> 后面还有 {title_remaining} 字符</span>'
+        if title_remaining
+        else ""
+    )
+    summary_suffix = (
+        f'<span class="more-note"> 后面还有 {summary_remaining} 字符</span>'
+        if summary_remaining
+        else ""
+    )
+    return (
+        f'<strong class="title-text" title="{esc(title)}">{esc(title_text)}{title_suffix}</strong>'
+        f'<div class="summary" title="{esc(summary)}">{esc(summary_text)}{summary_suffix}</div>'
+    )
 
 
 def display_source(source: str | None) -> str:
@@ -457,7 +483,7 @@ def events_table(events, filters: dict[str, str | None], options: dict[str, Any]
   <td class="db-cell">{esc(e['device_id'])}</td>
   <td class="db-cell">{esc(e['location_id'])}</td>
   <td class="db-cell">{esc(e['project'])}</td>
-  <td><strong class="title-text">{esc(e['title'])}</strong><div class="summary">{esc(e['summary'])}</div></td>
+  <td>{display_title_content(e.get('title'), e.get('summary'))}</td>
 </tr>""")
     hidden_order = f'<input type="hidden" name="order" value="{esc(filters.get("order") or "desc")}">'
     order = "asc" if filters.get("order") == "asc" else "desc"

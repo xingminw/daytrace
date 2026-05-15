@@ -1,0 +1,21 @@
+device:
+  id: omen-win
+  name: OMEN Windows
+  location_id: unknown
+  collector_id: hermes-mtl-windows
+
+sources:
+  codex:
+    enabled: true
+    # Set OMEN_WINDOWS_USERPROFILE in WSL, for example:
+    # export OMEN_WINDOWS_USERPROFILE=/mnt/c/Users/<WindowsUser>
+    home: $OMEN_WINDOWS_USERPROFILE/.codex
+    limit: 800
+  hermes:
+    enabled: false
+    sessions_dir: $OMEN_WINDOWS_USERPROFILE/.hermes/sessions
+    limit: 800
+  git:
+    enabled: false
+    repos: []
+    limit: 300

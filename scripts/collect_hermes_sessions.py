@@ -84,6 +84,34 @@ def session_sidecar_path(root: Path, session_id: str) -> Path:
     return root / f"session_{session_id}.json"
 
 
+def extract_content_text(raw_content) -> str:
+    """Return user-visible text from Hermes message content.
+
+    Feishu image messages can be stored as content arrays containing one text
+    part plus large data:image/base64 parts. Only the text part should become a
+    DayTrace input event; otherwise screenshots fill Title/Content with base64.
+    """
+    if raw_content is None:
+        return ""
+    if isinstance(raw_content, str):
+        return raw_content.strip()
+    if isinstance(raw_content, list):
+        parts: list[str] = []
+        for item in raw_content:
+            if isinstance(item, dict):
+                item_type = item.get("type")
+                if item_type in {"text", "input_text"} and item.get("text"):
+                    parts.append(str(item.get("text")))
+                continue
+            if isinstance(item, str):
+                parts.append(item)
+        return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
+    if isinstance(raw_content, dict):
+        text = raw_content.get("text") if isinstance(raw_content, dict) else None
+        return str(text).strip() if text else ""
+    return str(raw_content).strip()
+
+
 def load_channel_names() -> dict[str, str]:
     directory = Path.home() / ".hermes" / "channel_directory.json"
     if not directory.exists():
@@ -204,6 +232,74 @@ def load_session_origin(root: Path, session_id: str) -> dict[str, str | None]:
     return origin
 
 
+def message_sender_is_bot(obj: dict) -> bool:
+    """Return True when a Hermes session record preserves bot sender metadata.
+
+    Prefer structured metadata over display names. Feishu/Hermes can identify
+    peer bots at the gateway layer via sender_type={bot, app}; exported session
+    shapes may place that fact at the top level, under source, or under nested
+    raw message/event sender payloads depending on Hermes version.
+    """
+    if obj.get("is_bot") is True:
+        return True
+
+    source = obj.get("source")
+    if isinstance(source, dict):
+        if source.get("is_bot") is True:
+            return True
+        if str(source.get("sender_type") or "").lower() in {"bot", "app"}:
+            return True
+
+    if str(obj.get("sender_type") or "").lower() in {"bot", "app"}:
+        return True
+
+    raw_message = obj.get("raw_message")
+    if isinstance(raw_message, dict):
+        candidates = [
+            raw_message.get("sender"),
+            raw_message.get("event", {}).get("sender") if isinstance(raw_message.get("event"), dict) else None,
+            raw_message.get("event", {}).get("message", {}).get("sender")
+            if isinstance(raw_message.get("event"), dict)
+            and isinstance(raw_message.get("event", {}).get("message"), dict)
+            else None,
+        ]
+        for sender in candidates:
+            if isinstance(sender, dict) and str(sender.get("sender_type") or "").lower() in {"bot", "app"}:
+                return True
+
+    return False
+
+
+def is_probable_peer_agent_message(content: str) -> bool:
+    """Fallback filter for Feishu group messages emitted by peer bots/agents.
+
+    Use this only when exported Hermes logs lost structured sender metadata.
+    Hermes session logs can store inbound Feishu bot messages as role='user';
+    structured peer-bot handoffs/reports are not human-written DayTrace input.
+    """
+    text = content.strip()
+    if not text:
+        return False
+    reply_match = re.match(r"^\[Replying to: [\"']@Hermes(?:\s|$).*?\]\s*", text, re.DOTALL)
+    body = text[reply_match.end() :].strip() if reply_match else text
+    agent_starts = (
+        "MTL 这边",
+        "直接交付 omen",
+        "收到，第 1 轮",
+        "第 2 轮收到",
+        "Round 2 mention 测试",
+        "收到，我已完成检查",
+        "执行结果：",
+    )
+    if body.startswith(agent_starts):
+        return True
+    if "branch 机器信息如下" in body and "DESKTOP-O9DG52H" in body:
+        return True
+    if "daytrace.event.v1 JSONL" in body and "device_id=omen" in body:
+        return True
+    return False
+
+
 def collect_hermes_input_events(
     day: str, sessions_dir: Path | None = None, limit: int = 500
 ) -> list[TraceEvent]:
@@ -236,11 +332,14 @@ def collect_hermes_input_events(
                 continue
             if obj.get("role") != "user":
                 continue
-            content = str(obj.get("content") or "").strip()
+            content = extract_content_text(obj.get("content"))
             if (
                 not content
+                or content.startswith("[CONTEXT COMPACTION")
                 or content.startswith("[IMPORTANT: Background process")
                 or content.startswith("[Your active task list")
+                or message_sender_is_bot(obj)
+                or is_probable_peer_agent_message(content)
             ):
                 continue
             ts_float, ts_iso = parse_ts(obj.get("timestamp"), path.stat().st_mtime)
@@ -305,7 +404,7 @@ def collect_hermes_final_events(
                 continue
             if obj.get("role") != "assistant":
                 continue
-            content = str(obj.get("content") or "").strip()
+            content = extract_content_text(obj.get("content"))
             if len(content) < 80 or content.startswith("[CONTEXT COMPACTION"):
                 continue
             ts_float, ts_iso = parse_ts(obj.get("timestamp"), path.stat().st_mtime)

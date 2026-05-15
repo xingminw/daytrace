@@ -1,0 +1,20 @@
+device:
+  id: Mac
+  name: Mac Hub
+  location_id: unknown
+  collector_id: hub-local
+
+sources:
+  codex:
+    enabled: true
+    home: ~/.codex
+    limit: 600
+  hermes:
+    enabled: true
+    sessions_dir: ~/.hermes/sessions
+    limit: 700
+  git:
+    enabled: true
+    roots:
+      - ~/Projects
+    limit: 300

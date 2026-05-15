@@ -1,0 +1,20 @@
+device:
+  id: omen-wsl
+  name: OMEN WSL2
+  location_id: unknown
+  collector_id: hermes-mtl-wsl
+
+sources:
+  codex:
+    enabled: true
+    home: ~/.codex
+    limit: 800
+  hermes:
+    enabled: true
+    sessions_dir: ~/.hermes/sessions
+    limit: 800
+  git:
+    enabled: true
+    repos:
+      - /mnt/d/research-programs/daytrace
+    limit: 300

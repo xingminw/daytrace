@@ -8,6 +8,7 @@ from daytrace.db import (
 )
 from daytrace.schema import TraceEvent
 from dashboard.server import (
+    display_title_content,
     end_date_options,
     events_page,
     normalize_date_bound,
@@ -178,6 +179,16 @@ def test_events_page_ignores_malformed_start_without_clearing_valid_end(tmp_path
 
     assert "daytrace user_input" in html
     assert "daily-briefing user_input" not in html
+
+
+def test_display_title_content_truncates_long_values_with_remaining_count():
+    html = display_title_content("T" * 140, "C" * 400)
+
+    assert "T" * 120 in html
+    assert "C" * 320 in html
+    assert "后面还有 20 字符" in html
+    assert "后面还有 80 字符" in html
+    assert 'class="more-note"' in html
 
 
 def test_parse_event_limit_supports_all_and_safe_defaults():

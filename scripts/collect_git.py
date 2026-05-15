@@ -19,6 +19,9 @@ def find_repos(roots: list[Path]) -> list[Path]:
     for root in roots:
         if not root.exists():
             continue
+        if (root / ".git").exists():
+            repos.append(root)
+            continue
         for child in root.iterdir():
             if child.is_dir() and (child / ".git").exists():
                 repos.append(child)
