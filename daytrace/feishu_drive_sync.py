@@ -51,7 +51,7 @@ def build_machine_onboarding_bundle(
     bot_open_id: str | None = None,
     config_path: str = "config/devices/omen-wsl.yaml",
     date_value: str = "2026-05-14",
-    upload_identity: str = "user",
+    upload_identity: str = "bot",
 ) -> dict[str, Any]:
     machine = ensure_safe_segment(machine_id, "machine_id")
     token = require_inbox_token(inbox_token)
@@ -73,11 +73,11 @@ def build_machine_onboarding_bundle(
         "scope_url": build_scope_apply_url(client_id) if client_id else None,
         "scopes": REQUIRED_MACHINE_SCOPES if client_id else [],
         "feishu_cli_authorization": {
-            "default_identity": "user",
+            "default_identity": "bot",
             "selected_identity": upload_identity,
             "folder_token": token,
             "folder_url": f"https://my.feishu.cn/drive/folder/{token}",
-            "rule": "Authorize lark-cli on this machine with an identity that can edit the shared inbox. Machine identity comes from config/path, not the Drive uploader.",
+            "rule": "Use the lark-cli Feishu App/Bot entity to edit the shared inbox. Machine identity comes from config/path/manifest/events, not the Drive uploader.",
         },
         "optional_bot_folder_acl": {
             "grant_endpoint": f"POST /open-apis/drive/v1/permissions/{token}/members?type=folder&need_notification=false",
@@ -95,7 +95,7 @@ def build_machine_onboarding_bundle(
             }
             if bot_open_id
             else None,
-            "fallback": "Only needed for bot/app upload identities. CLI-first machines should prefer --as user or a service user.",
+            "fallback": "Required when the bot/app entity cannot yet access the shared inbox. DayTrace keeps Hub and branch machines on the same bot/app upload model.",
         }
         if client_id or bot_open_id
         else None,
@@ -126,7 +126,7 @@ def build_machine_onboarding_bundle(
         ],
         "error_interpretation": {
             "99991672": "Open Platform scope missing or not effective; mostly relevant for app/bot identities.",
-            "1061004": "The selected lark-cli identity cannot access the inbox folder; authorize/share the inbox to that user/service identity.",
+            "1061004": "The selected lark-cli App/Bot entity cannot access the inbox folder; authorize/share the inbox to that bot/app.",
         },
     }
     return bundle

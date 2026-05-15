@@ -35,13 +35,14 @@ def test_machine_onboarding_bundle_generates_scope_link_acl_guidance_and_smoke_c
     assert bundle["machine_id"] == "omen-wsl"
     assert bundle["protocol"] == "daytrace.cli_upload.v1"
     assert bundle["machine_declaration"]["target_path"] == "inbox/omen-wsl/2026-05-14/"
-    assert bundle["upload_identity"] == "user"
+    assert bundle["upload_identity"] == "bot"
     assert bundle["scope_url"] is None
     assert bundle["feishu_cli_authorization"]["folder_token"] == "folder-token"
     assert bundle["optional_bot_folder_acl"] is None
     assert "lark-cli drive files list" in bundle["smoke_test_command"]
-    assert "--as user" in bundle["smoke_test_command"]
+    assert "--as bot" in bundle["smoke_test_command"]
     assert "upload-date" in bundle["upload_command"]
+    assert "--as bot" in bundle["upload_command"]
 
 
 def test_machine_onboarding_bundle_can_include_optional_bot_scope_guidance():

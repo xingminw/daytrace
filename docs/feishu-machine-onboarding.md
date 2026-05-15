@@ -1,13 +1,13 @@
-# DayTrace CLI Machine Onboarding
+# DayTrace Feishu App/Bot Machine Onboarding
 
-> Status: draft. DayTrace multi-machine sync is CLI-first: a machine does not need to run Hermes, join a Feishu group, or own a Feishu bot. Hermes/MTL can help execute commands during testing, but it is not part of the durable sync architecture.
+> Status: draft. DayTrace multi-machine sync is CLI-first but Feishu Drive writes are unified around the local `lark-cli` Feishu App/Bot entity. A machine does not need to run Hermes or join a Feishu group for durable sync; Hermes/MTL can help execute commands during testing, but it is only control-plane automation.
 
 ## Core model
 
 DayTrace separates two identities:
 
 1. **Machine identity** — where the data came from. This is declared in the local collector config and encoded in the Drive path, manifest, and events.
-2. **Upload identity** — which Feishu credential writes files into Drive. The default is `lark-cli --as user` on each machine, authorized to the same Feishu user/service identity that can edit the shared inbox.
+2. **Upload entity** — the Feishu App/Bot entity behind the local `lark-cli` profile. Hub and branch machines use the same upload口径: `lark-cli --as bot`.
 
 The shared Drive surface is intentionally just an inbox root:
 
@@ -32,6 +32,7 @@ A branch machine is any computer that can run the DayTrace CLI. It may be a lapt
 - stores a local machine config, for example `config/devices/omen-wsl.yaml`;
 - stamps every event with the configured machine/device identity;
 - writes one date batch to `inbox/<machine>/<date>/`;
+- uploads through the local `lark-cli` App/Bot entity using `--as bot`;
 - reports command output or exits with a non-zero status if upload/verification fails.
 
 It must not:
@@ -44,7 +45,7 @@ It must not:
 
 ### Hub / Mac
 
-The Hub owns everything after upload:
+The Hub uses the same `--as bot` upload/download口径 for Drive access, then owns everything after upload:
 
 - pulls from the shared inbox;
 - imports into `data/daytrace.sqlite`;
@@ -56,7 +57,7 @@ The Hub owns everything after upload:
 
 ## New machine declaration
 
-Record non-secret machine metadata in a local config and, if desired, an onboarding note. Do **not** store Feishu user tokens or app secrets in the repo.
+Record non-secret machine metadata in a local config and, if desired, an onboarding note. Do **not** store Feishu app secrets or tokens in the repo.
 
 Example device config:
 
@@ -88,8 +89,7 @@ python scripts/feishu_drive_sync.py \
   machine-onboarding \
   --machine-id omen-wsl \
   --config config/devices/omen-wsl.yaml \
-  --date 2026-05-15 \
-  --upload-identity user
+  --date 2026-05-15
 ```
 
 The bundle includes:
@@ -99,48 +99,70 @@ The bundle includes:
 3. a minimal Feishu CLI list smoke test;
 4. the upload command;
 5. the Hub-side pull/import reminder;
-6. optional app-scope URL only if `--client-id` is supplied for a bot/app style identity.
+6. optional app-scope and folder-ACL guidance if `--client-id` or `--bot-open-id` is supplied.
 
-## Feishu authorization model
+## Feishu upload model
 
-Preferred default:
+Preferred and default口径:
 
 ```text
-lark-cli --as user
+lark-cli --as bot
 ```
 
-Each machine authorizes its local `lark-cli` user identity. The shared inbox folder only needs to be editable by that user/service identity. In this model, Feishu Drive may show the same uploader for all machines; DayTrace machine identity comes from path/config/manifest/events, not from Drive uploader identity.
+For DayTrace we treat the CLI-visible Feishu App/Bot as the upload entity. The uploader's job is only to place files in Drive. It does **not** express which machine produced the data.
 
-Use bot/app identity only for special automation tests. If using `--as bot`, the machine's app still needs both:
+Machine identity comes from:
 
-1. Open Platform Drive scopes; and
-2. resource access to the inbox folder.
+- `config/devices/<machine>.yaml`;
+- `inbox/<machine>/<date>/`;
+- `manifest.json`;
+- each event's `device_id` / device fields.
 
-That bot/app path is optional and should not be the default DayTrace architecture.
+Because this is a personal recording workflow running on the user's own machines, DayTrace does not model complex multi-tenant permissions. Operationally, each participating local `lark-cli` App/Bot only needs enough Feishu Drive access to list, create folders, upload, pull, and optionally clean up within the shared inbox.
+
+If Drive access fails, interpret it mechanically:
+
+1. Open Platform Drive scopes may be missing for the actual `clientID` used by the failing command.
+2. The shared inbox folder may not yet be accessible to that App/Bot entity.
+
+Do not switch to `--as user` as a silent fallback. If a user-token flow is needed for a special one-off, make it explicit and report it as a different identity mode.
 
 ## Smoke test before full upload
 
-First prove the local Feishu CLI identity can list the inbox root:
+First prove the local Feishu CLI App/Bot can list the inbox root:
 
 ```bash
 lark-cli drive files list \
   --params '{"folder_token":"<DAYTRACE_FEISHU_INBOX_TOKEN>","page_size":5}' \
-  --as user \
+  --as bot \
   --page-all
 ```
 
 Interpretation:
 
-- `code=0`: local Feishu CLI identity can see the inbox. Proceed to upload.
-- `99991672`: app/API scope problem, relevant mainly for app/bot identities.
-- `1061004`: identity lacks resource access to the inbox folder.
+- `code=0` / `ok=true`: local Feishu CLI App/Bot can see the inbox. Proceed to upload.
+- `99991672`: app/API scope problem.
+- `1061004`: App/Bot entity lacks resource access to the inbox folder.
+- `strict_mode` requiring bot: OK for the DayTrace default model; rerun with `--as bot`.
+- `strict_mode` requiring user: local policy conflicts with the DayTrace bot口径; switch only after explicit user approval.
 
 ## Upload one date
 
 ```bash
 DAYTRACE_FEISHU_INBOX_TOKEN='<DAYTRACE_FEISHU_INBOX_TOKEN>' \
 python scripts/feishu_drive_sync.py \
-  --as user \
+  upload-date \
+  --config config/devices/omen-wsl.yaml \
+  --date 2026-05-15 \
+  --lookback-days 1
+```
+
+`--as bot` is the default. It is fine to include it explicitly in tests:
+
+```bash
+DAYTRACE_FEISHU_INBOX_TOKEN='<DAYTRACE_FEISHU_INBOX_TOKEN>' \
+python scripts/feishu_drive_sync.py \
+  --as bot \
   upload-date \
   --config config/devices/omen-wsl.yaml \
   --date 2026-05-15 \
@@ -157,12 +179,11 @@ Expected output contains `verification.status = verified` after the remote folde
 
 ## Hub pull/import
 
-Hub pulls explicitly per machine/date:
+Hub pulls explicitly per machine/date, also using the default bot口径:
 
 ```bash
 DAYTRACE_FEISHU_INBOX_TOKEN='<DAYTRACE_FEISHU_INBOX_TOKEN>' \
 python scripts/feishu_drive_sync.py \
-  --as user \
   pull \
   --device omen-wsl \
   --date 2026-05-15 \
@@ -181,7 +202,6 @@ Cleanup is Hub-only and dry-run by default:
 
 ```bash
 python scripts/feishu_drive_sync.py \
-  --as user \
   cleanup \
   --keep-days 30
 ```
@@ -190,7 +210,6 @@ Live deletion requires explicit machine filters:
 
 ```bash
 python scripts/feishu_drive_sync.py \
-  --as user \
   cleanup \
   --before 2026-05-01 \
   --device omen-wsl \

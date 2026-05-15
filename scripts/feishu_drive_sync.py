@@ -127,7 +127,7 @@ def main() -> None:
         help=f"Feishu Drive shared inbox folder token; defaults to ${DEFAULT_INBOX_TOKEN_ENV}",
     )
     parser.add_argument("--lark-cli", default="lark-cli")
-    parser.add_argument("--as", dest="as_identity", default="user", choices=["bot", "user"], help="lark-cli upload identity; CLI-first DayTrace sync defaults to user")
+    parser.add_argument("--as", dest="as_identity", default="bot", choices=["bot", "user"], help="lark-cli upload identity; DayTrace sync defaults to the Feishu App/Bot entity")
     parser.add_argument("--dry-run", action="store_true")
     sub = parser.add_subparsers(dest="command", required=True)
 
@@ -161,7 +161,7 @@ def main() -> None:
     p_onboard.add_argument("--bot-open-id", help="optional Feishu bot/user open_id to include in folder grant guidance")
     p_onboard.add_argument("--config", default="config/devices/omen-wsl.yaml")
     p_onboard.add_argument("--date", default="2026-05-14")
-    p_onboard.add_argument("--upload-identity", choices=["user", "bot"], default="user")
+    p_onboard.add_argument("--upload-identity", choices=["user", "bot"], default="bot")
     p_onboard.set_defaults(func=machine_onboarding)
 
     args = parser.parse_args()
