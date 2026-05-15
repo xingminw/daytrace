@@ -101,15 +101,40 @@ The bundle includes:
 5. the Hub-side pull/import reminder;
 6. optional app-scope and folder-ACL guidance if `--client-id` or `--bot-open-id` is supplied.
 
+## Current sync status (2026-05-15)
+
+The OMEN/WSL branch machine has proven the end-to-end upload path with the personal user identity:
+
+- Hermes MTL workspace `lark-cli` is bound to app `cli_aa88cce2d7389bb5`.
+- The workspace was switched from bot-only to `default-as: user`, `strict-mode: off`.
+- Xingmin Wang user auth is valid in that Hermes workspace.
+- `lark-cli drive files list ... --as user` can list the shared inbox folder `HVtlfh9M8lpWbfdkPkOcY20Rndc`.
+- `python scripts/feishu_drive_sync.py --as user upload-date --config config/devices/omen-wsl.yaml --date 2026-05-15 --lookback-days 1` uploaded and verified:
+  - `codex.jsonl`
+  - `git.jsonl`
+  - `hermes.jsonl`
+  - `manifest.json`
+- Verified remote target: `inbox/omen-wsl/2026-05-15/`.
+
+This user-mode smoke test proves the DayTrace collection, staging, path convention, folder token, and remote verification logic work. It is an operational fallback and debugging mode.
+
+The preferred long-term unattended mode is still bot mode: grant the DayTrace inbox folder to the actual Hermes/Hermes MTL App/Bot entities, then use `--as bot` for cron/background sync so uploads do not depend on user OAuth refresh windows.
+
 ## Feishu upload model
 
-Preferred and default口径:
+Long-term preferred口径:
 
 ```text
 lark-cli --as bot
 ```
 
-For DayTrace we treat the CLI-visible Feishu App/Bot as the upload entity. The uploader's job is only to place files in Drive. It does **not** express which machine produced the data.
+Operational fallback/debug口径:
+
+```text
+lark-cli --as user
+```
+
+For DayTrace we treat the CLI-visible Feishu App/Bot or user token as the upload entity. The uploader's job is only to place files in Drive. It does **not** express which machine produced the data.
 
 Machine identity comes from:
 

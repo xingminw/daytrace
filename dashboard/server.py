@@ -28,13 +28,14 @@ nav { display:flex; gap:6px; flex-wrap:nowrap; justify-content:flex-end; justify
 main { padding:12px 18px 28px; max-width:none; margin:0 auto; min-height:calc(100vh - 51px); }
 body.events-page main { height:calc(100vh - 51px); min-height:0; overflow:hidden; padding-bottom:12px; }
 body.events-page form { height:100%; }
-.grid { display:grid; grid-template-columns: repeat(4, minmax(150px,1fr)); gap:10px; }.section-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }.three-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
+.grid { display:grid; grid-template-columns: repeat(4, minmax(150px,1fr)); gap:10px; }.section-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }.three-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }.report-grid { display:grid; grid-template-columns:minmax(360px,1.15fr) minmax(320px,.85fr); gap:12px; align-items:start; }.analysis-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:12px; }.wide-card { grid-column:1 / -1; }
 .card { background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:14px; padding:12px; box-shadow:0 8px 18px rgba(65,45,10,.05); }
-.metric { font-size:26px; font-weight:850; letter-spacing:-0.04em; }.label { color:var(--muted); margin-top:3px; font-size:12px; } section { margin-top:12px; } h2 { font-size:16px; margin:0 0 8px; } h3 { margin:0 0 5px; font-size:14px; }
+.metric { font-size:26px; font-weight:850; letter-spacing:-0.04em; }.metric-small { font-size:18px; font-weight:850; }.label { color:var(--muted); margin-top:3px; font-size:12px; } section { margin-top:12px; } h2 { font-size:16px; margin:0 0 8px; } h3 { margin:0 0 5px; font-size:14px; }
 .bar { display:flex; align-items:center; gap:10px; margin:9px 0; }.bar-name { width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }.bar-track { flex:1; height:10px; border-radius:999px; background:#ece3d2; overflow:hidden; }.bar-fill { height:100%; background:linear-gradient(90deg,#2f6fed,#7b61ff); border-radius:999px; }.bar-count { width:42px; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
 .filters { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:0 0 8px; } input,select,button { border:1px solid var(--line); background:white; border-radius:8px; padding:5px 7px; font:inherit; font-size:12px; } button { background:var(--accent); color:white; border-color:var(--accent); cursor:pointer; }.checkbox { display:flex; gap:4px; align-items:center; }
-.timeline { position:relative; padding-left:28px; }.timeline:before { content:""; position:absolute; left:9px; top:6px; bottom:6px; width:3px; border-radius:99px; background:linear-gradient(var(--accent),var(--purple),var(--orange)); }.bucket { position:relative; margin:0 0 16px; padding:14px 14px 14px 16px; border:1px solid var(--line); background:white; border-radius:16px; }.bucket:before { content:""; position:absolute; left:-25px; top:20px; width:14px; height:14px; border-radius:50%; background:var(--accent); box-shadow:0 0 0 4px #e8f0ff; }.bucket-head { display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:8px; }.hour { font-size:20px; font-weight:850; font-variant-numeric:tabular-nums; }.mini-event { padding:8px 0; border-top:1px dashed #eadfcd; }.mini-event:first-of-type { border-top:none; }.event-title { font-weight:700; }.muted { color:var(--muted); }.pills { display:flex; flex-wrap:wrap; gap:6px; }.tag { display:inline-flex; max-width:100%; border-radius:999px; padding:2px 8px; background:#ebe6ff; color:#4632a8; font-size:12px; font-weight:650; overflow:hidden; text-overflow:ellipsis; }.source { background:#e8f0ff; color:#174ea6; }.device { background:#dcfce7; color:#166534; }.location { background:#ffedd5; color:#9a3412; }.low { background:#fff3cd; color:#8a5a00; }
-.donut-row { display:grid; grid-template-columns:120px 1fr; gap:12px; align-items:center; }.donut { width:112px; height:112px; border-radius:50%; display:grid; place-items:center; background:conic-gradient(var(--accent) 0 40%, var(--purple) 40% 70%, var(--orange) 70% 88%, #cbd5e1 88% 100%); }.donut:after { content:attr(data-label); width:70px; height:70px; border-radius:50%; background:var(--card); display:grid; place-items:center; font-size:13px; font-weight:800; color:var(--muted); text-align:center; }
+.bucket-head { display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:8px; }.mini-event { padding:8px 0; border-top:1px dashed #eadfcd; }.mini-event:first-of-type { border-top:none; }.event-title { font-weight:700; }.muted { color:var(--muted); }.pills { display:flex; flex-wrap:wrap; gap:6px; }.tag { display:inline-flex; max-width:100%; border-radius:999px; padding:2px 8px; background:#ebe6ff; color:#4632a8; font-size:12px; font-weight:650; overflow:hidden; text-overflow:ellipsis; }.source { background:#e8f0ff; color:#174ea6; }.device { background:#dcfce7; color:#166534; }.location { background:#ffedd5; color:#9a3412; }.low { background:#fff3cd; color:#8a5a00; }
+.daily-report { line-height:1.55; }.daily-report ul { margin:8px 0 0 18px; padding:0; }.daily-report li { margin:5px 0; }.report-lede { font-size:15px; color:#362f27; margin:0 0 8px; }.day-nav { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }.day-nav a { border:1px solid var(--line); background:white; border-radius:999px; padding:4px 9px; font-size:12px; font-weight:700; }
+.donut-row { display:grid; grid-template-columns:120px 1fr; gap:12px; align-items:center; }.donut { width:112px; height:112px; border-radius:50%; display:grid; place-items:center; background:conic-gradient(var(--accent) 0 40%, var(--purple) 40% 70%, var(--orange) 70% 88%, #cbd5e1 88% 100%); }.donut:after { content:attr(data-label); width:70px; height:70px; border-radius:50%; background:var(--card); display:grid; place-items:center; font-size:13px; font-weight:800; color:var(--muted); text-align:center; }.legend-dot { width:9px; height:9px; display:inline-block; border-radius:50%; margin-right:6px; }.stack { display:flex; height:18px; overflow:hidden; border-radius:999px; background:#ece3d2; border:1px solid #e2d6c4; }.stack-seg { min-width:2px; height:100%; }.mini-table { width:100%; border-collapse:separate; border-spacing:0; }.mini-table th,.mini-table td { font-size:12px; padding:6px 4px; border-bottom:1px solid #eadfcd; }.mini-table th { position:static; background:transparent; box-shadow:none; color:var(--muted); }.spark { display:grid; grid-template-columns:repeat(24,1fr); gap:2px; align-items:end; height:86px; padding-top:6px; }.spark-bar { background:linear-gradient(180deg,#7b61ff,#2f6fed); border-radius:4px 4px 0 0; min-height:3px; }.spark-labels { display:grid; grid-template-columns:repeat(4,1fr); color:var(--muted); font-size:11px; margin-top:4px; }
 .table-wrap { max-height:none; min-height:calc(100vh - 86px); overflow:auto; border:1px solid var(--line); border-radius:16px; background:var(--card); }
 body.events-page .table-wrap { height:100%; min-height:0; max-height:100%; overflow:hidden; overscroll-behavior:contain; }
 table { width:100%; min-width:0; border-collapse:separate; border-spacing:0; background:var(--card); table-layout:fixed; }
@@ -85,7 +86,7 @@ a { color:var(--accent); text-decoration:none; }
 .cal-day.active { background:var(--ink); color:white; border-color:var(--ink); }
 .cal-day.empty { pointer-events:none; opacity:.25; }
 .cal-all { display:block; margin-top:8px; text-align:center; font-size:12px; font-weight:750; }
-@media (max-width:1000px) { header { grid-template-columns:1fr; gap:8px; } nav { flex-wrap:wrap; } .grid,.section-grid,.three-grid { grid-template-columns:1fr; } main { padding:10px; } .donut-row { grid-template-columns:1fr; } }
+@media (max-width:1000px) { header { grid-template-columns:1fr; gap:8px; } nav { flex-wrap:wrap; } .grid,.section-grid,.three-grid,.report-grid,.analysis-grid { grid-template-columns:1fr; } main { padding:10px; } .donut-row { grid-template-columns:1fr; } }
 """
 
 COLORS = ["#2f6fed", "#7b61ff", "#f59e0b", "#16a34a", "#ef4444", "#64748b"]
@@ -415,46 +416,152 @@ def donut(items, name_key, label):
     return f'<div class="donut-row"><div class="donut" data-label="{esc(label)}" style="background:conic-gradient({bg})"></div><div>{bar_list(items, name_key)}</div></div>'
 
 
+def pct_text(count: int, total: int) -> str:
+    if total <= 0:
+        return "0%"
+    return f"{count / total * 100:.0f}%"
+
+
+def first_item(items: list[dict[str, Any]], key: str, fallback: str = "暂无") -> str:
+    if not items:
+        return fallback
+    return str(items[0].get(key) or fallback)
+
+
+def report_stack(items: list[dict[str, Any]]) -> str:
+    total = sum(int(i["count"]) for i in items)
+    if total <= 0:
+        return '<div class="label">暂无数据</div>'
+    segs = []
+    rows = []
+    for idx, item in enumerate(items[:6]):
+        count = int(item["count"])
+        width = max(2, count / total * 100)
+        color = COLORS[idx % len(COLORS)]
+        raw_name = item.get("source") or item.get("project") or item.get("device_id") or item.get("location_id") or "unknown"
+        name = display_source(raw_name) if item.get("source") else raw_name
+        segs.append(f'<div class="stack-seg" title="{esc(name)} · {count}" style="width:{width:.2f}%;background:{color}"></div>')
+        rows.append(f'<span><i class="legend-dot" style="background:{color}"></i>{esc(name)} {count}（{pct_text(count,total)}）</span>')
+    return f'<div class="stack">{"".join(segs)}</div><div class="pills" style="margin-top:8px">{"".join(rows)}</div>'
+
+
+def hourly_distribution(con, date: str) -> list[dict[str, Any]]:
+    rows = con.execute(
+        """
+        SELECT substr(start, 12, 2) AS hour, COUNT(*) AS count
+        FROM events
+        WHERE date = ?
+        GROUP BY substr(start, 12, 2)
+        """,
+        (date,),
+    ).fetchall()
+    counts = {int(row["hour"]): int(row["count"]) for row in rows if str(row["hour"]).isdigit()}
+    return [{"hour": f"{hour:02d}:00", "count": counts.get(hour, 0)} for hour in range(24)]
+
+
+def sparkline(hours: list[dict[str, Any]]) -> str:
+    max_count = max((int(h["count"]) for h in hours), default=0) or 1
+    bars = []
+    for h in hours:
+        count = int(h["count"])
+        height = max(3, count / max_count * 82) if count else 3
+        opacity = "1" if count else ".18"
+        bars.append(f'<div class="spark-bar" title="{esc(h["hour"])} · {count}" style="height:{height:.1f}px;opacity:{opacity}"></div>')
+    return f'<div class="spark">{"".join(bars)}</div><div class="spark-labels"><span>00</span><span>06</span><span>12</span><span style="text-align:right">23</span></div>'
+
+
+def mini_table(items: list[dict[str, Any]], name_key: str, total: int, label: str) -> str:
+    rows = []
+    for item in items[:8]:
+        name = item.get(name_key) or "未归因"
+        count = int(item["count"])
+        rows.append(f'<tr><td>{esc(name)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">{count}</td><td style="text-align:right;color:var(--muted)">{pct_text(count,total)}</td></tr>')
+    body = "".join(rows) or '<tr><td colspan="3" class="label">暂无数据</td></tr>'
+    return f'<table class="mini-table"><thead><tr><th>{esc(label)}</th><th style="text-align:right">Count</th><th style="text-align:right">Share</th></tr></thead><tbody>{body}</tbody></table>'
+
+
+def daily_report_text(today: dict[str, Any], hours: list[dict[str, Any]]) -> str:
+    summary = today["summary"]
+    total = int(summary["total_events"])
+    top_source = first_item(today["by_source"], "source")
+    top_project = first_item(today["by_project"], "project")
+    low = int(summary.get("low_confidence") or 0)
+    active_hours = [h for h in hours if int(h["count"])]
+    busiest = max(hours, key=lambda h: int(h["count"]), default={"hour": "--", "count": 0})
+    source_count = len(summary.get("sources") or [])
+    project_count = len(summary.get("projects") or [])
+    confidence_note = "归因质量还需要检查" if low else "当天事件均已有项目归因"
+    if total == 0:
+        return "<p class='report-lede'>这一天没有可分析事件。</p><ul><li>可以切换到有数据的日期，或先运行 collector/import。</li></ul>"
+    return f"""
+<p class="report-lede">这一天记录了 <strong>{total}</strong> 条事件，覆盖 <strong>{source_count}</strong> 个来源、<strong>{project_count}</strong> 个项目。</p>
+<ul>
+  <li>主导来源是 <strong>{esc(display_source(top_source))}</strong>，主导项目是 <strong>{esc(top_project)}</strong>。</li>
+  <li>活跃时间覆盖 <strong>{len(active_hours)}</strong> 个小时段，峰值在 <strong>{esc(busiest['hour'])}</strong>，该小时有 <strong>{int(busiest['count'])}</strong> 条事件。</li>
+  <li>未归因/待检查事件 <strong>{low}</strong> 条，占当天 <strong>{pct_text(low,total)}</strong>；{confidence_note}。</li>
+  <li>下面优先看来源、项目、设备/位置和小时分布，不再展示质量较差的时间轴。</li>
+</ul>
+"""
+
+
 def date_filter(action: str, date: str | None, extra: str = "") -> str:
     return f"""<div class="filters card"><form method="get" action="{action}" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label>日期 <input name="date" value="{esc(date or '')}" placeholder="YYYY-MM-DD"></label>{extra}<button type="submit">查看</button><a href="{action}">全部日期</a></form></div>"""
 
 
 def today_page(db_path: Path, date: str | None):
     con = connect(db_path)
+    all_dates = available_dates(con)
     if not date:
-        latest = con.execute("SELECT date FROM events ORDER BY date DESC LIMIT 1").fetchone()
-        date = latest["date"] if latest else ""
-    today = query_today(con, date) if date else {"summary": query_summary(con, None), "timeline": [], "by_source": [], "by_project": [], "by_device": [], "by_location": [], "needs_review": []}
+        date = all_dates[0] if all_dates else ""
+    empty_today = {
+        "summary": query_summary(con, None),
+        "timeline": [],
+        "by_source": [],
+        "by_project": [],
+        "by_device": [],
+        "by_location": [],
+        "needs_review": [],
+    }
+    today = query_today(con, date) if date else empty_today
     s = today["summary"]
-    timeline_rows=[]
-    for bucket in today["timeline"]:
-        events_html=[]
-        for e in bucket.get("events", []):
-            events_html.append(f"""<div class="mini-event"><div class="event-title">{esc(e['title'])}</div><div class="muted">{esc(e['summary'])}</div><div class="pills"><span class="tag source">{esc(e['source'])}</span><span class="tag">{esc(e['project'])}</span><span class="tag device">{esc(e['device_id'])}</span><span class="tag location">{esc(e['location_id'])}</span></div></div>""")
-        timeline_rows.append(f"""<div class="bucket"><div class="bucket-head"><div><div class="hour">{esc(bucket['hour'])}</div><div class="label">{bucket['count']} events · {bucket['source_count']} sources · {bucket['project_count']} projects</div></div><div class="pills">{''.join(f'<span class="tag source">{esc(src)}</span>' for src in bucket.get('sources', [])[:4])}</div></div>{''.join(events_html) or '<div class="label">暂无事件详情</div>'}</div>""")
-    review_rows = "".join(f"<div class='mini-event'><strong>{esc(e['title'])}</strong><div class='muted'>{esc(e['source'])} · {esc(e['project'])}</div></div>" for e in today["needs_review"][:8]) or "<div class='label'>暂无需要人工检查的事件</div>"
+    total = int(s["total_events"])
+    hours = hourly_distribution(con, date) if date else []
+    review_rows = "".join(
+        f"<div class='mini-event'><strong>{esc(e['title'])}</strong><div class='muted'>{esc(display_source(e['source']))} · {esc(e['project'])}</div></div>"
+        for e in today["needs_review"][:8]
+    ) or "<div class='label'>暂无需要人工检查的事件</div>"
+    dates_desc = all_dates
+    prev_link = next_link = ""
+    if date in dates_desc:
+        idx = dates_desc.index(date)
+        if idx + 1 < len(dates_desc):
+            prev_day = dates_desc[idx + 1]
+            prev_link = f'<a href="/today?date={esc(prev_day)}">← 前一天 {esc(prev_day)}</a>'
+        if idx - 1 >= 0:
+            next_day = dates_desc[idx - 1]
+            next_link = f'<a href="/today?date={esc(next_day)}">后一天 {esc(next_day)} →</a>'
+    day_nav = f'<div class="day-nav">{prev_link}{next_link}<a href="/events?start_from={esc(date)}&start_to={esc(date)}">打开当天数据库</a></div>' if date else ""
     content = f"""
 <div class="grid">
-  <div class="card"><div class="metric">{s['total_events']}</div><div class="label">Events</div></div>
-  <div class="card"><div class="metric">{len(s['sources'])}</div><div class="label">Sources</div></div>
-  <div class="card"><div class="metric">{len(s['projects'])}</div><div class="label">Projects</div></div>
-  <div class="card"><div class="metric">{s['low_confidence']}</div><div class="label">Unattributed</div></div>
+  <div class="card"><div class="metric">{total}</div><div class="label">当天事件</div></div>
+  <div class="card"><div class="metric">{len(s['sources'])}</div><div class="label">来源数量</div></div>
+  <div class="card"><div class="metric">{len(s['projects'])}</div><div class="label">项目数量</div></div>
+  <div class="card"><div class="metric">{s['low_confidence']}</div><div class="label">未归因 / 待检查</div></div>
 </div>
-<section class="section-grid">
-  <div class="card"><h2>Timeline 时间轴</h2><div class="timeline">{''.join(timeline_rows) or '<div class="label">暂无 timeline 数据</div>'}</div></div>
-  <div>
-    <div class="card"><h2>时空上下文</h2><h3>Device</h3>{bar_list(today['by_device'], 'device_id')}<h3 style="margin-top:16px">Location</h3>{bar_list(today['by_location'], 'location_id')}</div>
-    <section class="card"><h2>待人工检查</h2>{review_rows}</section>
-  </div>
+<section class="report-grid">
+  <div class="card daily-report"><div class="bucket-head"><h2>每日 Report · {esc(date or '无日期')}</h2><span class="tag source">Daily</span></div>{daily_report_text(today, hours)}{day_nav}</div>
+  <div class="card"><h2>来源结构</h2>{donut(today['by_source'], 'source', 'Source')}{report_stack(today['by_source'])}</div>
 </section>
-<section class="three-grid">
-  <div class="card"><h2>Source 占比</h2>{donut(today['by_source'], 'source', 'Source')}</div>
-  <div class="card"><h2>Project 占比</h2>{donut(today['by_project'], 'project', 'Project')}</div>
-  <div class="card"><h2>Device 占比</h2>{donut(today['by_device'], 'device_id', 'Device')}</div>
+<section class="analysis-grid">
+  <div class="card"><h2>项目占比</h2>{donut(today['by_project'], 'project', 'Project')}</div>
+  <div class="card"><h2>项目排行</h2>{mini_table(today['by_project'], 'project', total, 'Project')}</div>
+  <div class="card"><h2>小时分布</h2>{sparkline(hours)}<div class="label">用于看当天事件密度；这里不再渲染事件时间轴。</div></div>
+  <div class="card"><h2>时空上下文</h2><h3>Device</h3>{bar_list(today['by_device'], 'device_id')}<h3 style="margin-top:16px">Location</h3>{bar_list(today['by_location'], 'location_id')}</div>
+  <div class="card wide-card"><h2>待人工检查</h2>{review_rows}</div>
 </section>
 """
-    date_control = calendar_control('/today', date, available_dates(con))
-    return layout("DayTrace · 报告", f"{s['total_events']} events", "today", content, date_control=date_control)
+    date_control = calendar_control('/today', date, all_dates)
+    return layout("DayTrace · 报告", f"{total} events · daily report", "today", content, date_control=date_control)
 
 
 def sources_page(db_path: Path, date: str | None):
