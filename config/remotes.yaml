@@ -1,0 +1,17 @@
+# config/remotes.yaml — single source of truth for "what other machines does
+# this hub pull from?".
+#
+# Used by:
+#   - `run_daily.py deploy`  — rsync local code (scripts/, daytrace/, config/)
+#                              to every remote's repo_path
+#   - `run_daily.py catchup` — for each remote, ssh in to run collect_from_config
+#                              and rsync inbox/<device>/<date>/ back
+#
+# Adding a new remote: append a block here, then re-run `deploy` once. catchup
+# will start including it on the next nightly run.
+
+remotes:
+  - device_id: omen-wsl                            # must match config.device.id
+    ssh: mtl-tail                                  # alias in ~/.ssh/config
+    repo_path: /mnt/d/research-programs/daytrace   # checked-out daytrace clone
+    config: config/devices/omen-wsl.yaml           # collector config, relative to repo_path

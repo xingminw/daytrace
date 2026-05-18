@@ -233,7 +233,15 @@ def cmd_catchup(args: argparse.Namespace) -> int:
 
     con = connect(args.db); init_db(con)
 
-    remotes = [_parse_ssh_remote(s) for s in args.remote]
+    # --remote on CLI overrides the registry; otherwise pull every machine in
+    # config/remotes.yaml. Empty list = single-machine setup (no peers).
+    if args.remote:
+        remote_specs = args.remote
+    else:
+        from daytrace.remotes import load_remotes, remotes_as_cli_specs
+        remote_specs = remotes_as_cli_specs(load_remotes(args.remotes_file))
+
+    remotes = [_parse_ssh_remote(s) for s in remote_specs]
     remote_by_id = {r["device_id"]: r for r in remotes}
     hub_device_id = _device_id_from_config(args.config)
     all_device_ids = [hub_device_id] + list(remote_by_id.keys())
@@ -323,6 +331,56 @@ def cmd_catchup(args: argparse.Namespace) -> int:
     return 1 if (pull_failures or regen_failures) else 0
 
 
+def cmd_deploy(args: argparse.Namespace) -> int:
+    """Push this hub's code (scripts/, daytrace/, config/) to every remote
+    listed in config/remotes.yaml. Idempotent; rsync is incremental.
+
+    Use this whenever you change collectors / configs on the hub — saves
+    you from per-remote manual rsync. Catchup will then run the new code
+    on each remote on its next invocation.
+    """
+    from daytrace.remotes import load_remotes
+
+    remotes = load_remotes(args.remotes_file)
+    if not remotes:
+        print(f"deploy: no remotes configured in {args.remotes_file}; nothing to do",
+              flush=True)
+        return 0
+
+    code_dirs = ["scripts", "daytrace", "config"]
+    excludes = ["__pycache__/", "*.pyc", ".pytest_cache/", ".mypy_cache/"]
+    print(f"deploy: pushing {code_dirs} to {len(remotes)} remote(s): "
+          f"{[r.device_id for r in remotes]}", flush=True)
+
+    failures: list[tuple[str, str]] = []
+    for r in remotes:
+        print(f"\n── deploy → {r.device_id} ({r.ssh}:{r.repo_path}) ──", flush=True)
+        for d in code_dirs:
+            local = REPO_ROOT / d
+            if not local.exists():
+                print(f"  skip {d}/ (not present locally)", flush=True)
+                continue
+            dest = f"{r.ssh}:{r.repo_path}/{d}/"
+            cmd = ["rsync", "-av", "--delete"]
+            for ex in excludes:
+                cmd += ["--exclude", ex]
+            cmd += [f"{local}/", dest]
+            try:
+                with Step(f"rsync/{r.device_id}/{d}", crash=True):
+                    run_cmd(cmd)
+            except Exception as e:
+                err = f"{type(e).__name__}: {e}"
+                print(f"  !! failed: {err}", flush=True)
+                failures.append((r.device_id, d))
+                break  # don't try the other dirs on this remote if ssh is down
+
+    if failures:
+        print(f"\ndeploy done with failures: {failures}", flush=True)
+        return 1
+    print(f"\ndeploy done: {len(remotes)} remote(s) up to date", flush=True)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="DayTrace daily runner — single entrypoint for cron / launchd."
@@ -366,7 +424,19 @@ def main() -> int:
                     help="always re-run the N most recent days (cache-cheap)")
     cs.add_argument("--hard-cutoff-days", type=int, default=30,
                     help="don't bother retrying pulls older than N days (keeps log bounded)")
+    cs.add_argument("--remotes-file", default="config/remotes.yaml",
+                    help="registry of remotes to pull from when --remote is empty")
     cs.set_defaults(func=cmd_catchup)
+
+    # `deploy` keeps every remote in config/remotes.yaml in sync with the
+    # hub's code. Run it after touching collectors / device configs / shared
+    # daytrace modules so catchup's remote step runs the latest logic.
+    dp = sub.add_parser(
+        "deploy",
+        help="rsync scripts/ daytrace/ config/ to every remote in remotes.yaml",
+    )
+    dp.add_argument("--remotes-file", default="config/remotes.yaml")
+    dp.set_defaults(func=cmd_deploy)
 
     args = parser.parse_args()
 

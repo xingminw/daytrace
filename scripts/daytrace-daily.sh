@@ -23,8 +23,13 @@ export PATH="$HOME/.npm-global/bin:/opt/anaconda3/bin:/usr/local/bin:/usr/bin:/b
 
 echo "=== $(date -Iseconds) DayTrace daily start ==="
 
+# Keep every remote's checked-out code in sync with this hub before catchup
+# runs anything on them. Cheap when nothing changed.
+python3 scripts/run_daily.py deploy
+
+# Pulls every (device, date) pair in device_pull_log that still needs work,
+# then imports + regenerates. Remotes come from config/remotes.yaml.
 python3 scripts/run_daily.py catchup \
-  --config config/devices/mac.yaml \
-  --remote omen-wsl=mtl-tail:/mnt/d/research-programs/daytrace
+  --config config/devices/mac.yaml
 
 echo "=== $(date -Iseconds) DayTrace daily end ==="
