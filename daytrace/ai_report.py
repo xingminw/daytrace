@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v7"  # v7 = structured shape: overview / trend / recommendations
+AI_VERSION = "v8"  # v8 = person-focused prompts + drop concerns, suggestions in place of recommendations
 
 
 # ----- Shape validators ------------------------------------------------
@@ -76,31 +76,33 @@ _TREND_DIRECTIONS = {"rising", "steady", "dropping", "new", "paused", "blocked"}
 
 
 def validate_overview(payload):
-    """v7 schema (structured for stable layout):
+    """v8 schema (person-focused; 3-column Insights row):
         {
-          "headline": str ≤30,
-          "overview": {"narrative": str, "key_moves": [str, ...]},
-          "trend":    {"direction": one_of, "comparison": str},
-          "highlights":      [str, ...],   # ✨ 高光
-          "concerns":        [str, ...],   # ⚠️ 风险
-          "recommendations": [str, ...]    # 💡 推荐
+          "headline":   str ≤30,
+          "overview":   {"narrative": str, "key_moves": [str, ...]},
+          "trend":      {"direction": one_of, "comparison": str},  # → 变化趋势
+          "highlights": [str, ...],                                 # → 关键进展
+          "suggestions":[str, ...]                                  # → 建议
         }
-    Older v6 payloads (narrative as top-level string, no trend/recommendations)
-    are normalized into the v7 shape so cached values keep rendering. The
-    renderer hides any empty/missing section."""
+
+    Backward compat:
+      - v6 top-level `narrative` string is moved into `overview.narrative`.
+      - v7 `recommendations` is renamed to `suggestions`.
+      - v7 `concerns` is dropped (the model is now told to fold warnings
+        into suggestions; cached v7 concerns are merged if suggestions is
+        empty so we don't lose existing data on a re-render).
+    The renderer hides any empty section."""
     from .ai_client import ShapeError
     if not isinstance(payload, dict):
         raise ShapeError(f"top-level must be an object, got {type(payload).__name__}")
 
     headline = _require_str(payload, "headline")
 
-    # overview: accept v7 dict or fall back to v6 top-level narrative
     raw_overview = payload.get("overview")
     if isinstance(raw_overview, dict):
         narrative = _require_str(raw_overview, "narrative")
         key_moves = _require_list_of_str(raw_overview, "key_moves", default_empty=True)
     else:
-        # v6 compat: pull `narrative` from top level
         if isinstance(payload.get("narrative"), str):
             narrative = payload["narrative"].strip()
         else:
@@ -108,7 +110,6 @@ def validate_overview(payload):
         key_moves = []
     overview_obj = {"narrative": narrative, "key_moves": key_moves}
 
-    # trend: optional in v6; required in v7 but tolerate missing for cache compat
     raw_trend = payload.get("trend")
     if isinstance(raw_trend, dict):
         direction = (raw_trend.get("direction") or "steady").strip().lower()
@@ -119,13 +120,24 @@ def validate_overview(payload):
     else:
         trend_obj = None
 
+    highlights = _require_list_of_str(payload, "highlights", default_empty=True)
+
+    # suggestions is the v8 name; v7 used `recommendations`.
+    if "suggestions" in payload:
+        suggestions = _require_list_of_str(payload, "suggestions", default_empty=True)
+    else:
+        suggestions = _require_list_of_str(payload, "recommendations", default_empty=True)
+    # v7 cached `concerns` — fold into suggestions if model didn't return any
+    # of its own (lets stale cache stay useful through one render cycle).
+    if not suggestions and isinstance(payload.get("concerns"), list):
+        suggestions = [str(c).strip() for c in payload["concerns"] if isinstance(c, str) and c.strip()]
+
     return {
-        "headline":        headline,
-        "overview":        overview_obj,
-        "trend":           trend_obj,
-        "highlights":      _require_list_of_str(payload, "highlights",      default_empty=True),
-        "concerns":        _require_list_of_str(payload, "concerns",        default_empty=True),
-        "recommendations": _require_list_of_str(payload, "recommendations", default_empty=True),
+        "headline":    headline,
+        "overview":    overview_obj,
+        "trend":       trend_obj,
+        "highlights":  highlights,
+        "suggestions": suggestions,
     }
 
 
@@ -268,30 +280,39 @@ def _stats_summary(con: sqlite3.Connection, date: str) -> str:
 # ---- channel: ai_overview ---------------------------------------------
 
 OVERVIEW_SYSTEM = (
-    "你是 DayTrace 的私人日报助手。基于当日活动事件和统计骨架, 写一段对"
-    "‘今天工作状态’的中文速读。严格只输出 JSON, 不要 Markdown 代码块, 不要解释。"
+    "你是一位软件工程师的私人工作复盘助手。\n\n"
+    "你的读者是这位工程师本人。输入的事件数据(项目分布、时段、来源)来自"
+    "ta 自己的 IDE / git / AI 对话 / 文档, 仅作为**证据**。\n\n"
+    "你要写的是: ta 今天**作为一个人**在做什么、节奏如何、产出在哪里、"
+    "接下来该怎么走。\n\n"
+    "**禁止**:\n"
+    "  ❌ 对数据本身提建议 (例: '梳理 misc 类别'、'合并项目名')\n"
+    "  ❌ 对系统/工具提建议 (例: '配置 webhook'、'增加分类规则')\n"
+    "  ❌ 泛化效率说教 (例: '减少 context switching'、'提升专注度')\n"
+    "  ❌ 数字复述 (例: '今天 191 个事件、69 次切换')\n\n"
+    "**鼓励**: 具体到项目名 / 具体动作 / 具体产出。\n\n"
+    "严格只输出 JSON, 不要 Markdown 代码块, 不要解释。"
 )
 
 
 def _overview_user(date: str, stats_text: str, events_text: str) -> str:
     return (
         f"【日期】{date}\n\n"
-        f"【骨架统计】\n{stats_text}\n\n"
-        f"【事件清单, 按时间, 已脱敏】\n{events_text}\n\n"
+        f"【骨架统计 — 供你参考节奏, 不要照搬数字】\n{stats_text}\n\n"
+        f"【事件清单, 按时间】\n{events_text}\n\n"
         "【输出 JSON, 严格按此 shape, 每个字段都要有】\n"
         '{\n'
-        '  "headline": "≤30 字, 抓住今天的主线",\n'
+        '  "headline": "≤30 字, 一句话概括今天的主线 (例: \'双线推进 daytrace UI 与评分模型\')",\n'
         '  "overview": {\n'
-        '    "narrative": "2-3 句 (60-120 字), 节奏 / 专注度 / 主题切换",\n'
-        '    "key_moves": ["3-5 条今日核心动作, 每条 ≤30 字"]\n'
+        '    "narrative": "2-3 句 (60-120 字): ta 今天具体做了什么 + 呈现什么工作模式 (深度块 / 多线 / 元工作 / 探索...), 不要堆砌数字",\n'
+        '    "key_moves": ["3-5 条具体动作或产出, 每条 ≤30 字, 例: \'完成评分模型 PR\', \'重构泳道布局\'"]\n'
         '  },\n'
         '  "trend": {\n'
-        '    "direction": "rising | steady | dropping | new | paused",\n'
-        '    "comparison": "1 句话对比昨天 / 近 3 日 (≤60 字)"\n'
+        '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
+        '    "comparison": "1 句 (≤60 字) 描述工作重心/节奏 vs 昨天有什么变化, 不要复述事件量"\n'
         '  },\n'
-        '  "highlights":      ["2-4 条今日值得记住的高光, 每条 ≤40 字"],\n'
-        '  "concerns":        ["0-3 条该注意的风险 / 漏点, 每条 ≤50 字"],\n'
-        '  "recommendations": ["1-3 条明天可执行的下一步, 每条 ≤50 字"]\n'
+        '  "highlights":  ["1-3 条今天真正完成或推进的事 (合并 PR、提交、上线...), 每条 ≤40 字; 不要写\'高频活动\'之类"],\n'
+        '  "suggestions": ["1-3 条针对 ta 个人的下一步行动 (具体到项目和动作); 可以是\'明天继续推 X\'、\'Y 已 3 天没碰, 该回来看看\'; 每条 ≤50 字"]\n'
         '}'
     )
 
@@ -302,7 +323,7 @@ def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> Ch
             "headline": f"{ctx.date} 无事件",
             "overview": {"narrative": "今天没有记录到事件。", "key_moves": []},
             "trend": None,
-            "highlights": [], "concerns": [], "recommendations": [],
+            "highlights": [], "suggestions": [],
         })
     if not ai_client.is_available():
         return ChannelResult(value=None)  # written as JSON null, error=None

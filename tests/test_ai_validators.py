@@ -48,10 +48,10 @@ def test_validate_overview_rejects_non_object():
 
 
 def test_validate_overview_defaults_empty_lists_when_omitted():
-    payload = {"headline": "h", "narrative": "n"}  # no highlights / concerns
+    payload = {"headline": "h", "narrative": "n"}  # no highlights / suggestions
     out = validate_overview(payload)
     assert out["highlights"] == []
-    assert out["concerns"] == []
+    assert out["suggestions"] == []
 
 
 def test_validate_continuity_normalizes_unknown_momentum():

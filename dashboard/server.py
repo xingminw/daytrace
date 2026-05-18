@@ -140,13 +140,20 @@ body.events-page form { height:100%; }
 .dr-narrative { font-size:14px; line-height:1.65; color:#362f27; margin:0 0 12px; }
 /* Section divider used inside the Report panel — visually subtle so the
    factual + AI sections (Dashboard / 总览 / 趋势 / 推荐) read as one card. */
-.dr-section-title { font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.10em; text-transform:uppercase; margin:14px 0 6px; padding-top:10px; border-top:1px dashed #eadfcd; }
-.dr-section-title:first-child { margin-top:0; padding-top:0; border-top:none; }
+/* Minimal section separator inside the Report panel: a thin dashed line.
+   No labels, no header chrome — sections speak for themselves. */
+.dr-sep { border:0; border-top:1px dashed #eadfcd; margin:14px 0 12px; height:0; }
 .dr-trend { display:flex; align-items:center; gap:10px; font-size:13px; line-height:1.55; padding:6px 12px; background:#fff7e8; border:1px solid #f0d68b; border-radius:10px; margin-bottom:8px; }
 .dr-trend-text { color:#362f27; }
 .dr-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin:0 0 12px; }
 @media (max-width:900px) { .dr-grid { grid-template-columns:1fr; } }
 .dr-section h4 { margin:0 0 6px; font-size:12.5px; font-weight:700; color:#4d4438; letter-spacing:.04em; }
+/* Insights card — full-width row below Report+Chart with 3 parallel
+   columns (变化趋势 / 关键进展 / 建议). Collapses to 1 col on narrow. */
+.insights-card { margin-top:12px; }
+.insights-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; }
+.insights-grid .dr-section h4 { cursor:help; }  /* hint that hover reveals tooltip */
+@media (max-width:900px) { .insights-grid { grid-template-columns:1fr; } }
 .dr-bullets { margin:0; padding-left:18px; font-size:13px; line-height:1.55; }
 .dr-bullets li { margin:3px 0; }
 .dr-highlights li::marker { color:var(--green); }
@@ -996,16 +1003,12 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
             "运行 backfill 后可看到 AI 速读)</div>"
         )
     else:
-        # New v2 layout: 4 sections stacked in the Report panel.
-        # 1. Dashboard (facts: stats + 关键时刻)
-        # 2. 总览 (AI: headline + narrative + key_moves)
-        # 3. 趋势 (AI: direction + comparison, or legacy continuity)
-        # 4. 推荐 (AI: recommendations)
+        # v3 layout: Report panel keeps Dashboard (facts) + 总览 (headline +
+        # narrative + key_moves) only. 趋势/关键进展/建议 move out to the
+        # full-width Insights card below the top row.
         rich_daily_body = (
             _render_dashboard_section(dict(day_report_row), day_channels, date or "")
             + _render_overview_section(ai_overview)
-            + _render_trend_section(ai_overview, ai_continuity)
-            + _render_recommendations_section(ai_overview)
         )
 
     dates_desc = all_dates
@@ -1098,12 +1101,11 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         '</div>'
     )
 
-    # Highlights / suggestions card — mirrors weekly's right column under
-    # the chart. Reuse the existing daily AI overview shape (highlights +
-    # concerns) but rebrand the concerns as suggestions if you ever swap
-    # the channel. For now we keep ✨ Highlights / ⚠️ Concerns labels.
-    highlights_concerns_html = _render_highlights_panel(ai_overview)
-    right_column_body = daily_top_chart_card + (highlights_concerns_html or "")
+    # Right column under chart used to host a highlights/concerns mini-card;
+    # those moved into the full-width Insights card (rendered between the
+    # top row and the timeline). Right column is now just the chart card.
+    right_column_body = daily_top_chart_card
+    insights_card_html = _render_insights_card(ai_overview, continuity=ai_continuity)
 
     # Bottom swim-lane card — reuse the weekly module with days=[date] so
     # the rendering is literally identical (single row covering 24h, ticks
@@ -1269,6 +1271,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
   <div class="card daily-report"><div class="bucket-head"><h2>每日 Report · {esc(date or '无日期')}</h2><span class="tag source">Report</span></div>{rich_daily_body}</div>
   <div class="right-column">{right_column_body}</div>
 </section>
+{insights_card_html}
 {daily_swim_card}
 {tasks_panel_html}
 {audit_html}
@@ -1449,34 +1452,37 @@ def _status_chip(status: str | None) -> str:
 
 # ----- day_report: card-per-day human view -----------------------------
 
+_SECTION_SEP = '<hr class="dr-sep">'
+
+
 def _section_header(label: str) -> str:
-    """Consistent section divider used inside the Report panel."""
-    return f'<div class="dr-section-title">┃ {esc(label)} ┃</div>'
+    """Back-compat shim — sections no longer have labeled headers; callers
+    use `_SECTION_SEP` directly for the thin dashed divider."""
+    return _SECTION_SEP
 
 
 def _render_dashboard_section(
     header: dict, channels: dict[str, str | None], date_val: str,
 ) -> str:
-    """┃ Dashboard ┃ — pure-data section: stats strip + 关键时刻.
-    No AI here; values come from day_report + factual channels."""
+    """Dashboard section — pure-data: stats strip + 关键时刻.
+    No leading separator; this is always the first section in the panel."""
     stats_html = _render_stats_strip_compact(header, channels)
     facts_html = _render_facts_block(date_val, channels)
-    parts = [_section_header("Dashboard"), stats_html]
+    parts = [stats_html]
     if facts_html:
         parts.append(facts_html)
     return "".join(parts)
 
 
 def _render_overview_section(overview_payload: dict | None) -> str:
-    """┃ 总览 ┃ — AI headline + 2-3 句 narrative + 3-5 条 key_moves bullets.
-    Tolerates legacy v6 cache shape (top-level `narrative` string)."""
+    """Overview section — AI headline + narrative + key_moves bullets.
+    Always preceded by a thin dashed separator. Tolerates legacy v6 cache."""
     if not overview_payload:
         return (
-            _section_header("总览")
+            _SECTION_SEP
             + '<div class="dr-narrative muted">(AI 速读未生成)</div>'
         )
     headline = overview_payload.get("headline") or ""
-    # v7: overview is a dict; v6: narrative was top-level string
     ov = overview_payload.get("overview")
     if isinstance(ov, dict):
         narrative = ov.get("narrative") or ""
@@ -1484,7 +1490,7 @@ def _render_overview_section(overview_payload: dict | None) -> str:
     else:
         narrative = overview_payload.get("narrative") or ""
         key_moves = []
-    parts = [_section_header("总览")]
+    parts = [_SECTION_SEP]
     if headline:
         parts.append(f'<div class="dr-headline">📰 {esc(headline)}</div>')
     if narrative:
@@ -1496,10 +1502,10 @@ def _render_overview_section(overview_payload: dict | None) -> str:
 
 
 def _render_trend_section(overview_payload: dict | None, continuity: dict | None) -> str:
-    """┃ 趋势 ┃ — direction chip + 1-sentence comparison.
+    """Trend section — direction chip + 1-sentence comparison.
 
-    Source priority: new v7 `overview.trend` dict ↦ legacy `ai_continuity_day`
-    channel's momentum + relation_to_yesterday. Hidden when nothing to show."""
+    Source priority: v7 `overview.trend` dict ↦ legacy `ai_continuity_day`.
+    Hidden entirely (no separator) when nothing to show."""
     direction = ""
     comparison = ""
     if overview_payload:
@@ -1513,7 +1519,7 @@ def _render_trend_section(overview_payload: dict | None, continuity: dict | None
     if not direction and not comparison:
         return ""
     return (
-        _section_header("趋势")
+        _SECTION_SEP
         + '<div class="dr-trend">'
         + (_momentum_chip(direction) if direction else "")
         + (f'<span class="dr-trend-text">{esc(comparison)}</span>' if comparison else "")
@@ -1522,7 +1528,7 @@ def _render_trend_section(overview_payload: dict | None, continuity: dict | None
 
 
 def _render_recommendations_section(overview_payload: dict | None) -> str:
-    """┃ 推荐 ┃ — 1-3 条可执行下一步 bullet. Hidden when empty."""
+    """Recommendations section — 1-3 actionable bullets. Hidden when empty."""
     if not overview_payload:
         return ""
     recs = overview_payload.get("recommendations") or []
@@ -1530,48 +1536,97 @@ def _render_recommendations_section(overview_payload: dict | None) -> str:
         return ""
     items = "".join(f"<li>{esc(r)}</li>" for r in recs)
     return (
-        _section_header("推荐")
+        _SECTION_SEP
         + f'<ul class="dr-bullets dr-recommendations">{items}</ul>'
     )
 
 
-def _render_highlights_panel(overview_payload: dict | None) -> str:
-    """┃ Highlights panel ┃ — two columns: ✨ 高光 / ⚠️ 风险. Hidden when
-    both arrays are empty."""
+# Tooltips on each Insights column — paraphrase the AI guidance so you
+# can hover the title and see what prompt the model received for that
+# column. Plain `title=` attribute (browser-native tooltip; zero JS).
+_INSIGHTS_TOOLTIPS = {
+    "trend":       "AI 引导:对比昨天/上周,描述工作重心、节奏、产出有什么变化(只 1 句,不复述事件量)",
+    "highlights":  "AI 引导:今天/本周真正完成或推进了哪些具体事(合并 PR、提交、上线...) — 不要数字复述,不要写'高频活动'",
+    "suggestions": "AI 引导:针对你个人的下一步行动(具体项目+具体动作); 包括\"继续推 X\"和\"Y 已 N 天没碰,该回来\"; 不要给系统/工具建议,不要泛化效率说教",
+}
+
+
+def _render_insights_card(overview_payload: dict | None, *, continuity: dict | None = None) -> str:
+    """Full-width 3-column Insights card sitting below the Report row.
+
+    Columns: 📈 变化趋势 / 🚀 关键进展 / 🎯 建议. Each title carries a
+    `title=` tooltip describing the AI prompt for that column.
+
+    Hidden entirely when no AI payload at all. Empty individual columns
+    show `(无)` so the 3-column grid stays steady."""
     if not overview_payload:
         return ""
+
+    # ── column 1: trend ─────────────────────────────────────────────
+    direction = ""
+    comparison = ""
+    tr = overview_payload.get("trend")
+    if isinstance(tr, dict):
+        direction = tr.get("direction") or ""
+        comparison = tr.get("comparison") or ""
+    if not direction and continuity:
+        direction = continuity.get("momentum") or ""
+        comparison = continuity.get("relation_to_yesterday") or ""
+    if direction or comparison:
+        trend_body = (
+            '<div class="dr-trend" style="margin:0;">'
+            + (_momentum_chip(direction) if direction else "")
+            + (f'<span class="dr-trend-text">{esc(comparison)}</span>' if comparison else "")
+            + '</div>'
+        )
+    else:
+        trend_body = '<div class="muted small">(无)</div>'
+
+    # ── column 2: highlights ────────────────────────────────────────
     highlights = overview_payload.get("highlights") or []
-    concerns = overview_payload.get("concerns") or []
-    if not highlights and not concerns:
-        return ""
-    hl = "".join(f"<li>{esc(h)}</li>" for h in highlights)
-    cn = "".join(f"<li>{esc(c)}</li>" for c in concerns)
-    sections = []
-    # Always render both columns (even if one is empty) so the grid layout
-    # stays steady — empty column just shows muted placeholder.
-    sections.append(
-        '<div class="dr-section">'
-        '<h4>✨ 高光</h4>'
-        + (f'<ul class="dr-bullets dr-highlights">{hl}</ul>' if hl
-           else '<div class="muted small">(无)</div>')
-        + '</div>'
-    )
-    sections.append(
-        '<div class="dr-section">'
-        '<h4>⚠️ 风险</h4>'
-        + (f'<ul class="dr-bullets dr-concerns">{cn}</ul>' if cn
-           else '<div class="muted small">(无)</div>')
-        + '</div>'
-    )
+    if highlights:
+        hl_body = f'<ul class="dr-bullets dr-highlights">{"".join(f"<li>{esc(h)}</li>" for h in highlights)}</ul>'
+    else:
+        hl_body = '<div class="muted small">(无)</div>'
+
+    # ── column 3: suggestions (v8) — fall back to v7 recommendations
+    suggestions = overview_payload.get("suggestions")
+    if not suggestions:
+        suggestions = overview_payload.get("recommendations") or []
+    if suggestions:
+        sg_body = f'<ul class="dr-bullets dr-suggestions">{"".join(f"<li>{esc(s)}</li>" for s in suggestions)}</ul>'
+    else:
+        sg_body = '<div class="muted small">(无)</div>'
+
+    def _col(emoji: str, label: str, key: str, body: str) -> str:
+        tip = _INSIGHTS_TOOLTIPS.get(key, "")
+        return (
+            '<div class="dr-section">'
+            f'<h4 title="{esc(tip)}">{emoji} {esc(label)}</h4>'
+            f'{body}'
+            '</div>'
+        )
+
     return (
-        '<div class="card highlights-card">'
-        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">'
-        '<h3 style="margin:0;">AI 速读</h3>'
-        '<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">Highlights</span>'
+        '<section class="card insights-card">'
+        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">'
+        '<h3 style="margin:0;">Insights</h3>'
+        '<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">Insights</span>'
+        '<span class="muted small" style="margin-left:8px;">悬停每列标题查看 AI 引导词</span>'
         '</div>'
-        f'<div class="dr-grid">{"".join(sections)}</div>'
-        '</div>'
+        '<div class="insights-grid">'
+        + _col("📈", "变化趋势", "trend", trend_body)
+        + _col("🚀", "关键进展", "highlights", hl_body)
+        + _col("🎯", "建议",     "suggestions", sg_body)
+        + '</div>'
+        '</section>'
     )
+
+
+# Back-compat shim — older callers (day_report_table) reference
+# _render_highlights_panel; map it onto the new Insights card.
+def _render_highlights_panel(overview_payload: dict | None) -> str:
+    return _render_insights_card(overview_payload)
 
 
 def _render_facts_block(date_val: str, channels: dict[str, str | None]) -> str:
@@ -1682,8 +1737,7 @@ def _render_day_card(date_val: str, header: dict, channels: dict[str, str | None
     </div>
   </div>
   {_render_overview_section(overview)}
-  {_render_trend_section(overview, continuity)}
-  {_render_recommendations_section(overview)}
+  {_render_insights_card(overview, continuity=continuity)}
   {_render_facts_block(date_val, channels)}
   {_render_raw_channels_block(channels)}
 </div>
@@ -3089,26 +3143,33 @@ def _ai_weekly_summary(
         f"这是 2026 年 ISO 周 {week} 的活动汇总。\n\n"
         f"总事件数: {len(events)}\n"
         f"活跃天数: {active_days}/7\n"
-        f"活跃总时长（估计）: {total_minutes/60:.1f}h\n\n"
+        f"活跃总时长(估计): {total_minutes/60:.1f}h\n\n"
         f"项目分布 (top 8):\n{top_projects}\n\n"
-        "请输出严格 JSON, shape 跟日报一致以便 dashboard 复用:\n"
+        "请输出严格 JSON, shape 跟日报一致:\n"
         "{\n"
-        '  "headline": "1 句话本周关键词 (≤30 字)",\n'
+        '  "headline": "≤30 字, 一句话概括本周的主线 (例: \'评分模型从设计到上线, daytrace UI 收尾\')",\n'
         '  "overview": {\n'
-        '    "narrative": "2-3 句叙事, 主线 + 状态 + 重点产出",\n'
-        '    "key_moves": ["3-5 条本周核心动作, 每条 ≤30 字"]\n'
+        '    "narrative": "2-3 句叙事 (60-120 字): 本周 ta 主线是什么、节奏如何、有什么阶段性产出; 不要堆砌项目占比",\n'
+        '    "key_moves": ["3-5 条本周具体动作或产出, 每条 ≤30 字"]\n'
         '  },\n'
         '  "trend": {\n'
-        '    "direction": "rising | steady | dropping | new | paused",\n'
-        '    "comparison": "1 句话 vs 上周 / 近 4 周 (≤60 字)"\n'
+        '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
+        '    "comparison": "1 句 (≤60 字) 描述工作重心/节奏 vs 上周有什么变化, 不要复述事件量"\n'
         '  },\n'
-        '  "highlights":      ["2-4 条本周值得记住的高光, 每条 ≤40 字"],\n'
-        '  "concerns":        ["0-3 条该注意的风险 / 漏点, 每条 ≤50 字"],\n'
-        '  "recommendations": ["1-3 条下周可执行的动作, 每条 ≤50 字"]\n'
+        '  "highlights":  ["1-3 条本周真正完成或推进的具体事项, 每条 ≤40 字"],\n'
+        '  "suggestions": ["1-3 条下周针对 ta 个人的行动 (具体项目+动作); 可以包含\'继续推 X\'、\'Y 该收尾\'、\'Z 已停 N 天该回来看看\'; 每条 ≤50 字"]\n'
         "}"
     )
     system = (
-        "你是 DayTrace 周报助手。只看聚合数字, 不杜撰未提供的细节。"
+        "你是一位软件工程师的私人**周复盘助手**。读者是这位工程师本人; "
+        "聚合数字仅作为证据。\n\n"
+        "你要写: ta 本周作为一个人的工作状态、产出、下一步。\n\n"
+        "**禁止**:\n"
+        "  ❌ 对数据本身提建议 ('梳理 misc'、'合并项目名'...)\n"
+        "  ❌ 对系统/工具提建议\n"
+        "  ❌ 泛化效率说教 ('减少 context switching'...)\n"
+        "  ❌ 数字复述\n\n"
+        "**鼓励**: 具体项目名 / 具体动作 / 具体产出。\n\n"
         "严格只输出 JSON, 不要 Markdown。"
     )
 
@@ -3118,20 +3179,18 @@ def _ai_weekly_summary(
             raise ShapeError("expected object")
         if not isinstance(payload.get("headline"), str):
             raise ShapeError("headline must be string")
-        # overview: prefer v2 dict, accept legacy top-level narrative
         ov = payload.get("overview")
         if isinstance(ov, dict):
             if not isinstance(ov.get("narrative"), str):
                 raise ShapeError("overview.narrative must be string")
         elif not isinstance(payload.get("narrative"), str):
             raise ShapeError("missing 'overview' (or legacy 'narrative')")
-        # arrays — any are optional
-        for k in ("highlights", "concerns", "recommendations"):
+        for k in ("highlights", "suggestions", "recommendations", "concerns"):
             if not isinstance(payload.get(k, []), list):
                 raise ShapeError(f"{k} must be list")
-        # legacy `suggestions` → recommendations
-        if "suggestions" in payload and "recommendations" not in payload:
-            payload["recommendations"] = payload.pop("suggestions")
+        # Legacy renames so cached values keep working through one cycle.
+        if "recommendations" in payload and "suggestions" not in payload:
+            payload["suggestions"] = payload.pop("recommendations")
         return payload
 
     try:
@@ -3189,26 +3248,22 @@ def _weekly_stats_strip(
 
 
 def _ai_summary_body(summary: dict | None) -> str:
-    """Weekly Report-card body. Reuses the daily Overview / 趋势 / 推荐
-    section renderers so daily and weekly look identical structurally."""
+    """Weekly Report-card body. Just Overview (headline + narrative + key
+    moves). 趋势/关键进展/建议 live in the full-width Insights card below."""
     if summary is None:
         return '<div class="dr-narrative muted">(本周 AI 速读还没生成)</div>'
     if summary.get("_unavailable"):
         return '<div class="dr-narrative muted">(DEEPSEEK_API_KEY 未设置, 跳过 AI 速读)</div>'
     if summary.get("_error"):
         return f'<div class="dr-narrative muted">AI 调用失败: {esc(summary["_error"])}</div>'
-    return (
-        _render_overview_section(summary)
-        + _render_trend_section(summary, None)
-        + _render_recommendations_section(summary)
-    )
+    return _render_overview_section(summary)
 
 
-def _ai_highlights_card(summary: dict | None) -> str:
-    """Right-column 高光 / 风险 card. Reuses the daily helper."""
+def _ai_insights_card_weekly(summary: dict | None) -> str:
+    """Full-width Insights card for the weekly page. Hidden on error states."""
     if summary is None or summary.get("_unavailable") or summary.get("_error"):
         return ""
-    return _render_highlights_panel(summary)
+    return _render_insights_card(summary)
 
 
 def _vs_last_week_card(diffs: list[dict]) -> str:
@@ -4171,7 +4226,6 @@ def weekly_page(
     weekly_report_card = (
         '<div class="card daily-report">'
         f'<div class="bucket-head"><h2>周报 · {esc(week)}</h2><span class="tag source">Report</span></div>'
-        + _section_header("Dashboard")
         + stats_strip
         + _ai_summary_body(ai_summary)
         + '</div>'
@@ -4222,8 +4276,8 @@ def weekly_page(
         '</div>'
     )
 
-    # Highlights / suggestions card (full-width below top row)
-    highlights_card = _ai_highlights_card(ai_summary)
+    # Insights card (full-width row below the Report+Chart top row)
+    insights_card_html = _ai_insights_card_weekly(ai_summary)
 
     # Bottom view-switcher card — CSS-driven (no reload), mirrors daily timeline-card.
     # All 3 view bodies are rendered to DOM; data-view attribute on the card root
@@ -4470,18 +4524,20 @@ def weekly_page(
         '</section>'
     )
 
-    # Right column: histogram on top, highlights/suggestions below (stacked).
-    # Both are .card so they share the right-column gutter & spacing.
-    right_column_body = top_histogram_card + (highlights_card or "")
+    # Right column: just the histogram card. Insights moved to a full-width
+    # row below the top row.
+    right_column_body = top_histogram_card
 
     tasks_panel_html = _tasks_panel(con, days, bh)
     audit_html = _alignment_audit_card(con, days)
     body = (
-        # Top row: Report | (Chart + Highlights stacked)
+        # Top row: Report | Chart
         '<section class="report-grid">'
         + weekly_report_card
         + '<div class="right-column">' + right_column_body + '</div>'
         + '</section>'
+        # Full-width Insights row (变化趋势 / 关键进展 / 建议)
+        + insights_card_html
         # Timeline panel
         + bottom_card
         + view_sync_js
