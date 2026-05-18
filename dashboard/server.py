@@ -22,7 +22,14 @@ STYLE = """
 * { box-sizing: border-box; }
 body { margin:0; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:radial-gradient(circle at top left,#fff7df 0,#f8f5ee 35%,#f4efe5 100%); color:var(--ink); }
 body.events-page { height:100vh; overflow:hidden; }
-header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(255,250,240,.94); position:sticky; top:0; backdrop-filter: blur(10px); z-index:5; display:grid; grid-template-columns:auto auto 1fr auto; gap:12px; align-items:center; min-height:50px; }
+header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(255,250,240,.94); position:sticky; top:0; backdrop-filter: blur(10px); z-index:5; display:grid; grid-template-columns:auto auto 1fr auto auto; gap:12px; align-items:center; min-height:50px; }
+.header-spacer { /* 1fr eater so right-rail right-aligns */ }
+.page-toggle { display:inline-flex; gap:0; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
+.page-toggle-pill { font-size:13px; font-weight:700; padding:5px 16px; border-radius:999px; color:#3b352e; cursor:pointer; transition:background .12s, color .12s; text-decoration:none; }
+.page-toggle-pill:hover { background:rgba(0,0,0,.04); }
+.page-toggle-pill.active { background:var(--ink); color:white; }
+.page-db-btn { display:inline-flex; align-items:center; padding:6px 14px; border:1px solid var(--line); background:white; border-radius:999px; font-size:12.5px; font-weight:650; color:var(--ink); text-decoration:none; }
+.page-db-btn:hover { background:#fdf6e3; }
 h1 { margin:0; font-size:20px; letter-spacing:-0.03em; white-space:nowrap; }.sub { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 nav { display:flex; gap:6px; flex-wrap:nowrap; justify-content:flex-end; justify-self:end; margin-left:auto; } nav a { padding:5px 9px; border:1px solid var(--line); border-radius:999px; background:white; color:#3b352e; font-weight:650; font-size:13px; white-space:nowrap; } nav a.active { background:var(--ink); color:white; border-color:var(--ink); }
 main { padding:12px 18px 28px; max-width:none; margin:0 auto; min-height:calc(100vh - 51px); }
@@ -500,13 +507,22 @@ def html_response(handler: BaseHTTPRequestHandler, body: str, status=200):
 
 
 def layout(title: str, subtitle: str, active: str, content: str, date_control: str = "", body_class: str | None = None) -> str:
-    nav = "".join(
-        f'<a class="{ "active" if active == key else "" }" href="{href}">{label}</a>'
+    # Right-rail: 日报/周报 toggle pill + 数据库 (new tab) button.
+    # Subtitle dropped — the Report panel already carries that info.
+    toggle = "".join(
+        f'<a class="page-toggle-pill{" active" if active == key else ""}" href="{href}">{label}</a>'
         for key, label, href in [
             ("today", "日报", "/today"),
             ("weekly", "周报", "/weekly"),
-            ("events", "数据库", "/events"),
         ]
+    )
+    db_btn = (
+        '<a class="page-db-btn" target="_blank" rel="noopener" '
+        'href="/events" title="在新标签页打开数据库">数据库 ↗</a>'
+    )
+    nav = (
+        f'<div class="page-toggle">{toggle}</div>'
+        f'{db_btn}'
     )
     if body_class is None:
         body_class = f'{active}-page'
@@ -523,7 +539,7 @@ document.addEventListener('keydown', (event) => {
   }
 });
 </script>"""
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(title)}</title><style>{STYLE}</style></head><body class="{body_class}"><header><h1>{esc(title)}</h1>{date_control}<div class="sub">{subtitle}</div><nav>{nav}</nav></header><main>{content}</main>{script}</body></html>"""
+    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(title)}</title><style>{STYLE}</style></head><body class="{body_class}"><header><h1>{esc(title)}</h1>{date_control}<div class="header-spacer"></div>{nav}</header><main>{content}</main>{script}</body></html>"""
 
 
 def select_control(name: str, options: list[dict[str, str]], selected: str | bool | None, label: str = "") -> str:
