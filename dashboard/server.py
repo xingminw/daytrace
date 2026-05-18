@@ -2649,13 +2649,13 @@ def _weekly_dim_bar(
     unit_bar = _pill_bar(
         css_class="unit-tab", options=_WEEKLY_UNIT_OPTS, current=unit,
         href_for=lambda v: _weekly_url(
-            week=week, mode=mode, unit=v, view=view, anchor="chart",
+            week=week, mode=mode, unit=v, view=view,
         ),
     )
     dim_bar = _pill_bar(
         css_class="dim-tab", options=_WEEKLY_DIM_OPTS, current=mode,
         href_for=lambda v: _weekly_url(
-            week=week, mode=v, unit=unit, view=view, anchor="chart",
+            week=week, mode=v, unit=unit, view=view,
         ),
     )
     return (
@@ -2693,16 +2693,18 @@ def _weekly_swimlane_card(
     *, events: list[dict], days: list[str], boundary_hour: int,
     stack_by: str, top_names: list[str], palette: dict[str, str],
 ) -> str:
-    """7 horizontal swim-lanes (one per shifted-day), each showing 24h ticks
-    colored by the current stack_by dim. Mirrors the daily timeline's swim
-    style — same hour grid, same hairline ticks, same hover semantics —
-    but stacked across the week so you see "what project on which day at
-    which hour" in one glance.
+    """7-day swim-lane reusing the daily timeline-card's CSS classes
+    (.tl-swim-row, .tl-swim-track, .tl-swim-tick, .tl-tooltip, .tl-tip-*)
+    so hover, scaling, and tooltip styling are identical to /today.
 
-    Time axis runs from boundary_hour (e.g. 04:00) on the left to
-    boundary_hour next day on the right, matching the daily timeline so
-    the visual mental model carries over."""
+    Layout:
+      - one shared X-axis at the top (04, 06, 08, ..., 04) using .tl-hour markers
+      - 7 .tl-swim-row's, one per shifted-day, with day label + .tl-swim-track
+      - .tl-legend strip with palette swatches + counts
+      - .tl-tooltip element for the JS to populate on hover
+    """
     from datetime import datetime, date as _date, timedelta
+    from collections import Counter
     if not events:
         return ""
 
@@ -2711,11 +2713,10 @@ def _weekly_swimlane_card(
     OTHER = _WEEKLY_OTHER_COLOR
 
     def shifted_pos_min(dt: datetime) -> int:
-        """Clock-minute → position-minute on the 0..1440 shifted axis."""
         m = dt.hour * 60 + dt.minute
         return (m - boundary_min) % (24 * 60)
 
-    # Bucket ticks per day
+    # Bucket ticks per day, capture full event metadata for tooltip
     per_day_ticks: dict[str, list[dict]] = {d: [] for d in days}
     for ev in events:
         s = ev.get("start") or ""
@@ -2734,47 +2735,117 @@ def _weekly_swimlane_card(
             "color": color,
             "title": ev.get("title") or "",
             "time": s[11:16],
+            "date": d,
             "value": v,
+            "source": ev.get("source") or "other",
+            "project": ev.get("project") or "misc",
+            "device": ev.get("device_id") or "unknown",
+            "activity": ev.get("activity") or "未分类",
         })
 
-    # Hour grid labels (every 2h), aligned with the daily timeline conventions
-    hour_grid = "".join(
-        f'<div style="position:absolute; left:{(i/12)*100:.4f}%; top:0; bottom:0; width:1px; background:rgba(0,0,0,0.04);">'
-        f'<span style="position:absolute; top:-15px; left:-9px; font-size:9px; color:var(--muted); font-variant-numeric:tabular-nums;">{(boundary_hour + i*2) % 24:02d}</span></div>'
+    # Top X-axis: 13 hour markers (every 2h), starting from boundary
+    LABEL_W = 70
+    hour_labels = "".join(
+        f'<div style="position:absolute; left:{(i/12)*100:.4f}%; transform:translateX(-50%); '
+        f'font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums;">'
+        f'{(boundary_hour + i*2) % 24:02d}</div>'
         for i in range(13)
     )
 
+    # Inline vertical grid lines drawn inside each track (so they line up
+    # with the top axis labels regardless of the 70px label-column offset)
+    grid_lines = "".join(
+        f'<div style="position:absolute; left:{(i/12)*100:.4f}%; top:0; bottom:0; '
+        f'width:1px; background:rgba(0,0,0,0.045); pointer-events:none;"></div>'
+        for i in range(1, 12)  # skip 0 and 12 (left/right edges)
+    )
+
     rows_html = []
+    overall_counts: Counter = Counter()
     for d in days:
         wd = _WEEK_ZH[_date.fromisoformat(d).weekday()]
         ticks = per_day_ticks[d]
         ticks_html = "".join(
-            f'<div title="{esc(t["time"] + " · " + t["value"] + (" · " + t["title"][:40] if t["title"] else ""))}" '
-            f'style="position:absolute; left:{t["pos"]:.3f}%; top:3px; bottom:3px; width:3px; '
-            f'border-radius:2px; background:{t["color"]}; transform:translateX(-1px); cursor:default;"></div>'
+            f'<span class="tl-swim-tick" '
+            f'data-time="{esc(t["time"])}" data-date="{esc(t["date"])}" '
+            f'data-source="{esc(t["source"])}" data-project="{esc(t["project"])}" '
+            f'data-device="{esc(t["device"])}" data-activity="{esc(t["activity"])}" '
+            f'data-title="{esc(t["title"])}" '
+            f'style="left:{t["pos"]:.4f}%; background:{t["color"]};"></span>'
             for t in ticks
         )
-        empty_note = '' if ticks else (
-            '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; '
-            'font-size:11px; color:#cbb;">无活动</div>'
-        )
+        for t in ticks:
+            overall_counts[t["value"]] += 1
         rows_html.append(
-            '<div style="display:grid; grid-template-columns:60px 1fr; gap:10px; align-items:center; padding:3px 0;">'
-            f'<div style="font-size:12px; color:var(--muted); display:flex; gap:6px; align-items:baseline;">'
-            f'<span style="font-weight:700; color:var(--ink);">周{wd}</span>'
-            f'<span style="font-size:10px; color:#bbb; font-variant-numeric:tabular-nums;">{esc(d[5:])}</span>'
-            f'<span style="margin-left:auto; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums;">{len(ticks)}</span></div>'
-            f'<div style="position:relative; height:22px; background:linear-gradient(180deg,#faf6ec,#f3ead8); '
-            f'border:1px solid #e6dcc6; border-radius:5px;">{hour_grid}{ticks_html}{empty_note}</div>'
+            '<div class="tl-swim-row">'
+            f'<div class="tl-swim-label" style="border-left:3px solid #e6dcc6;">'
+            f'<span class="tl-swim-name">周{wd} <span class="muted" style="font-size:11px; font-weight:500;">{esc(d[5:])}</span></span>'
+            f'<span class="tl-swim-count muted">×{len(ticks)}</span>'
+            '</div>'
+            f'<div class="tl-swim-track">{grid_lines}{ticks_html}</div>'
             '</div>'
         )
 
-    return (
-        '<div style="position:relative; padding-top:18px;">'
-        + "".join(rows_html) +
+    # Top axis row, aligned to where the .tl-swim-track starts (offset matches
+    # .tl-swim-row's first column = 160px from the daily CSS).
+    AXIS_OFFSET = 160 + 10  # 160px label col + 10px gap
+    top_axis = (
+        f'<div class="tl-swim-row" style="padding:0 0 6px;">'
+        f'<div class="tl-swim-label"></div>'
+        f'<div style="position:relative; height:14px;">{hour_labels}</div>'
         '</div>'
-        '<div class="muted small" style="margin-top:8px;">'
-        f'横轴是 24 小时 (shifted 边界 {boundary_hour:02d}:00 起)，每根竖线一个事件，颜色跟直方图一致。'
+    )
+
+    # Legend strip (uses .tl-legend-item + .tl-swatch from daily CSS)
+    legend = "".join(
+        f'<span class="tl-legend-item">'
+        f'<span class="tl-swatch" style="background:{palette[k]};"></span>'
+        f'{esc(k)} <span class="muted">×{overall_counts.get(k, 0)}</span>'
+        '</span>'
+        for k in top_names if overall_counts.get(k, 0) > 0
+    )
+    legend_html = f'<div class="tl-legend show" style="margin-top:10px;">{legend}</div>' if legend else ""
+
+    # Tooltip element + JS that wires up .tl-swim-tick hover (scoped to
+    # .weekly-swim so it doesn't clash with the daily timeline-card's JS).
+    tooltip_html = '<div class="tl-tooltip" hidden></div>'
+
+    js_html = (
+        '<script>(function(){'
+        'var card=document.currentScript&&document.currentScript.closest(".weekly-swim");'
+        'if(!card)return;'
+        'var tip=card.querySelector(".tl-tooltip");if(!tip)return;'
+        'function esc(s){return String(s==null?"":s).replace(/[&<>\\"]/g,function(c){return ({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"})[c];});}'
+        'function chip(label,val){if(!val)return ""; return "<span class=\\"tl-tip-chip\\"><b>"+label+"</b> "+esc(val)+"</span>";}'
+        'function show(html,ev){tip.innerHTML=html;tip.hidden=false;'
+        'var r=card.getBoundingClientRect();'
+        'var x=ev.clientX-r.left+12;var y=ev.clientY-r.top+12;'
+        'var w=tip.offsetWidth;if(x+w>card.clientWidth-8)x=card.clientWidth-w-8;'
+        'tip.style.left=x+"px";tip.style.top=y+"px";}'
+        'function hide(){tip.hidden=true;}'
+        'card.querySelectorAll(".tl-swim-tick").forEach(function(el){'
+        'el.addEventListener("mousemove",function(ev){'
+        'var html="<div class=\\"tl-tip-time\\">"+esc(el.dataset.date+" "+el.dataset.time)+"</div>"+'
+        '"<div class=\\"tl-tip-title\\">"+esc(el.dataset.title||"(无标题)")+"</div>"+'
+        'chip("项目",el.dataset.project)+chip("来源",el.dataset.source)+'
+        'chip("活动",el.dataset.activity)+chip("设备",el.dataset.device);'
+        'show(html,ev);});'
+        'el.addEventListener("mouseleave",hide);});'
+        '})();</script>'
+    )
+
+    return (
+        # The .timeline-card class pulls in tooltip / tick / track styling
+        # from the daily timeline CSS. .weekly-swim is our own scope tag.
+        '<div class="timeline-card weekly-swim" style="position:relative; padding:0;">'
+        + top_axis
+        + "".join(rows_html) +
+        legend_html +
+        tooltip_html +
+        js_html +
+        '<div class="muted small" style="margin-top:6px;">'
+        f'横轴 24h (shifted 边界 {boundary_hour:02d}:00 起)，hover 任意竖线看事件详情，颜色跟直方图一致。'
+        '</div>'
         '</div>'
     )
 
@@ -2996,8 +3067,11 @@ def _hour_heatmap_card(events: list[dict], days: list[str], boundary_hour: int) 
         header.append(f'<div style="text-align:center; font-size:11px; color:var(--muted);">周{wd}<br><span style="font-size:10px; color:#bbb;">{esc(d[5:])}</span></div>')
     cells_html.append("".join(header))
 
-    # 24 hour rows
-    for h in range(24):
+    # Hour rows ordered by shifted-day axis: boundary_hour, +1, +2, …, +23
+    # so the top of the heatmap matches "start of day" under the same 04:00
+    # convention as the rest of the dashboard (daily timeline, weekly swim).
+    hour_order = [(boundary_hour + i) % 24 for i in range(24)]
+    for h in hour_order:
         row = [f'<div style="font-size:10px; color:var(--muted); text-align:right; padding-right:4px; font-variant-numeric:tabular-nums;">{h:02d}</div>']
         for d in days:
             c = buckets.get((d, h), 0)
@@ -3411,9 +3485,20 @@ def weekly_page(
         '</section>'
     )
 
-    # JS: switch bottom card view via CSS attr + URL replaceState (no reload, no scroll jump)
+    # Page-level JS: (1) save/restore scrollY around dim/unit reloads so clicking
+    # the global dim-bar doesn't jump the viewport, (2) CSS-driven view switch
+    # for the bottom card (no reload, history.replaceState for URL sync).
     view_sync_js = (
         '<script>(function(){'
+        # ── (1) scroll preservation around dim/unit reload ──
+        'var KEY="daytrace.weekly.scrollY";'
+        'var saved=sessionStorage.getItem(KEY);'
+        'if(saved!==null){window.scrollTo(0,parseInt(saved,10)||0);sessionStorage.removeItem(KEY);}'
+        'document.querySelectorAll(".dim-bar .dim-tab, .dim-bar .unit-tab").forEach(function(a){'
+        'a.addEventListener("click",function(){'
+        'if(a.classList.contains("active"))return;'
+        'sessionStorage.setItem(KEY,String(window.scrollY));});});'
+        # ── (2) bottom view switcher (CSS attr toggle) ──
         'var card=document.querySelector(".weekly-viz");'
         'if(!card)return;'
         'card.querySelectorAll("[data-role=\\"wv-switcher\\"] .dim-tab").forEach(function(btn){'
