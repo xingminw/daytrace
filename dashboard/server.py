@@ -592,13 +592,6 @@ def available_event_date_counts(con, source_in: list[str] | None = None) -> dict
     return {row["event_date"]: int(row["count"]) for row in rows}
 
 
-def available_event_date_options(con, source_in: list[str] | None = None) -> list[dict[str, str]]:
-    return [
-        {"value": day, "label": f"{day} · {count} events"}
-        for day, count in available_event_date_counts(con, source_in).items()
-    ]
-
-
 def end_date_options(start_date: str | None, date_options: list[dict[str, str]]) -> list[dict[str, str]]:
     start = format_date_input(start_date)
     if not start:
@@ -860,23 +853,6 @@ def first_item(items: list[dict[str, Any]], key: str, fallback: str = "暂无") 
     return str(items[0].get(key) or fallback)
 
 
-def report_stack(items: list[dict[str, Any]]) -> str:
-    total = sum(int(i["count"]) for i in items)
-    if total <= 0:
-        return '<div class="label">暂无数据</div>'
-    segs = []
-    rows = []
-    for idx, item in enumerate(items[:6]):
-        count = int(item["count"])
-        width = max(2, count / total * 100)
-        color = COLORS[idx % len(COLORS)]
-        raw_name = item.get("source") or item.get("project") or item.get("device_id") or item.get("location_id") or "unknown"
-        name = display_source(raw_name) if item.get("source") else raw_name
-        segs.append(f'<div class="stack-seg" title="{esc(name)} · {count}" style="width:{width:.2f}%;background:{color}"></div>')
-        rows.append(f'<span><i class="legend-dot" style="background:{color}"></i>{esc(name)} {count}（{pct_text(count,total)}）</span>')
-    return f'<div class="stack">{"".join(segs)}</div><div class="pills" style="margin-top:8px">{"".join(rows)}</div>'
-
-
 def hourly_distribution(con, date: str) -> list[dict[str, Any]]:
     rows = con.execute(
         """
@@ -889,17 +865,6 @@ def hourly_distribution(con, date: str) -> list[dict[str, Any]]:
     ).fetchall()
     counts = {int(row["hour"]): int(row["count"]) for row in rows if str(row["hour"]).isdigit()}
     return [{"hour": f"{hour:02d}:00", "count": counts.get(hour, 0)} for hour in range(24)]
-
-
-def sparkline(hours: list[dict[str, Any]]) -> str:
-    max_count = max((int(h["count"]) for h in hours), default=0) or 1
-    bars = []
-    for h in hours:
-        count = int(h["count"])
-        height = max(3, count / max_count * 82) if count else 3
-        opacity = "1" if count else ".18"
-        bars.append(f'<div class="spark-bar" title="{esc(h["hour"])} · {count}" style="height:{height:.1f}px;opacity:{opacity}"></div>')
-    return f'<div class="spark">{"".join(bars)}</div><div class="spark-labels"><span>00</span><span>06</span><span>12</span><span style="text-align:right">23</span></div>'
 
 
 # Top-2 colors must be perceptually far apart, because the dominant source
@@ -1287,16 +1252,6 @@ def event_timeline_card(
     )
 
 
-def mini_table(items: list[dict[str, Any]], name_key: str, total: int, label: str) -> str:
-    rows = []
-    for item in items[:8]:
-        name = item.get(name_key) or "misc"
-        count = int(item["count"])
-        rows.append(f'<tr><td>{esc(name)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">{count}</td><td style="text-align:right;color:var(--muted)">{pct_text(count,total)}</td></tr>')
-    body = "".join(rows) or '<tr><td colspan="3" class="label">暂无数据</td></tr>'
-    return f'<table class="mini-table"><thead><tr><th>{esc(label)}</th><th style="text-align:right">Count</th><th style="text-align:right">Share</th></tr></thead><tbody>{body}</tbody></table>'
-
-
 def daily_report_text(today: dict[str, Any], hours: list[dict[str, Any]]) -> str:
     summary = today["summary"]
     total = int(summary["total_events"])
@@ -1319,10 +1274,6 @@ def daily_report_text(today: dict[str, Any], hours: list[dict[str, Any]]) -> str
   <li>下方时间轴可按 来源 / 项目 / 设备 切换上色，看一天的真实分布。</li>
 </ul>
 """
-
-
-def date_filter(action: str, date: str | None, extra: str = "") -> str:
-    return f"""<div class="filters card"><form method="get" action="{action}" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label>日期 <input name="date" value="{esc(date or '')}" placeholder="YYYY-MM-DD"></label>{extra}<button type="submit">查看</button><a href="{action}">全部日期</a></form></div>"""
 
 
 DIMENSIONS = [
@@ -1828,21 +1779,6 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         + '</div>'
     )
     return layout("DayTrace · 报告", f"{total} events · daily report", "today", content, date_control=header_controls)
-
-
-def sources_page(db_path: Path, date: str | None):
-    con = connect(db_path)
-    summary = query_summary(con, date)
-    source_cards=[]
-    for src in summary["sources"]:
-        source = src["source"]
-        examples = query_events(con, date=date, source=source, limit=3)
-        sample = "".join(f"<div class='mini-event'><strong>{esc(e['title'])}</strong><div class='muted'>{esc(e['project'])}</div></div>" for e in examples)
-        source_cards.append(f"""<div class="card"><div class="bucket-head"><h2>{esc(source)}</h2><span class="tag source">active</span></div><div class="grid" style="grid-template-columns:repeat(2,1fr)"><div><div class="metric">{src['count']}</div><div class="label">Events</div></div><div><div class="metric">mac</div><div class="label">Collector device</div></div></div><div class="label" style="margin-top:10px">规则：单机 prototype 默认保留该 source 的事件；后续在这里展示 filtering rules / noise / errors。</div>{sample}</div>""")
-    cards = ''.join(source_cards) or '<div class="card label">暂无 source</div>'
-    content = f"<section class='section-grid' style='margin-top:0'>{cards}</section>"
-    date_control = calendar_control('/sources', date, available_dates(con), allow_all=True)
-    return layout("DayTrace · 来源是啥", f"{summary['total_events']} events", "sources", content, date_control=date_control)
 
 
 def events_table(events, filters: dict[str, str | None], options: dict[str, Any]):
