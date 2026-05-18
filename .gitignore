@@ -54,3 +54,6 @@ inbox/
 # Generated launchd / cron config — they embed live API keys
 ops/*.plist
 ops/*-local.*
+
+# Feishu drive folder tokens — created on first upload, machine-local
+config/feishu_drive.yaml

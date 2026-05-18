@@ -32,4 +32,8 @@ python3 scripts/run_daily.py deploy
 python3 scripts/run_daily.py catchup \
   --config config/devices/mac.yaml
 
+# Export yesterday's report as standalone HTML + Markdown, upload to
+# Feishu drive. We don't email daily — weekly handles that to avoid spam.
+python3 scripts/export_report.py --upload-feishu
+
 echo "=== $(date -Iseconds) DayTrace daily end ==="

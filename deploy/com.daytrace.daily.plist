@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  DayTrace daily catchup + archive export.
+  Fires at 04:30 every day (after the 04:00 shifted-day boundary).
+  If the Mac is asleep at fire time, launchd runs the job the next time
+  the system wakes (KeepAlive default behavior for StartCalendarInterval).
+
+  Install:
+    cp deploy/com.daytrace.daily.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.daytrace.daily.plist
+
+  Inspect:
+    launchctl list | grep daytrace
+    tail -f /Users/xingminwang/Projects/daytrace/data/logs/daily.log
+
+  Unload:
+    launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.daytrace.daily.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.daytrace.daily</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/xingminwang/Projects/daytrace/scripts/daytrace-daily.sh</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/xingminwang/Projects/daytrace</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/xingminwang/Projects/daytrace/data/logs/daily.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/xingminwang/Projects/daytrace/data/logs/daily.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>

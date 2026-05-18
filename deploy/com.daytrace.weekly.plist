@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  DayTrace weekly report — runs every Monday at 06:00.
+  Renders last completed ISO week to HTML + MD, uploads to Feishu drive,
+  emails the Markdown body to xingminw@umich.edu.
+
+  Install:
+    cp deploy/com.daytrace.weekly.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.daytrace.weekly.plist
+
+  Logs: data/logs/weekly.log
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.daytrace.weekly</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/xingminwang/Projects/daytrace/scripts/daytrace-weekly.sh</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>6</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/xingminwang/Projects/daytrace</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/xingminwang/Projects/daytrace/data/logs/weekly.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/xingminwang/Projects/daytrace/data/logs/weekly.log</string>
+
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
