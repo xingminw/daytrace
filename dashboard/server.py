@@ -1485,8 +1485,11 @@ def _render_dashboard_section(
 
 
 def _render_overview_section(overview_payload: dict | None) -> str:
-    """Overview section — AI headline + narrative + key_moves bullets.
-    Always preceded by a thin dashed separator. Tolerates legacy v6 cache."""
+    """Overview section — AI headline + narrative paragraph only.
+
+    Bullet-form key moves used to live here too, but they duplicated the
+    Insights `🚀 关键进展` column verbatim. Bullets now belong to Insights;
+    the Report-card overview is a single story-like paragraph."""
     if not overview_payload:
         return (
             _SECTION_SEP
@@ -1496,18 +1499,13 @@ def _render_overview_section(overview_payload: dict | None) -> str:
     ov = overview_payload.get("overview")
     if isinstance(ov, dict):
         narrative = ov.get("narrative") or ""
-        key_moves = ov.get("key_moves") or []
     else:
         narrative = overview_payload.get("narrative") or ""
-        key_moves = []
     parts = [_SECTION_SEP]
     if headline:
         parts.append(f'<div class="dr-headline">📰 {esc(headline)}</div>')
     if narrative:
         parts.append(f'<p class="dr-narrative">{esc(narrative)}</p>')
-    if key_moves:
-        moves_html = "".join(f"<li>{esc(m)}</li>" for m in key_moves)
-        parts.append(f'<ul class="dr-bullets dr-key-moves">{moves_html}</ul>')
     return "".join(parts)
 
 
@@ -3178,8 +3176,7 @@ def _ai_weekly_summary(
         "{\n"
         '  "headline": "≤30 字, 一句话概括本周的主线 (例: \'评分模型从设计到上线, daytrace UI 收尾\')",\n'
         '  "overview": {\n'
-        '    "narrative": "2-3 句叙事 (60-120 字): 本周 ta 主线是什么、节奏如何、有什么阶段性产出; 不要堆砌项目占比",\n'
-        '    "key_moves": ["3-5 条本周具体动作或产出, 每条 ≤30 字"]\n'
+        '    "narrative": "3-4 句 (100-180 字) 的叙事段落, 像周记不是周报: 本周从哪儿起步、中间在哪儿转弯/卡住、最后停在哪儿; 可以带画面感和节奏 (\'周一上午...\', \'周三起重心转向...\'); **不要列 bullet, 不要重复 highlights 里会出现的具体产出**"\n'
         '  },\n'
         '  "trend": {\n'
         '    "direction": "rising | steady | dropping | new | paused | blocked",\n'

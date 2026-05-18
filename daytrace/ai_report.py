@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v9"  # v9 = task-context prompts ([task:X] / [proj:Y] prefixes + active-task list)
+AI_VERSION = "v10"  # v10 = narrative-only overview (drop key_moves; bullets live in Insights)
 
 
 # ----- Shape validators ------------------------------------------------
@@ -101,14 +101,14 @@ def validate_overview(payload):
     raw_overview = payload.get("overview")
     if isinstance(raw_overview, dict):
         narrative = _require_str(raw_overview, "narrative")
-        key_moves = _require_list_of_str(raw_overview, "key_moves", default_empty=True)
+    elif isinstance(payload.get("narrative"), str):
+        narrative = payload["narrative"].strip()
     else:
-        if isinstance(payload.get("narrative"), str):
-            narrative = payload["narrative"].strip()
-        else:
-            raise ShapeError("missing 'overview' (or legacy 'narrative')")
-        key_moves = []
-    overview_obj = {"narrative": narrative, "key_moves": key_moves}
+        raise ShapeError("missing 'overview' (or legacy 'narrative')")
+    # v10 drops key_moves — bullets live in `highlights` (Insights column).
+    # Older v7-v9 payloads may still carry `overview.key_moves`; we silently
+    # discard it so the cached value still renders.
+    overview_obj = {"narrative": narrative}
 
     raw_trend = payload.get("trend")
     if isinstance(raw_trend, dict):
@@ -394,8 +394,7 @@ def _overview_user(date: str, stats_text: str, events_text: str, tasks_text: str
         '{\n'
         '  "headline": "≤30 字, 一句话概括今天的主线 (例: \'双线推进 daytrace UI 与评分模型\')",\n'
         '  "overview": {\n'
-        '    "narrative": "2-3 句 (60-120 字): ta 今天具体做了什么 + 呈现什么工作模式 (深度块 / 多线 / 元工作 / 探索...), 不要堆砌数字",\n'
-        '    "key_moves": ["3-5 条具体动作或产出, 每条 ≤30 字, 例: \'完成评分模型 PR\', \'重构泳道布局\'"]\n'
+        '    "narrative": "3-4 句 (100-180 字) 的叙事段落, 像写日记不是写报告: 讲讲今天 ta 是怎么进入工作的、节奏在哪里转弯、有没有意外或亮点、最后落在哪里; 可以带点画面感和情绪 (\'下午一头扎进 X\'、\'临到收工才把 Y 提上去\'), **不要列 bullet, 不要重复 highlights 里会出现的具体产出**"\n'
         '  },\n'
         '  "trend": {\n'
         '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
@@ -411,7 +410,7 @@ def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> Ch
     if not events:
         return ChannelResult(value={
             "headline": f"{ctx.date} 无事件",
-            "overview": {"narrative": "今天没有记录到事件。", "key_moves": []},
+            "overview": {"narrative": "今天没有记录到事件。"},
             "trend": None,
             "highlights": [], "suggestions": [],
         })
