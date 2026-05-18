@@ -296,6 +296,29 @@ def cmd_catchup(args: argparse.Namespace) -> int:
         print(f"!!! import-inbox failed: {type(e).__name__}: {e}", flush=True)
         return 1
 
+    # Sync work items + rebuild links. Best-effort — failure here doesn't
+    # block regen; the dashboard just sees stale or empty work_items.
+    try:
+        with Step("work-items-sync", crash=False):
+            from daytrace import work_items as wi
+            cfg = wi.load_config()
+            if cfg is None:
+                print("    (work_items disabled / no config; skipping)", flush=True)
+            else:
+                stats = wi.sync_from_feishu(
+                    con, app_token=cfg["app_token"], table_id=cfg["table_id"],
+                    as_identity=cfg.get("as", "user"),
+                )
+                links = wi.rebuild_links(con, lookback_days=30)
+                print(
+                    f"    work_items: fetched={stats['fetched']} "
+                    f"links={links['links_inserted']}",
+                    flush=True,
+                )
+    except Exception as e:
+        print(f"    !! work-items-sync skipped: {type(e).__name__}: {e}",
+              flush=True)
+
     rep_plan = pending_dates(
         con, target_date=args.date,
         lookback_days=args.lookback_days,
@@ -329,6 +352,46 @@ def cmd_catchup(args: argparse.Namespace) -> int:
         flush=True,
     )
     return 1 if (pull_failures or regen_failures) else 0
+
+
+def cmd_work_items_sync(args: argparse.Namespace) -> int:
+    """Pull the Feishu 任务 Bitable into local work_items + rebuild
+    event_work_item_links via URL / alias matching. Read-only on the
+    Feishu side; safe to run any time. Skipped silently if work_items
+    config is missing or disabled."""
+    from daytrace.db import connect, init_db
+    from daytrace import work_items as wi
+
+    cfg = wi.load_config(args.config) if args.config else wi.load_config()
+    if cfg is None:
+        print("work-items-sync: feature disabled (no enabled config); skipping.",
+              flush=True)
+        return 0
+
+    con = connect(args.db); init_db(con)
+    print(
+        f"work-items-sync: pulling table {cfg['table_id']} from "
+        f"app {cfg['app_token']} as {cfg['as']}...",
+        flush=True,
+    )
+    try:
+        sync_stats = wi.sync_from_feishu(
+            con, app_token=cfg["app_token"], table_id=cfg["table_id"],
+            as_identity=cfg.get("as", "user"),
+        )
+    except Exception as e:
+        print(f"!!! sync failed: {type(e).__name__}: {e}", flush=True)
+        return 1
+    print(f"  fetched={sync_stats['fetched']}  upserted={sync_stats['upserted']}",
+          flush=True)
+
+    link_stats = wi.rebuild_links(con, lookback_days=args.lookback_days)
+    print(
+        f"  links: scanned={link_stats['events_scanned']} "
+        f"inserted={link_stats['links_inserted']} by={link_stats['by_type']}",
+        flush=True,
+    )
+    return 0
 
 
 def cmd_deploy(args: argparse.Namespace) -> int:
@@ -431,6 +494,17 @@ def main() -> int:
     # `deploy` keeps every remote in config/remotes.yaml in sync with the
     # hub's code. Run it after touching collectors / device configs / shared
     # daytrace modules so catchup's remote step runs the latest logic.
+    ws = sub.add_parser(
+        "work-items-sync",
+        help="pull Feishu 任务 Bitable + rebuild event ↔ work_item links",
+    )
+    ws.add_argument("--db", default="data/daytrace.sqlite")
+    ws.add_argument("--config", default=None,
+                    help="path to work_items.yaml (default config/work_items.yaml)")
+    ws.add_argument("--lookback-days", type=int, default=30,
+                    help="scan this many days of events when rebuilding links")
+    ws.set_defaults(func=cmd_work_items_sync)
+
     dp = sub.add_parser(
         "deploy",
         help="rsync scripts/ daytrace/ config/ to every remote in remotes.yaml",

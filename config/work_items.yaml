@@ -1,0 +1,14 @@
+# config/work_items.yaml — Feishu work-items table to mirror locally.
+# Read-only on the Feishu side. Disabling this just hides the Tasks panel +
+# 任务 dim option; nothing else breaks.
+
+enabled: true
+
+# Feishu Bitable identifiers. Found via:
+#   lark-cli drive +search --query "<your table name>" --doc-types bitable
+# Then look at the result's `icon_info.token` (app_token) and
+#   lark-cli base +table-list --as user --base-token <app_token>
+# for table_id.
+app_token: F9p4bjm24axBY8sd8macJIySnYe
+table_id:  tbldFwiuV4K0l2Lp
+as:        user

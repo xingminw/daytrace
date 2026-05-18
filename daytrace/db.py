@@ -7,7 +7,7 @@ from typing import Iterable, Any
 
 from .schema import TraceEvent
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 11
 DEFAULT_DEVICE_ID = "Mac"
 DEFAULT_LOCATION_ID = "unknown"
 DEFAULT_COLLECTOR_ID = "hub-local"
@@ -207,6 +207,39 @@ CREATE TABLE IF NOT EXISTS device_pull_log (
   PRIMARY KEY (device_id, date)
 );
 CREATE INDEX IF NOT EXISTS idx_device_pull_log_date ON device_pull_log(date);
+-- Local snapshot of the Feishu "任务" Bitable (work items). DayTrace is a
+-- read-only observer: this table is rewritten each sync from the upstream
+-- snapshot; we never write back to Feishu in v11.
+CREATE TABLE IF NOT EXISTS work_items (
+  record_id        TEXT PRIMARY KEY,            -- 飞书 record id
+  title            TEXT NOT NULL,               -- 任务
+  status           TEXT,                        -- 待办 / 进行中 / 完成
+  priority         TEXT,                        -- P0..P3
+  tags             TEXT,                        -- JSON array
+  project_source   TEXT,                        -- 项目来源 (free text)
+  external_links   TEXT,                        -- JSON array of URLs
+  due_date         TEXT,                        -- 截止时间 (YYYY-MM-DD)
+  next_action_date TEXT,                        -- 下一步时间
+  weekly_hours     REAL,                        -- 每周预计投入
+  next_action      TEXT,                        -- 下一步动作
+  agent_workspace  TEXT,                        -- Agent 工作区 (kept read-only)
+  last_synced_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  raw_fields_json  TEXT                         -- full row dump for debugging
+);
+CREATE INDEX IF NOT EXISTS idx_work_items_status ON work_items(status);
+CREATE INDEX IF NOT EXISTS idx_work_items_priority ON work_items(priority);
+-- (event, work_item) bridge — multiple match strategies stamp distinct rows;
+-- the consumer picks the highest-confidence link per event.
+CREATE TABLE IF NOT EXISTS event_work_item_links (
+  event_id   TEXT NOT NULL,
+  record_id  TEXT NOT NULL,
+  match_type TEXT NOT NULL,              -- github_url | local_path | alias | manual | ai
+  confidence REAL NOT NULL DEFAULT 0.9,
+  matched_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (event_id, record_id),
+  FOREIGN KEY (event_id)  REFERENCES events(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_ewil_record ON event_work_item_links(record_id);
 """
 
 

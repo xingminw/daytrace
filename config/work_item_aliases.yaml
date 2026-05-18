@@ -1,0 +1,13 @@
+# config/work_item_aliases.yaml — manual project_guess → Feishu record_id map.
+# Used by daytrace.work_items.rebuild_links() as a deterministic override
+# for cases where URL matching doesn't find a link (e.g. chat-only projects).
+#
+# Find a record_id with:
+#   lark-cli base +record-list --as user \
+#     --base-token <app_token> --table-id <table_id> --limit 50
+# (first column of the markdown table.)
+
+aliases: {}
+  # "Daily Briefing": recvjP3BNUM48e
+  # "daily-briefing": recvjP3BNUM48e
+  # "Personal Recording": recvjKEnBD0MlQ
