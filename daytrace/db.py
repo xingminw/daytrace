@@ -621,6 +621,61 @@ def events_for_shifted_day(
     )
 
 
+def iso_week_to_date_range(week_label: str) -> tuple[str, str, list[str]]:
+    """Parse an ISO week label like '2026-W20' → (monday_iso, sunday_iso, [7 day ISOs]).
+
+    The ISO week starts Monday. We return calendar dates here; callers using
+    the shifted-day boundary will pass each date through events_for_shifted_day.
+    """
+    from datetime import date as _date, timedelta
+    if "-W" not in week_label:
+        raise ValueError(f"expected YYYY-Www, got {week_label!r}")
+    year_str, wk_str = week_label.split("-W", 1)
+    year, week = int(year_str), int(wk_str)
+    monday = _date.fromisocalendar(year, week, 1)
+    days = [(monday + timedelta(days=i)).isoformat() for i in range(7)]
+    return days[0], days[-1], days
+
+
+def date_to_iso_week(d: str) -> str:
+    """'2026-05-18' → '2026-W21'."""
+    from datetime import date as _date
+    y, w, _ = _date.fromisoformat(d).isocalendar()
+    return f"{y}-W{w:02d}"
+
+
+def iso_week_neighbors(week_label: str) -> tuple[str, str]:
+    """Return (prev_week_label, next_week_label) for nav links."""
+    from datetime import timedelta
+    monday, _, _ = iso_week_to_date_range(week_label)
+    from datetime import date as _date
+    m = _date.fromisoformat(monday)
+    prev = (m - timedelta(days=7))
+    nxt = (m + timedelta(days=7))
+    py, pw, _ = prev.isocalendar()
+    ny, nw, _ = nxt.isocalendar()
+    return f"{py}-W{pw:02d}", f"{ny}-W{nw:02d}"
+
+
+def events_for_shifted_week(
+    con: sqlite3.Connection,
+    week_label: str,
+    *,
+    boundary_hour: int | None = None,
+    limit: int | None = 20000,
+) -> list[dict[str, Any]]:
+    """All events whose shifted-day falls inside the 7 calendar dates of the
+    ISO week. Concatenation of events_for_shifted_day for the 7 days."""
+    _, _, days = iso_week_to_date_range(week_label)
+    out: list[dict] = []
+    per_day_cap = (limit // 7) if limit else None
+    for d in days:
+        out.extend(events_for_shifted_day(
+            con, d, boundary_hour=boundary_hour, limit=per_day_cap,
+        ))
+    return out
+
+
 def load_activity_labels_for_event_ids(
     con: sqlite3.Connection, event_ids: list[str], *, chunk: int = 900
 ) -> dict[str, str]:

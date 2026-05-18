@@ -487,6 +487,7 @@ def layout(title: str, subtitle: str, active: str, content: str, date_control: s
         f'<a class="{ "active" if active == key else "" }" href="{href}">{label}</a>'
         for key, label, href in [
             ("today", "报告", "/today"),
+            ("weekly", "周报", "/weekly"),
             ("events", "数据库", "/events"),
         ]
     )
@@ -2358,6 +2359,256 @@ def events_page(db_path: Path, qs: dict[str, list[str]]):
     return layout("DayTrace · 数据库", f"{len(events)} events", "events", content)
 
 
+# ───────────────────────────── weekly report ──────────────────────────────
+# v1: pure aggregation (no AI). Sections: stats strip, by-project, by-source,
+# per-day mini bars, vs-last-week delta, top events. AI sections (summary,
+# next-week recommendations, work-items integration) will land here later.
+
+def _project_of(ev: dict) -> str:
+    return str(ev.get("project") or ev.get("project_guess") or "misc")
+
+
+def _weekly_breakdown(events: list[dict], field: str, top: int = 12) -> list[dict]:
+    """Group by field (project/source/device_id), sort desc by count."""
+    from collections import Counter
+    bag: Counter = Counter()
+    for ev in events:
+        if field == "project":
+            name = _project_of(ev)
+        else:
+            name = str(ev.get(field) or "unknown")
+        bag[name] += 1
+    total = sum(bag.values()) or 1
+    rows = [{"name": n, "count": c, "share": c / total} for n, c in bag.most_common(top)]
+    return rows
+
+
+def _per_day_counts(events: list[dict], days: list[str], boundary_hour: int) -> dict[str, int]:
+    """Bucket events into their owning shifted-day."""
+    from datetime import datetime, timedelta
+    out = {d: 0 for d in days}
+    for ev in events:
+        start = ev.get("start") or ""
+        try:
+            dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        # naive shift: subtract boundary_hour, then take date()
+        shifted = (dt - timedelta(hours=boundary_hour)).date().isoformat()
+        if shifted in out:
+            out[shifted] += 1
+    return out
+
+
+def _diff_breakdowns(this_week: list[dict], last_week: list[dict]) -> list[dict]:
+    """Project-level Δ table for the vs-last-week section."""
+    a = {r["name"]: r["count"] for r in this_week}
+    b = {r["name"]: r["count"] for r in last_week}
+    names = sorted(set(a) | set(b), key=lambda n: -(a.get(n, 0) + b.get(n, 0)))
+    out = []
+    for n in names:
+        cur = a.get(n, 0)
+        prev = b.get(n, 0)
+        delta = cur - prev
+        if cur == 0 and prev == 0:
+            continue
+        out.append({"name": n, "this": cur, "last": prev, "delta": delta})
+    return out
+
+
+def _week_picker_control(current: str, prev_label: str, next_label: str) -> str:
+    """Header chip showing current week + prev/next links (mirrors date pill)."""
+    return (
+        '<div class="date-control">'
+        f'<a class="date-nav-btn" href="/weekly?week={esc(prev_label)}">←</a>'
+        f'<span class="date-label" style="padding:6px 10px;border-radius:8px;background:#fff;border:1px solid var(--line);">{esc(current)}</span>'
+        f'<a class="date-nav-btn" href="/weekly?week={esc(next_label)}">→</a>'
+        '</div>'
+    )
+
+
+def _bar_row(label: str, count: int, total: int, *, max_count: int) -> str:
+    pct_total = (count / total * 100) if total else 0
+    pct_bar = (count / max_count * 100) if max_count else 0
+    return (
+        '<tr>'
+        f'<td>{esc(label)}</td>'
+        f'<td style="text-align:right; font-variant-numeric: tabular-nums;">{count}</td>'
+        f'<td style="text-align:right; color:var(--muted); font-size:12px;">{pct_total:.1f}%</td>'
+        f'<td style="width:120px;"><div style="height:8px;background:#eadfcd;border-radius:4px;overflow:hidden;"><div style="height:100%;width:{pct_bar:.1f}%;background:linear-gradient(90deg,#7b61ff,#2f6fed);"></div></div></td>'
+        '</tr>'
+    )
+
+
+def _breakdown_card(title: str, rows: list[dict], total: int) -> str:
+    if not rows:
+        return f'<section class="card"><h3>{esc(title)}</h3><div class="muted">无数据</div></section>'
+    max_count = max(r["count"] for r in rows)
+    body = "".join(
+        _bar_row(r["name"], r["count"], total, max_count=max_count) for r in rows
+    )
+    return (
+        f'<section class="card"><h3>{esc(title)}</h3>'
+        '<table class="mini-table" style="width:100%;"><tbody>'
+        f'{body}'
+        '</tbody></table></section>'
+    )
+
+
+def _per_day_spark(per_day: dict[str, int]) -> str:
+    """7 bars, one per shifted-day, with totals + day-of-week labels under."""
+    if not per_day:
+        return ""
+    from datetime import date as _date
+    days = list(per_day.keys())
+    counts = list(per_day.values())
+    max_c = max(counts) or 1
+    week_zh = ["一", "二", "三", "四", "五", "六", "日"]
+    bars = []
+    labels = []
+    for d, c in zip(days, counts):
+        height = max(2, int(c / max_c * 100))
+        wd = week_zh[_date.fromisoformat(d).weekday()]
+        bars.append(
+            f'<div title="{esc(d)} · 周{wd} · {c} events" '
+            f'style="flex:1; display:flex; flex-direction:column; align-items:center; gap:4px;">'
+            f'<div style="height:120px; width:100%; display:flex; align-items:flex-end;">'
+            f'<div style="width:100%; height:{height}%; background:linear-gradient(180deg,#7b61ff,#2f6fed); border-radius:4px 4px 0 0;"></div>'
+            f'</div>'
+            f'<div style="font-size:11px; color:var(--muted); font-variant-numeric: tabular-nums;">{c}</div>'
+            f'<div style="font-size:11px; color:var(--muted);">周{wd}</div>'
+            f'<div style="font-size:10px; color:#bbb;">{esc(d[5:])}</div>'
+            f'</div>'
+        )
+    return (
+        '<section class="card"><h3>每日事件分布</h3>'
+        '<div style="display:flex; gap:6px; align-items:flex-end;">'
+        + "".join(bars) +
+        '</div></section>'
+    )
+
+
+def _vs_last_week_card(diffs: list[dict]) -> str:
+    if not diffs:
+        return ""
+    rows_html = []
+    for r in diffs[:15]:
+        delta = r["delta"]
+        if delta > 0:
+            arrow, color = f"+{delta}", "#16a34a"
+        elif delta < 0:
+            arrow, color = f"{delta}", "#dc2626"
+        else:
+            arrow, color = "—", "var(--muted)"
+        rows_html.append(
+            '<tr>'
+            f'<td>{esc(r["name"])}</td>'
+            f'<td style="text-align:right; font-variant-numeric:tabular-nums;">{r["this"]}</td>'
+            f'<td style="text-align:right; color:var(--muted); font-variant-numeric:tabular-nums;">{r["last"]}</td>'
+            f'<td style="text-align:right; color:{color}; font-weight:600; font-variant-numeric:tabular-nums;">{arrow}</td>'
+            '</tr>'
+        )
+    return (
+        '<section class="card"><h3>跟上周比（按项目）</h3>'
+        '<table class="mini-table" style="width:100%;">'
+        '<thead><tr><th style="text-align:left;">项目</th>'
+        '<th style="text-align:right;">本周</th>'
+        '<th style="text-align:right;">上周</th>'
+        '<th style="text-align:right;">Δ</th></tr></thead>'
+        f'<tbody>{"".join(rows_html)}</tbody></table></section>'
+    )
+
+
+def weekly_page(db_path: Path, week: str | None) -> str:
+    """ISO-week aggregation page. Default: the week of "now" (shifted)."""
+    from daytrace.db import (
+        connect, init_db, events_for_shifted_week,
+        iso_week_to_date_range, date_to_iso_week, iso_week_neighbors,
+    )
+    from daytrace import stats as _stats
+
+    con = connect(db_path); init_db(con)
+    if not week:
+        from datetime import datetime, timedelta
+        now = datetime.now()
+        ref = now.date() if now.hour >= _stats.DAY_BOUNDARY_HOUR else (now.date() - timedelta(days=1))
+        week = date_to_iso_week(ref.isoformat())
+
+    try:
+        monday, sunday, days = iso_week_to_date_range(week)
+    except ValueError as e:
+        return layout("DayTrace · 周报", "格式错误", "weekly",
+                      f'<section class="card"><div class="muted">{esc(str(e))}</div></section>')
+    prev_week, next_week = iso_week_neighbors(week)
+    bh = _stats.DAY_BOUNDARY_HOUR
+
+    events = events_for_shifted_week(con, week)
+    last_events = events_for_shifted_week(con, prev_week)
+
+    # Stats
+    total_events = len(events)
+    per_day = _per_day_counts(events, days, bh)
+    active_days = sum(1 for v in per_day.values() if v > 0)
+    last_total = len(last_events)
+    delta = total_events - last_total
+    delta_pct = ((delta / last_total) * 100) if last_total else 0
+    ai_cost = con.execute(
+        "SELECT COALESCE(SUM(cost_usd),0) FROM day_channel "
+        "WHERE date BETWEEN ? AND ? AND generator='ai'",
+        (monday, sunday),
+    ).fetchone()[0] or 0
+
+    by_project = _weekly_breakdown(events, "project", top=12)
+    by_source = _weekly_breakdown(events, "source", top=8)
+    diffs = _diff_breakdowns(by_project, _weekly_breakdown(last_events, "project", top=50))
+
+    # Header pill + nav
+    week_pill = _week_picker_control(week, prev_week, next_week)
+    subtitle = f"{monday} ~ {sunday} · {total_events} events · {active_days}/7 active"
+
+    # Stats strip — 4 tiles, matches the look of daily report
+    stats_strip = (
+        '<section class="card"><div class="dr-stats-compact">'
+        f'<div><div class="muted small">事件总数</div><div style="font-size:24px;font-weight:700;">{total_events}</div>'
+        f'<div class="muted small" style="margin-top:2px;">上周 {last_total} '
+        f'<span style="color:{"#16a34a" if delta>=0 else "#dc2626"};">({delta:+d}, {delta_pct:+.0f}%)</span></div></div>'
+        f'<div><div class="muted small">活跃天数</div><div style="font-size:24px;font-weight:700;">{active_days}/7</div>'
+        f'<div class="muted small" style="margin-top:2px;">空白日: {7 - active_days}</div></div>'
+        f'<div><div class="muted small">主线项目</div><div style="font-size:18px;font-weight:700;">{esc(by_project[0]["name"]) if by_project else "—"}</div>'
+        f'<div class="muted small" style="margin-top:2px;">{by_project[0]["count"] if by_project else 0} events · {(by_project[0]["share"]*100 if by_project else 0):.0f}%</div></div>'
+        f'<div><div class="muted small">AI 花费</div><div style="font-size:24px;font-weight:700;">${ai_cost:.3f}</div>'
+        f'<div class="muted small" style="margin-top:2px;">含日报生成</div></div>'
+        '</div></section>'
+    )
+
+    # Per-day links footer
+    day_links = " · ".join(
+        f'<a href="/today?date={d}">{d[5:]}</a>' for d in days
+    )
+    day_links_html = f'<section class="card"><h3>跳到每日报告</h3><div>{day_links}</div></section>'
+
+    body = (
+        stats_strip
+        + _per_day_spark(per_day)
+        + '<div class="section-grid">'
+        + _breakdown_card("项目分布", by_project, total_events)
+        + _breakdown_card("数据源分布", by_source, total_events)
+        + '</div>'
+        + _vs_last_week_card(diffs)
+        + day_links_html
+    )
+
+    if total_events == 0:
+        body = (
+            '<section class="card"><div class="muted">'
+            f'本周（{monday} ~ {sunday}）暂无事件数据。'
+            '可能是 catchup 还没跑到，或者这周确实没记录。'
+            '</div></section>' + day_links_html
+        )
+
+    return layout(f"DayTrace · {week}", subtitle, "weekly", body, date_control=week_pill)
+
+
 class Handler(BaseHTTPRequestHandler):
     db_path: Path = DEFAULT_DB
 
@@ -2383,6 +2634,9 @@ class Handler(BaseHTTPRequestHandler):
                 mode = qs.get("mode", [None])[0] or None
                 unit = qs.get("unit", [None])[0] or None
                 html_response(self, today_page(self.db_path, date, mode=mode, unit=unit))
+            elif parsed.path == "/weekly":
+                week = qs.get("week", [None])[0] or None
+                html_response(self, weekly_page(self.db_path, week))
             elif parsed.path == "/sources":
                 self.send_response(302)
                 self.send_header("Location", "/events")
