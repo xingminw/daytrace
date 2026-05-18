@@ -2900,15 +2900,10 @@ def _weekly_swimlane_card(
         '</div>'
     )
 
-    # Legend strip (uses .tl-legend-item + .tl-swatch from daily CSS)
-    legend = "".join(
-        f'<span class="tl-legend-item">'
-        f'<span class="tl-swatch" style="background:{palette[k]};"></span>'
-        f'{esc(k)} <span class="muted">×{overall_counts.get(k, 0)}</span>'
-        '</span>'
-        for k in top_names if overall_counts.get(k, 0) > 0
-    )
-    legend_html = f'<div class="tl-legend show" style="margin-top:10px;">{legend}</div>' if legend else ""
+    # Legend dropped — the filter pill bar above already serves as the
+    # color key (each pill shows swatch + name + count), so repeating it
+    # below was just visual noise.
+    legend_html = ""
 
     # Tooltip element + JS that wires up .tl-swim-tick hover (scoped to
     # .weekly-swim so it doesn't clash with the daily timeline-card's JS).
