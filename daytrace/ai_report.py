@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v10"  # v10 = narrative-only overview (drop key_moves; bullets live in Insights)
+AI_VERSION = "v11"  # v11 = enforce task-name (vs project-name) phrasing; drop top项目 from stats
 
 
 # ----- Shape validators ------------------------------------------------
@@ -337,23 +337,21 @@ def _stats_summary(con: sqlite3.Connection, date: str) -> str:
     dc = _read_day_channel(con, date, "dimension_counts") or {}
     q = _read_day_channel(con, date, "quality") or {}
 
+    # `top 项目` deliberately omitted — including it tempts the model to
+    # name-drop project_guess values ('daytrace', 'daily-manager') instead
+    # of the proper task titles from the 活跃任务清单. Project info is
+    # already in event line prefixes [proj:Y] for events with no task.
     by_source = ", ".join(
         f"{r['name']}({r['count']})" for r in (dc.get("by_source") or [])[:5]
     )
-    by_project = ", ".join(
-        f"{r['name']}({r['count']})" for r in (dc.get("by_project") or [])[:5]
-    )
-    peak = ", ".join(f"{p['label']}={p['count']}" for p in pw[:3])
     parts = [
         f"时间跨度 {ts.get('first', '?')}–{ts.get('last', '?')} (span {ts.get('span_min', 0)} min)",
         f"活跃总时长 {am.get('total', 0)} min",
         f"最长不间断块 {lfb.get('duration_min', 0)} min ({lfb.get('start','?')}–{lfb.get('end','?')}, "
-        f"主导项目 {lfb.get('dominant_project','?')}, 主导来源 {lfb.get('dominant_source','?')})"
+        f"主导来源 {lfb.get('dominant_source','?')})"
         if lfb else "最长不间断块: 无",
         f"项目切换 {cs.get('count', 0)} 次",
-        f"峰值时段 {peak}" if peak else "",
         f"top 来源 {by_source}",
-        f"top 项目 {by_project}",
         f"质量: 敏感事件 {q.get('sensitive', 0)} 条, 缺项目归类 {q.get('missing_project', 0)} 条",
     ]
     return "\n".join(p for p in parts if p)
@@ -365,17 +363,22 @@ OVERVIEW_SYSTEM = (
     "你是一位软件工程师的私人工作复盘助手。\n\n"
     "你的读者是这位工程师本人。输入会先给你一份**活跃任务清单**(飞书任务表),"
     "再给事件清单 — 事件已预标 [task:X] 或 [proj:Y] 前缀。\n\n"
-    "**优先级**: 任务 > 项目。看到 [task:X] 就**以任务为单位**描述, 例如 "
-    "‘今天主要推进了 X 任务, 完成了…’; 看到 [proj:Y] 是没关联任务的游离工作, "
-    "可以一笔带过。\n\n"
-    "你要写的是: ta 今天**作为一个人**在做什么任务、有什么产出、接下来该怎么走。\n\n"
+    "**核心原则 — 任务视角而非项目视角**:\n"
+    "  • narrative / highlights / suggestions 里提到的具体活动, **必须用"
+    "任务清单里的完整任务标题**, 例如 ‘DayTrace 应用开发’, 不要简写成 "
+    "‘DayTrace’ 或 ‘daytrace’; 不要用事件里的 [proj:Y] 项目名 (daytrace / "
+    "daily-manager / misc) 当主体。\n"
+    "  • 只有当一组事件**没有任何 [task:X] 标签**时, 才退而用项目名描述, "
+    "并明确说‘游离工作’/‘未关联任务’。\n"
+    "  • 任务清单上**今天没出现**的任务也可以在 suggestions 里点出来 "
+    "(例: ‘X 任务已 N 天没碰, deadline 临近’)。\n\n"
+    "你要写的是: ta 今天**作为一个人**在推进哪些任务、有什么产出、接下来怎么走。\n\n"
     "**禁止**:\n"
-    "  ❌ 对数据本身提建议 (例: '梳理 misc 类别'、'合并项目名')\n"
-    "  ❌ 对系统/工具提建议 (例: '配置 webhook'、'增加分类规则')\n"
-    "  ❌ 泛化效率说教 (例: '减少 context switching'、'提升专注度')\n"
-    "  ❌ 数字复述 (例: '今天 191 个事件、69 次切换')\n\n"
-    "**鼓励**: 具体任务名 / 具体动作 / 具体产出。可以在 suggestions 里指出"
-    "任务清单上 N 天没动的任务, 提醒回来推进。\n\n"
+    "  ❌ 用项目名代替任务名 (例: 写‘DayTrace’而不是‘DayTrace 应用开发’)\n"
+    "  ❌ 对数据本身提建议 ('梳理 misc 类别'、'合并项目名')\n"
+    "  ❌ 对系统/工具提建议 ('配置 webhook'、'增加分类规则')\n"
+    "  ❌ 泛化效率说教 ('减少 context switching')\n"
+    "  ❌ 数字复述 ('今天 191 个事件、69 次切换')\n\n"
     "严格只输出 JSON, 不要 Markdown 代码块, 不要解释。"
 )
 
