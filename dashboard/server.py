@@ -63,10 +63,13 @@ body.events-page form { height:100%; }
    when narrow or when the toggle picks a single table. */
 .tasks-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:start; }
 @media (max-width:1100px) { .tasks-grid { grid-template-columns: 1fr; } }
-/* Tasks tables use a fixed layout so the title column gets all leftover
-   space; force ellipsis on every other column to avoid the chip/number
-   columns ballooning. Title cell keeps `word-break` so long manuscript
-   names wrap normally inside its allotted width. */
+/* Two display modes:
+   - compact (default, two cards side-by-side): hide 事件 + 最近活动 to free
+     room for title / 时长 / 截止. Toggled by the [全部] pill.
+   - full (one card alone, single column): show all columns.
+   JS sets data-display-mode="full" on .tasks-grid when toggle picks single. */
+.tasks-grid:not([data-display-mode="full"]) .tasks-card .col-events,
+.tasks-grid:not([data-display-mode="full"]) .tasks-card .col-last { display: none; }
 .tasks-card table.mini-table th,
 .tasks-card table.mini-table td { vertical-align: top; padding:6px 6px; }
 .tasks-card table.mini-table td:not(.tasks-title-cell),
@@ -3570,8 +3573,8 @@ def _tasks_panel_one(
             f'<td>{_chip(status, _STATUS_COLOR.get(status))}</td>'
             f'<td class="tasks-title-cell">{title_html}</td>'
             f'<td style="text-align:right;">{time_html}</td>'
-            f'<td style="text-align:right;">{ev_html}</td>'
-            f'<td style="font-size:11px; color:var(--muted);">{esc(_format_time_ago(last_iso))}</td>'
+            f'<td class="col-events" style="text-align:right;">{ev_html}</td>'
+            f'<td class="col-last" style="font-size:11px; color:var(--muted);">{esc(_format_time_ago(last_iso))}</td>'
             f'<td>{_due_chip_html(wi.get("due_date"))}</td>'
             '</tr>'
         )
@@ -3595,25 +3598,26 @@ def _tasks_panel_one(
         '</label>'
     )
 
-    def thead_cell(lab: str, sort_key: str, *, align: str = "left", default_dir: str = "asc") -> str:
+    def thead_cell(lab: str, sort_key: str, *, align: str = "left", default_dir: str = "asc", cls: str = "") -> str:
+        cls_attr = f' class="{cls}"' if cls else ""
         return (
-            f'<th data-sort="{sort_key}" data-default-dir="{default_dir}" '
+            f'<th{cls_attr} data-sort="{sort_key}" data-default-dir="{default_dir}" '
             f'style="text-align:{align}; cursor:pointer; user-select:none;">'
             f'{esc(lab)} <span class="sort-arrow" style="color:var(--muted); font-size:10px;">↕</span>'
             '</th>'
         )
-    # Header + colgroup. Fixed widths for chip / number columns; title
-    # column gets the rest (auto) so it wraps cleanly inside the card.
+    # Columns marked col-events / col-last are hidden in compact (2-col) mode
+    # via CSS, then shown when the user picks a single table.
     if table_key == "tasks":
         colgroup = (
             '<colgroup>'
-            '<col style="width:36px">'   # P
-            '<col style="width:64px">'   # 状态
-            '<col>'                       # 任务 (auto)
-            '<col style="width:54px">'   # 时长
-            '<col style="width:42px">'   # 事件
-            '<col style="width:88px">'   # 最近活动
-            '<col style="width:104px">'  # 截止
+            '<col style="width:36px">'                            # P
+            '<col style="width:64px">'                            # 状态
+            '<col>'                                                # 任务 (auto)
+            '<col style="width:54px">'                            # 时长
+            '<col class="col-events" style="width:48px">'         # 事件
+            '<col class="col-last"   style="width:92px">'         # 最近活动
+            '<col style="width:104px">'                           # 截止
             '</colgroup>'
         )
         thead_html = (
@@ -3622,20 +3626,20 @@ def _tasks_panel_one(
             + thead_cell("状态","status")
             + thead_cell("任务","title")
             + thead_cell("时长","hours", align="right", default_dir="desc")
-            + thead_cell("事件","events", align="right", default_dir="desc")
-            + thead_cell("最近活动","last", default_dir="desc")
+            + thead_cell("事件","events", align="right", default_dir="desc", cls="col-events")
+            + thead_cell("最近活动","last", default_dir="desc", cls="col-last")
             + thead_cell("截止","due")
             + '</tr>'
         )
     else:
         colgroup = (
             '<colgroup>'
-            '<col style="width:64px">'   # 状态
-            '<col>'                       # 题目 (auto)
-            '<col style="width:54px">'   # 时长
-            '<col style="width:42px">'   # 事件
-            '<col style="width:88px">'   # 最近活动
-            '<col style="width:104px">'  # 截止
+            '<col style="width:64px">'                            # 状态
+            '<col>'                                                # 题目 (auto)
+            '<col style="width:54px">'                            # 时长
+            '<col class="col-events" style="width:48px">'         # 事件
+            '<col class="col-last"   style="width:92px">'         # 最近活动
+            '<col style="width:104px">'                           # 截止
             '</colgroup>'
         )
         thead_html = (
@@ -3643,8 +3647,8 @@ def _tasks_panel_one(
             + thead_cell("状态","status")
             + thead_cell("题目","title")
             + thead_cell("时长","hours", align="right", default_dir="desc")
-            + thead_cell("事件","events", align="right", default_dir="desc")
-            + thead_cell("最近活动","last", default_dir="desc")
+            + thead_cell("事件","events", align="right", default_dir="desc", cls="col-events")
+            + thead_cell("最近活动","last", default_dir="desc", cls="col-last")
             + thead_cell("截止","due")
             + '</tr>'
         )
@@ -3732,11 +3736,10 @@ def _tasks_panel_one(
 
 
 def _alignment_audit_card(con, days: list[str]) -> str:
-    """Show top project_guess values that DIDN'T get linked to a work_item
-    in the current window, plus a fuzzy-match suggestion per row.
-
-    Lets the user spot "I should add this to aliases.yaml" candidates at
-    a glance. Hidden when nothing to report."""
+    """Audit unmatched project_guess values + interactive dropdown to map
+    each to an existing work_item. POST → /api/work-items/alias persists to
+    config/work_item_aliases.yaml and rebuilds links so future catchups
+    follow the user's manual mapping."""
     if not days:
         return ""
     rows = con.execute(
@@ -3751,33 +3754,43 @@ def _alignment_audit_card(con, days: list[str]) -> str:
          GROUP BY e.project_guess
         HAVING n >= 3
          ORDER BY n DESC
-         LIMIT 12
+         LIMIT 20
         """, (min(days), max(days)),
     ).fetchall()
     if not rows:
         return ""
 
-    # Fuzzy match suggestions: any work_item whose title shares a non-trivial
-    # substring with the project_guess (case-insensitive). Crude but useful.
     wi_rows = con.execute(
-        "SELECT record_id, title, table_key FROM work_items"
+        "SELECT record_id, title, table_key FROM work_items "
+        "ORDER BY CASE table_key WHEN 'tasks' THEN 0 ELSE 1 END, title"
     ).fetchall()
+    if not wi_rows:
+        return ""
 
-    def _suggest(pg: str) -> tuple[str, str, str] | None:
+    table_labels = {"tasks": "任务", "reviews": "审稿"}
+
+    # Existing aliases — pre-select in the dropdown if already mapped.
+    from daytrace.work_items import load_aliases
+    try:
+        existing_aliases = load_aliases()
+    except Exception:
+        existing_aliases = {}
+
+    def _suggest(pg: str) -> str | None:
+        """Auto-suggested record_id (fuzzy title/word match). None if no
+        decent match — user will leave dropdown at '-- 跳过 --'."""
         pg_l = pg.lower()
-        # Try direct substring (either direction)
         for w in wi_rows:
             t = (w["title"] or "").lower()
             if not t:
                 continue
             if pg_l in t or t in pg_l:
-                return w["record_id"], w["title"], w["table_key"] or ""
-        # Try word-overlap (split on non-letters)
+                return w["record_id"]
         import re as _re
         pg_words = {w for w in _re.findall(r"[\w]+", pg_l) if len(w) > 2}
         if not pg_words:
             return None
-        best: tuple[float, dict] | None = None
+        best: tuple[float, str] | None = None
         for w in wi_rows:
             t = (w["title"] or "").lower()
             t_words = {x for x in _re.findall(r"[\w]+", t) if len(x) > 2}
@@ -3786,10 +3799,22 @@ def _alignment_audit_card(con, days: list[str]) -> str:
             overlap = len(pg_words & t_words) / max(len(pg_words), 1)
             if overlap >= 0.5:
                 if best is None or overlap > best[0]:
-                    best = (overlap, w)
-        if best:
-            return best[1]["record_id"], best[1]["title"], best[1]["table_key"] or ""
-        return None
+                    best = (overlap, w["record_id"])
+        return best[1] if best else None
+
+    def _options_html(selected_rid: str | None) -> str:
+        parts = ['<option value="">— 跳过 / 无对应 —</option>']
+        for w in wi_rows:
+            rid = w["record_id"]
+            ttl = w["title"] or ""
+            tk = w["table_key"] or "tasks"
+            sel = ' selected' if rid == selected_rid else ''
+            parts.append(
+                f'<option value="{esc(rid)}"{sel}>'
+                f'[{esc(table_labels.get(tk, tk))}] {esc(ttl[:60])}'
+                f'</option>'
+            )
+        return "".join(parts)
 
     rows_html: list[str] = []
     total_unmatched = 0
@@ -3797,22 +3822,18 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         pg = r["pg"]
         n = r["n"]
         total_unmatched += n
-        sug = _suggest(pg)
-        if sug:
-            rid, ttl, _tk = sug
-            sug_html = (
-                '<span style="font-size:11px;">'
-                f'<code style="font-size:11px; background:#f4eed8; padding:1px 5px; border-radius:4px;">"{esc(pg)}": {esc(rid)}</code>'
-                f' <span class="muted">→ {esc(ttl[:40])}</span>'
-                '</span>'
-            )
-        else:
-            sug_html = '<span class="muted small">无明显对应任务</span>'
+        # Prefer existing alias > fuzzy suggestion > nothing
+        preselect = existing_aliases.get(pg) or _suggest(pg)
         rows_html.append(
             '<tr>'
-            f'<td style="font-family: ui-monospace, monospace;">{esc(pg)}</td>'
+            f'<td><span style="font-family: ui-monospace, monospace; font-size:12px;">{esc(pg)}</span></td>'
             f'<td style="text-align:right; font-variant-numeric:tabular-nums; font-weight:700;">{n}</td>'
-            f'<td>{sug_html}</td>'
+            '<td>'
+            f'<input type="hidden" name="project[]" value="{esc(pg)}">'
+            f'<select name="record[]" style="width:100%; max-width:100%; padding:4px 6px; border:1px solid var(--line); border-radius:6px; background:white; font-size:12.5px;">'
+            f'{_options_html(preselect)}'
+            '</select>'
+            '</td>'
             '</tr>'
         )
 
@@ -3822,21 +3843,29 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         '<h3 style="margin:0;">未匹配项目审计</h3>'
         '<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">Audit</span>'
         f'<span class="muted small">{len(rows)} 个项目 / 共 {total_unmatched} 条事件未对应任务</span>'
-        '<span style="margin-left:auto;" class="muted small">把建议复制到 <code>config/work_item_aliases.yaml</code></span>'
         '</div>'
+        '<form method="POST" action="/api/work-items/alias" '
+        'style="margin:0;">'
         '<table class="mini-table" style="width:100%; table-layout:fixed;">'
         '<colgroup>'
-        '<col style="width:30%">'
-        '<col style="width:8%">'
-        '<col>'
+        '<col style="width:240px">'   # project_guess
+        '<col style="width:80px">'    # events
+        '<col>'                        # dropdown (auto)
         '</colgroup>'
         '<thead><tr>'
         '<th style="text-align:left;">project_guess</th>'
         '<th style="text-align:right;">events</th>'
-        '<th style="text-align:left;">建议</th>'
+        '<th style="text-align:left;">对应任务</th>'
         '</tr></thead>'
         f'<tbody>{"".join(rows_html)}</tbody>'
         '</table>'
+        '<div style="display:flex; align-items:center; gap:12px; padding-top:10px; margin-top:8px; border-top:1px dashed var(--line);">'
+        '<span class="muted small">保存后会写入 <code>config/work_item_aliases.yaml</code> 并立刻重建链接（历史报告已缓存的不变；下次 catchup / 刷新时按新规则统计）</span>'
+        '<button type="submit" style="margin-left:auto; padding:6px 14px; background:var(--ink); color:white; border:none; border-radius:8px; font-weight:650; cursor:pointer; font-size:13px;">'
+        '保存并重建链接'
+        '</button>'
+        '</div>'
+        '</form>'
         '</section>'
     )
 
@@ -3897,7 +3926,13 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         'b.classList.toggle("active",b.dataset.tablePick===pick);});'
         'document.querySelectorAll(".tasks-card").forEach(function(c){'
         'c.style.display=(pick==="all"||c.dataset.tableKey===pick)?"":"none";});'
-        'if(grid){grid.style.gridTemplateColumns=(pick==="all")?"":"1fr";}'
+        # In "全部" mode keep grid 2-col (CSS hides 事件 + 最近活动 to fit).
+        # When user picks one table, expand to single column AND switch to
+        # "full" display mode (CSS shows the dropped columns).
+        'if(grid){'
+        'if(pick==="all"){grid.style.gridTemplateColumns="";grid.removeAttribute("data-display-mode");}'
+        'else{grid.style.gridTemplateColumns="1fr";grid.setAttribute("data-display-mode","full");}'
+        '}'
         '}'
         'bar.querySelectorAll(".dim-tab").forEach(function(btn){'
         'btn.addEventListener("click",function(){apply(btn.dataset.tablePick);});});'
@@ -4371,11 +4406,104 @@ def weekly_page(
     return layout(f"DayTrace · {week}", subtitle, "weekly", body, date_control=header_controls)
 
 
+def _apply_audit_aliases(db_path: Path, picks: list[tuple[str, str]]) -> dict:
+    """Persist audit dropdown picks to config/work_item_aliases.yaml + rebuild
+    event links. `picks` is a list of (project_guess, record_id_or_empty).
+    Empty record_id means "remove this alias if it exists".
+
+    Returns {"added": N, "removed": M, "links_inserted": K}.
+    """
+    import yaml
+    from daytrace.work_items import DEFAULT_ALIASES, load_aliases, rebuild_links
+
+    existing = load_aliases()
+    added = removed = 0
+    for pg, rid in picks:
+        pg = (pg or "").strip()
+        rid = (rid or "").strip()
+        if not pg:
+            continue
+        if rid:
+            if existing.get(pg) != rid:
+                existing[pg] = rid
+                added += 1
+        else:
+            if pg in existing:
+                existing.pop(pg)
+                removed += 1
+
+    # Write back. Preserve the header comment by reading the file first
+    # and only replacing the aliases: section.
+    path = Path(DEFAULT_ALIASES)
+    if path.exists():
+        original = path.read_text(encoding="utf-8")
+        # Split into pre-aliases preamble + the aliases block
+        lines = original.splitlines()
+        keep_lines: list[str] = []
+        in_aliases = False
+        for ln in lines:
+            stripped = ln.strip()
+            if stripped.startswith("aliases:"):
+                in_aliases = True
+                continue
+            if in_aliases:
+                # Skip indented or commented continuation lines of the existing block
+                if ln.startswith(" ") or ln.startswith("\t") or stripped.startswith("#") or stripped == "":
+                    continue
+                in_aliases = False
+            keep_lines.append(ln)
+        preamble = "\n".join(keep_lines).rstrip() + "\n\n" if keep_lines else ""
+    else:
+        preamble = ""
+
+    out = preamble + "aliases:\n"
+    if not existing:
+        out += "  # (empty — use the audit panel on /today or /weekly to add mappings)\n"
+    else:
+        for k in sorted(existing.keys()):
+            out += f'  "{k}": {existing[k]}\n'
+    path.write_text(out, encoding="utf-8")
+
+    # Rebuild links (covers the 30-day window). Uses fresh aliases.
+    from daytrace.db import connect, init_db
+    con = connect(db_path); init_db(con)
+    stats = rebuild_links(con, lookback_days=30)
+    return {"added": added, "removed": removed, "links_inserted": stats["links_inserted"]}
+
+
 class Handler(BaseHTTPRequestHandler):
     db_path: Path = DEFAULT_DB
 
     def log_message(self, format, *args):
         print("[dashboard] " + format % args)
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/work-items/alias":
+            self.send_response(404); self.end_headers(); return
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length).decode("utf-8")
+        form = parse_qs(body, keep_blank_values=True)
+        projects = form.get("project[]", [])
+        records = form.get("record[]", [])
+        picks = list(zip(projects, records))
+        try:
+            stats = _apply_audit_aliases(self.db_path, picks)
+        except Exception as exc:
+            print(f"[dashboard] audit POST failed: {exc}")
+            self.send_response(500); self.end_headers()
+            self.wfile.write(str(exc).encode("utf-8"))
+            return
+        # Redirect back to the referring page with a success indicator
+        referer = self.headers.get("Referer") or "/today"
+        sep = "&" if "?" in referer else "?"
+        target = (
+            f"{referer.rstrip('#chart').rstrip('#alignment-audit')}"
+            f"{sep}audit_applied={stats['added']}_{stats['removed']}_{stats['links_inserted']}"
+        )
+        self.send_response(303)
+        self.send_header("Location", target)
+        self.end_headers()
 
     def do_GET(self):
         parsed = urlparse(self.path)
