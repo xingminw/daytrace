@@ -45,9 +45,8 @@ body.events-page form { height:100%; }
 /* Weekly view-switcher card: only the active view's pane is visible.
    Toggling .weekly-viz[data-view] flips visibility with no reload (no scroll jump). */
 .weekly-viz .wv-pane { display:none; }
-.weekly-viz[data-view="chart"] .wv-pane[data-pane="chart"] { display:block; }
-.weekly-viz[data-view="swim"]  .wv-pane[data-pane="swim"]  { display:block; }
-.weekly-viz[data-view="heat"]  .wv-pane[data-pane="heat"]  { display:block; }
+.weekly-viz[data-view="swim"] .wv-pane[data-pane="swim"] { display:block; }
+.weekly-viz[data-view="heat"] .wv-pane[data-pane="heat"] { display:block; }
 .card { background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:14px; padding:12px; box-shadow:0 8px 18px rgba(65,45,10,.05); }
 .metric { font-size:26px; font-weight:850; letter-spacing:-0.04em; }.metric-small { font-size:18px; font-weight:850; }.label { color:var(--muted); margin-top:3px; font-size:12px; } section { margin-top:12px; } h2 { font-size:16px; margin:0 0 8px; } h3 { margin:0 0 5px; font-size:14px; }
 .bar { display:flex; align-items:center; gap:10px; margin:9px 0; }.bar-name { width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }.bar-track { flex:1; height:10px; border-radius:999px; background:#ece3d2; overflow:hidden; }.bar-fill { height:100%; background:linear-gradient(90deg,#2f6fed,#7b61ff); border-radius:999px; }.bar-count { width:42px; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
@@ -2598,7 +2597,8 @@ _WEEKLY_DIM_OPTS = [
     ("device_id", "设备"),
 ]
 _WEEKLY_VIEW_OPTS = [
-    ("chart", "直方图"),
+    # Histogram has its own standalone card on top, so it's not in this
+    # switcher — these two views are complementary cuts of the same data.
     ("swim",  "泳道"),
     ("heat",  "热力图"),
 ]
@@ -3269,7 +3269,7 @@ def weekly_page(
     if mode not in valid_modes:
         mode = "project"
     if view not in valid_views:
-        view = "chart"
+        view = "swim"
 
     con = connect(db_path); init_db(con)
     if not week:
@@ -3406,7 +3406,6 @@ def weekly_page(
         '<h3 style="margin:0;">视图切换</h3>'
         f'<div style="margin-left:auto;">{bottom_switcher_pills}</div>'
         '</div>'
-        '<div class="wv-pane" data-pane="chart">' + main_chart_body + '</div>'
         '<div class="wv-pane" data-pane="swim">' + swim_body + '</div>'
         '<div class="wv-pane" data-pane="heat">' + heat_body + '</div>'
         '</section>'
@@ -3437,16 +3436,18 @@ def weekly_page(
     )
     day_links_html = f'<section class="card"><h3>跳到每日报告</h3><div>{day_links}</div></section>'
 
+    # Right column: histogram on top, highlights/suggestions below (stacked).
+    # Both are .card so they share the right-column gutter & spacing.
+    right_column_body = top_histogram_card + (highlights_card or "")
+
     body = (
         dim_bar
-        # Top row: AI summary | standalone histogram
+        # Top row: AI summary | (直方图 + highlights stacked)
         + '<section class="report-grid">'
         + weekly_report_card
-        + '<div class="right-column">' + top_histogram_card + '</div>'
+        + '<div class="right-column">' + right_column_body + '</div>'
         + '</section>'
-        # Highlights / suggestions (full width)
-        + (highlights_card or '')
-        # Bottom switcher card (chart/swim/heat, CSS-toggled)
+        # Bottom switcher card (swim/heat, CSS-toggled)
         + bottom_card
         + view_sync_js
         + '<div class="section-grid">'
