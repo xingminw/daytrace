@@ -486,7 +486,7 @@ def layout(title: str, subtitle: str, active: str, content: str, date_control: s
     nav = "".join(
         f'<a class="{ "active" if active == key else "" }" href="{href}">{label}</a>'
         for key, label, href in [
-            ("today", "报告", "/today"),
+            ("today", "日报", "/today"),
             ("weekly", "周报", "/weekly"),
             ("events", "数据库", "/events"),
         ]
@@ -1331,7 +1331,18 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     con = connect(db_path)
     all_dates = available_dates(con)
     if not date:
-        date = all_dates[0] if all_dates else ""
+        # Default to shifted-yesterday rather than "most recent with any data" —
+        # today's shifted-day is usually still in flight at the time the user
+        # opens the dashboard, so yesterday is the page they actually want.
+        from datetime import datetime as _dt, date as _dt_date, timedelta as _td
+        from daytrace import stats as _stats
+        now = _dt.now()
+        ref = now.date() if now.hour >= _stats.DAY_BOUNDARY_HOUR else (now.date() - _td(days=1))
+        date = (ref - _td(days=1)).isoformat()
+        # Fall back to "most recent with data" if that exact day has nothing
+        # (e.g. backfill gap, machine off all day).
+        if date not in all_dates and all_dates:
+            date = all_dates[0]
     empty_today = {
         "summary": query_summary(con, None),
         "timeline": [],
@@ -2510,26 +2521,55 @@ def _per_day_stack(
     return {d: dict(b) for d, b in per_day.items()}, totals
 
 
-def _rescale_to_hours(
-    per_day: dict[str, dict[str, float]], totals: dict[str, float],
-    per_day_minutes: dict[str, float],
+_SLOT_MIN = 5  # must match daytrace.stats.ACTIVE_SLOT_MIN
+
+
+def _per_slot_hours_per_dim(
+    events: list[dict], days: list[str], boundary_hour: int,
+    *, stack_by: str,
 ) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
-    """For unit='hours': scale each day's stack so its sum equals the day's
-    active_minutes from day_report (then convert to hours). Each segment's
-    height is therefore a proxy for "how many hours did this dim get this day"."""
-    out: dict[str, dict[str, float]] = {}
-    out_totals: dict[str, float] = {}
-    for d, bag in per_day.items():
-        minutes = per_day_minutes.get(d, 0.0)
-        hours = minutes / 60.0
-        total = totals[d]
-        if total <= 0 or hours <= 0:
-            out[d] = {k: 0.0 for k in bag}
-            out_totals[d] = 0.0
+    """Per-(day, dim) HOURS via per-5min-slot proportional split.
+
+    Algorithm:
+      1) For every event, find its (shifted_day, 5min_slot, dim_value).
+      2) For each (day, slot), distribute the slot's 5 minutes among
+         the dim values present in that slot proportional to event count.
+      3) Sum per (day, dim) to get minutes, divide by 60 for hours.
+
+    Properties:
+      - Σ_dim per day ≡ that day's active_minutes / 60 (no double counting)
+      - Bursty 8 events of source X in one slot only earn ≤5 min total
+        (capped by the slot), not 8 × the day's hours / total_events.
+      - When two dims share a slot, the slot's 5 min is split by their
+        event ratio within just that slot — local fairness.
+    """
+    from collections import defaultdict
+    from daytrace.stats import _safe_minute  # type: ignore
+
+    per_slot_dim: dict[tuple[str, int], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    days_set = set(days)
+    for ev in events:
+        d = _shifted_day_of(ev, boundary_hour)
+        if d not in days_set:
             continue
-        out[d] = {k: hours * (v / total) for k, v in bag.items()}
-        out_totals[d] = hours
-    return out, out_totals
+        m = _safe_minute(ev.get("start"))
+        if m is None:
+            continue
+        slot = m // _SLOT_MIN
+        v = _stack_value_of(ev, stack_by)
+        per_slot_dim[(d, slot)][v] += 1
+
+    per_day_dim_min: dict[str, dict[str, float]] = {d: defaultdict(float) for d in days}
+    for (d, _slot), dim_counts in per_slot_dim.items():
+        total = sum(dim_counts.values())
+        if total <= 0:
+            continue
+        for v, c in dim_counts.items():
+            per_day_dim_min[d][v] += _SLOT_MIN * (c / total)
+
+    per_day_hours = {d: {v: m / 60.0 for v, m in bag.items()} for d, bag in per_day_dim_min.items()}
+    totals = {d: sum(bag.values()) for d, bag in per_day_hours.items()}
+    return per_day_hours, totals
 
 
 def _palette_for(top_names: list[str]) -> dict[str, str]:
@@ -2542,25 +2582,26 @@ def _palette_for(top_names: list[str]) -> dict[str, str]:
 
 def _selector_strip(
     *, week: str, current_unit: str, current_stack_by: str,
+    anchor: str = "chart",
 ) -> str:
-    """Two rows of tab pills: stack-by dim + unit. Mirrors the daily report's
-    dim-bar so the controls feel native to anyone coming from /today."""
-    def pills(name: str, options: list[tuple[str, str]], current: str) -> str:
+    """Two pill-bars matching the daily report's `.dim-tabs` / `.unit-tabs`
+    style. Every link carries a #anchor so the browser jumps back to the
+    same section after a click — your scroll position doesn't reset."""
+    def pills(name: str, css_class: str, options: list[tuple[str, str]], current: str) -> str:
         chips = []
         for value, label in options:
-            cls = "dim-tab active" if value == current else "dim-tab"
-            href = f"/weekly?week={esc(week)}"
+            cls = f"{css_class} active" if value == current else css_class
             other_param = "unit" if name == "stack_by" else "stack_by"
             other_val = current_unit if name == "stack_by" else current_stack_by
-            href += f"&{name}={value}&{other_param}={other_val}"
+            href = f"/weekly?week={esc(week)}&{name}={value}&{other_param}={other_val}#{anchor}"
             chips.append(f'<a class="{cls}" href="{href}">{esc(label)}</a>')
         return "".join(chips)
 
     stack_opts = [
-        ("project",   "按项目"),
-        ("source",    "按数据源"),
-        ("activity",  "按活动"),
-        ("device_id", "按设备"),
+        ("project",   "项目"),
+        ("source",    "数据源"),
+        ("activity",  "活动"),
+        ("device_id", "设备"),
     ]
     unit_opts = [
         ("hours", "小时"),
@@ -2568,9 +2609,11 @@ def _selector_strip(
         ("chars", "字数"),
     ]
     return (
-        '<div style="display:flex; flex-wrap:wrap; gap:14px; align-items:center; margin-bottom:10px;">'
-        f'<div style="display:flex; gap:4px; align-items:center;"><span class="muted small">堆叠维度</span>{pills("stack_by", stack_opts, current_stack_by)}</div>'
-        f'<div style="display:flex; gap:4px; align-items:center;"><span class="muted small">单位</span>{pills("unit", unit_opts, current_unit)}</div>'
+        '<div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center; margin-bottom:12px;">'
+        f'<span class="muted small" style="font-weight:600;">维度</span>'
+        f'<div class="dim-tabs">{pills("stack_by", "dim-tab", stack_opts, current_stack_by)}</div>'
+        f'<span class="muted small" style="font-weight:600;">单位</span>'
+        f'<div class="unit-tabs">{pills("unit", "unit-tab", unit_opts, current_unit)}</div>'
         '</div>'
     )
 
@@ -2585,18 +2628,107 @@ def _format_value(v: float, unit: str) -> str:
     return f"{int(v)}"
 
 
-def _main_chart_card(
-    *, days: list[str], per_day: dict[str, dict[str, float]],
-    per_day_totals: dict[str, float], unit: str, stack_by: str,
+def _weekly_swimlane_card(
+    *, events: list[dict], days: list[str], boundary_hour: int,
+    stack_by: str, top_names: list[str], palette: dict[str, str],
     selector_html: str,
 ) -> str:
-    """7-day stacked bar chart. Each bar = one day; segments = stack_by dim.
-    The top-10 dim values get distinct palette colors; the rest collapses to
-    "其它" grey so the legend stays readable."""
-    from datetime import date as _date
+    """7 horizontal swim-lanes (one per shifted-day), each showing 24h ticks
+    colored by the current stack_by dim. Mirrors the daily timeline's swim
+    style — same hour grid, same hairline ticks, same hover semantics —
+    but stacked across the week so you see "what project on which day at
+    which hour" in one glance.
 
-    # Pick top-N dim values across the whole week → color them. The rest
-    # gets folded into "其它" so the legend doesn't explode.
+    Time axis runs from boundary_hour (e.g. 04:00) on the left to
+    boundary_hour next day on the right, matching the daily timeline so
+    the visual mental model carries over."""
+    from datetime import datetime, date as _date, timedelta
+    if not events:
+        return ""
+
+    boundary_min = (boundary_hour % 24) * 60
+    days_set = set(days)
+    OTHER = _WEEKLY_OTHER_COLOR
+
+    def shifted_pos_min(dt: datetime) -> int:
+        """Clock-minute → position-minute on the 0..1440 shifted axis."""
+        m = dt.hour * 60 + dt.minute
+        return (m - boundary_min) % (24 * 60)
+
+    # Bucket ticks per day
+    per_day_ticks: dict[str, list[dict]] = {d: [] for d in days}
+    for ev in events:
+        s = ev.get("start") or ""
+        try:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        d = (dt - timedelta(hours=boundary_hour)).date().isoformat()
+        if d not in days_set:
+            continue
+        v = _stack_value_of(ev, stack_by)
+        color = palette.get(v, OTHER)
+        pos_min = shifted_pos_min(dt)
+        per_day_ticks[d].append({
+            "pos": pos_min / (24 * 60) * 100,
+            "color": color,
+            "title": ev.get("title") or "",
+            "time": s[11:16],
+            "value": v,
+        })
+
+    # Hour grid labels (every 2h), aligned with the daily timeline conventions
+    hour_grid = "".join(
+        f'<div style="position:absolute; left:{(i/12)*100:.4f}%; top:0; bottom:0; width:1px; background:rgba(0,0,0,0.04);">'
+        f'<span style="position:absolute; top:-15px; left:-9px; font-size:9px; color:var(--muted); font-variant-numeric:tabular-nums;">{(boundary_hour + i*2) % 24:02d}</span></div>'
+        for i in range(13)
+    )
+
+    rows_html = []
+    for d in days:
+        wd = _WEEK_ZH[_date.fromisoformat(d).weekday()]
+        ticks = per_day_ticks[d]
+        ticks_html = "".join(
+            f'<div title="{esc(t["time"] + " · " + t["value"] + (" · " + t["title"][:40] if t["title"] else ""))}" '
+            f'style="position:absolute; left:{t["pos"]:.3f}%; top:3px; bottom:3px; width:3px; '
+            f'border-radius:2px; background:{t["color"]}; transform:translateX(-1px); cursor:default;"></div>'
+            for t in ticks
+        )
+        empty_note = '' if ticks else (
+            '<div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; '
+            'font-size:11px; color:#cbb;">无活动</div>'
+        )
+        rows_html.append(
+            '<div style="display:grid; grid-template-columns:60px 1fr; gap:10px; align-items:center; padding:3px 0;">'
+            f'<div style="font-size:12px; color:var(--muted); display:flex; gap:6px; align-items:baseline;">'
+            f'<span style="font-weight:700; color:var(--ink);">周{wd}</span>'
+            f'<span style="font-size:10px; color:#bbb; font-variant-numeric:tabular-nums;">{esc(d[5:])}</span>'
+            f'<span style="margin-left:auto; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums;">{len(ticks)}</span></div>'
+            f'<div style="position:relative; height:22px; background:linear-gradient(180deg,#faf6ec,#f3ead8); '
+            f'border:1px solid #e6dcc6; border-radius:5px;">{hour_grid}{ticks_html}{empty_note}</div>'
+            '</div>'
+        )
+
+    return (
+        '<section class="card" id="swimlane"><h3>本周时间线（按' + esc({
+            "project":"项目","source":"数据源","activity":"活动","device_id":"设备"
+        }.get(stack_by, stack_by)) + '上色）</h3>'
+        + selector_html +
+        '<div style="position:relative; padding-top:18px;">'
+        + "".join(rows_html) +
+        '</div>'
+        '<div class="muted small" style="margin-top:8px;">'
+        f'横轴是 24 小时 (shifted 边界 {boundary_hour:02d}:00 起)，每根竖线一个事件，颜色跟主图一致。'
+        '</div></section>'
+    )
+
+
+def _compute_palette_for_week(
+    per_day: dict[str, dict[str, float]],
+) -> tuple[list[str], dict[str, str]]:
+    """Top-N dim values across the week → distinct palette colors, rest grey.
+    Returned so other cards (swim-lane, legend) can reuse the same mapping
+    and stay color-consistent with the main chart."""
     from collections import Counter
     overall: Counter = Counter()
     for bag in per_day.values():
@@ -2605,6 +2737,24 @@ def _main_chart_card(
     top = [n for n, _ in overall.most_common(10)]
     palette = _palette_for(top)
     palette["其它"] = _WEEKLY_OTHER_COLOR
+    return top, palette
+
+
+def _main_chart_card(
+    *, days: list[str], per_day: dict[str, dict[str, float]],
+    per_day_totals: dict[str, float], unit: str, stack_by: str,
+    selector_html: str, top_names: list[str], palette: dict[str, str],
+) -> str:
+    """7-day stacked bar chart. Each bar = one day; segments = stack_by dim.
+    Uses the precomputed week palette so colors match the swim-lane card."""
+    from datetime import date as _date
+    from collections import Counter
+
+    overall: Counter = Counter()
+    for bag in per_day.values():
+        for k, v in bag.items():
+            overall[k] += v
+    top = top_names
 
     def fold(bag: dict[str, float]) -> list[tuple[str, float]]:
         kept = []
@@ -2622,7 +2772,7 @@ def _main_chart_card(
     max_total = max(per_day_totals.values()) if per_day_totals else 0
     if max_total <= 0:
         return (
-            f'<section class="card"><h3>每日趋势</h3>{selector_html}'
+            f'<section class="card" id="chart"><h3>每日趋势</h3>{selector_html}'
             f'<div class="muted">本周该维度无可用数据</div></section>'
         )
 
@@ -2678,7 +2828,7 @@ def _main_chart_card(
         pass  # legend already covers top-N; "其它" segment is self-explanatory
 
     return (
-        '<section class="card"><h3>每日趋势</h3>'
+        '<section class="card" id="chart"><h3>每日趋势</h3>'
         + selector_html +
         '<div style="display:flex; gap:8px; align-items:flex-end; padding:6px 4px 12px;">'
         + "".join(bars_html) +
@@ -2943,10 +3093,13 @@ def weekly_page(
 
     con = connect(db_path); init_db(con)
     if not week:
+        # Default to LAST week — the current shifted-week is still in flight
+        # (most of its days haven't happened yet), so showing it as default
+        # would confuse anyone opening the page on a Mon-Wed.
         from datetime import datetime, timedelta
         now = datetime.now()
         ref = now.date() if now.hour >= _stats.DAY_BOUNDARY_HOUR else (now.date() - timedelta(days=1))
-        week = date_to_iso_week(ref.isoformat())
+        week = date_to_iso_week((ref - timedelta(days=7)).isoformat())
 
     try:
         monday, sunday, days = iso_week_to_date_range(week)
@@ -2997,14 +3150,20 @@ def weekly_page(
     by_source = _weekly_breakdown(events, "source", top=8)
     diffs = _diff_breakdowns(by_project, _weekly_breakdown(last_events, "project", top=50))
 
-    # Main chart — per-day stack
-    per_day_stack, per_day_totals = _per_day_stack(
-        events, days, bh, stack_by=stack_by, unit=unit,
-    )
+    # Main chart — per-day stack. For unit=hours we use per-5min-slot
+    # proportional allocation (honest: day totals = active_minutes exactly).
+    # For count/chars we still do the trivial event-count breakdown.
     if unit == "hours":
-        per_day_stack, per_day_totals = _rescale_to_hours(
-            per_day_stack, per_day_totals, per_day_minutes,
+        per_day_stack, per_day_totals = _per_slot_hours_per_dim(
+            events, days, bh, stack_by=stack_by,
         )
+    else:
+        per_day_stack, per_day_totals = _per_day_stack(
+            events, days, bh, stack_by=stack_by, unit=unit,
+        )
+
+    # Compute palette once so chart + swim-lane share colors
+    top_names, palette = _compute_palette_for_week(per_day_stack)
 
     selector_html = _selector_strip(
         week=week, current_unit=unit, current_stack_by=stack_by,
@@ -3046,32 +3205,48 @@ def weekly_page(
     )
     ai_summary_html = _ai_summary_card(ai_summary)
 
-    # Main chart
+    # Main chart (stacked bars)
     main_chart = _main_chart_card(
         days=days, per_day=per_day_stack, per_day_totals=per_day_totals,
         unit=unit, stack_by=stack_by, selector_html=selector_html,
+        top_names=top_names, palette=palette,
     )
 
-    # Heatmap
+    # Weekly swim-lane (7 rows × 24h timeline, same palette as main chart).
+    # Its selector is hidden (the chart's selector controls both — they share
+    # stack_by). To keep one source of truth we just don't render a selector
+    # inside the swim-lane card; the chart's selector above does it.
+    swim_card = _weekly_swimlane_card(
+        events=events, days=days, boundary_hour=bh,
+        stack_by=stack_by, top_names=top_names, palette=palette,
+        selector_html="",
+    )
+
+    # Heatmap (density-only; kept as a small supplementary card)
     heatmap = _hour_heatmap_card(events, days, bh)
 
     # Per-day links footer
+    from datetime import date as _date
     day_links = " · ".join(
-        f'<a href="/today?date={d}">{d[5:]}（周{_WEEK_ZH[__import__("datetime").date.fromisoformat(d).weekday()]}）</a>'
+        f'<a href="/today?date={d}">{d[5:]}（周{_WEEK_ZH[_date.fromisoformat(d).weekday()]}）</a>'
         for d in days
     )
     day_links_html = f'<section class="card"><h3>跳到每日报告</h3><div>{day_links}</div></section>'
 
+    # Body: stats → (AI + chart 两栏) → swim-lane → 项目/数据源/上周对比 → 热力图 → 跳转
     body = (
         stats_strip
-        + ai_summary_html
+        + '<div class="report-grid">'
+        + (ai_summary_html or '<div></div>')
         + main_chart
-        + heatmap
+        + '</div>'
+        + swim_card
         + '<div class="section-grid">'
         + _breakdown_card("项目分布（本周）", by_project, total_events)
         + _breakdown_card("数据源分布（本周）", by_source, total_events)
         + '</div>'
         + _vs_last_week_card(diffs)
+        + heatmap
         + day_links_html
     )
 
