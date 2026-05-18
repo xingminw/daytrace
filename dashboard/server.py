@@ -65,11 +65,11 @@ body.events-page form { height:100%; }
 .composition-card .cc-pane.show { display:flex; }
 .composition-card .cc-pane-body { display:grid; grid-template-columns:minmax(180px,.85fr) minmax(220px,1.15fr); gap:20px; align-items:center; width:100%; }
 .composition-card .cc-pane-empty { place-items:center; }
-.composition-card .cc-donut-wrap { display:flex; justify-content:center; align-items:center; padding:4px; }
-.composition-card .cc-donut { width:210px; height:210px; border-radius:50%; display:grid; place-items:center; box-shadow:0 8px 18px rgba(40,30,10,.10); position:relative; }
-.composition-card .cc-donut-hole { width:124px; height:124px; border-radius:50%; background:var(--card); display:grid; place-items:center; text-align:center; box-shadow:inset 0 1px 2px rgba(0,0,0,.05); }
-.composition-card .cc-donut-total { font-size:28px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; line-height:1; }
-.composition-card .cc-donut-label { font-size:11px; color:var(--muted); margin-top:3px; letter-spacing:.06em; text-transform:uppercase; }
+.composition-card .cc-donut-wrap, .top-chart-card .cc-donut-wrap { display:flex; justify-content:center; align-items:center; padding:4px; }
+.composition-card .cc-donut, .top-chart-card .cc-donut { width:210px; height:210px; border-radius:50%; display:grid; place-items:center; box-shadow:0 8px 18px rgba(40,30,10,.10); position:relative; }
+.composition-card .cc-donut-hole, .top-chart-card .cc-donut-hole { width:124px; height:124px; border-radius:50%; background:var(--card); display:grid; place-items:center; text-align:center; box-shadow:inset 0 1px 2px rgba(0,0,0,.05); }
+.composition-card .cc-donut-total, .top-chart-card .cc-donut-total { font-size:28px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; line-height:1; }
+.composition-card .cc-donut-label, .top-chart-card .cc-donut-label { font-size:11px; color:var(--muted); margin-top:3px; letter-spacing:.06em; text-transform:uppercase; }
 .composition-card .cc-bars { display:flex; flex-direction:column; gap:7px; max-height:none; padding-right:2px; }
 .composition-card .cc-bar { display:grid; grid-template-columns:11px minmax(70px,1fr) minmax(80px,2fr) 36px 36px; align-items:center; gap:9px; font-size:12.5px; }
 .composition-card .cc-bar-sw { width:10px; height:10px; border-radius:3px; flex:none; }
