@@ -1787,12 +1787,15 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     #   └──────────────────────────┘
     # Project cards section dropped — the chart/distribution panels above
     # already convey project-level breakdowns at the page level.
+    tasks_panel_html = _tasks_panel(con, [date or ""], boundary_h) if date else ""
+
     content = f"""
 <section class="report-grid">
   <div class="card daily-report"><div class="bucket-head"><h2>每日 Report · {esc(date or '无日期')}</h2><span class="tag source">Report</span></div>{rich_daily_body}</div>
   <div class="right-column">{right_column_body}</div>
 </section>
 {daily_swim_card}
+{tasks_panel_html}
 {daily_sync_js}
 """
     # Header pattern: [←] [📅 picker] [→] [open db ↗] [dim pills]
@@ -4041,6 +4044,242 @@ def _daily_histogram_body(
     )
 
 
+def _compute_task_stats(
+    con, days: list[str], boundary_hour: int,
+) -> dict[str, dict]:
+    """Per-task stats over the given shifted-day range.
+    Returns {record_id: {event_count, minutes, last_activity_iso}}.
+
+    - event_count + minutes are scoped to `days` (passing days=[date] gives
+      a single-day view; passing the whole week gives weekly totals).
+    - last_activity_iso is all-time (so "未触碰" rows still tell you when
+      you last did anything on this task, even if it's outside the window).
+    """
+    if not days:
+        return {}
+    from collections import defaultdict
+    from daytrace.stats import _safe_minute
+
+    # Ranged: count + slot-union per record over the days
+    rows = con.execute(
+        """
+        SELECT e.id, e.date, e.start, l.record_id
+          FROM events e
+          JOIN event_work_item_links l ON l.event_id = e.id
+         WHERE e.date BETWEEN ? AND ?
+        """,
+        (min(days), max(days)),
+    ).fetchall()
+    event_count: dict[str, int] = defaultdict(int)
+    slots: dict[str, set] = defaultdict(set)
+    for r in rows:
+        rid = r["record_id"]
+        event_count[rid] += 1
+        m = _safe_minute(r["start"])
+        if m is not None:
+            slots[rid].add((r["date"], m // 5))
+
+    # All-time last activity per task
+    last_rows = con.execute(
+        """
+        SELECT l.record_id, MAX(e.start) AS last_start
+          FROM events e
+          JOIN event_work_item_links l ON l.event_id = e.id
+         GROUP BY l.record_id
+        """
+    ).fetchall()
+    last_map = {r["record_id"]: r["last_start"] for r in last_rows}
+
+    out: dict[str, dict] = {}
+    all_rids = set(event_count) | set(last_map)
+    for rid in all_rids:
+        out[rid] = {
+            "event_count": event_count.get(rid, 0),
+            "minutes": len(slots.get(rid, set())) * 5,
+            "last_activity": last_map.get(rid),
+        }
+    return out
+
+
+def _format_time_ago(iso: str | None) -> str:
+    if not iso:
+        return "未触碰"
+    from datetime import datetime
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).replace(tzinfo=None)
+    except ValueError:
+        return iso[:10]
+    delta = datetime.now() - dt
+    s = int(delta.total_seconds())
+    if s < 0:
+        return "刚刚"
+    if s < 90:
+        return "刚刚"
+    if s < 3600:
+        return f"{s // 60} 分钟前"
+    if s < 86400:
+        return f"{s // 3600} 小时前"
+    if s < 86400 * 7:
+        return f"{s // 86400} 天前"
+    return iso[:10]
+
+
+def _due_chip_html(due_date: str | None) -> str:
+    if not due_date:
+        return '<span class="muted">—</span>'
+    from datetime import date as _date
+    try:
+        d = _date.fromisoformat(due_date)
+    except ValueError:
+        return f'<span class="muted">{esc(due_date)}</span>'
+    delta = (d - _date.today()).days
+    if delta < 0:
+        bg, color, label = "#fce8e8", "#b32a2a", f"已过期 {-delta}d"
+    elif delta <= 3:
+        bg, color, label = "#fce8e8", "#b32a2a", f"急 {delta}d"
+    elif delta <= 7:
+        bg, color, label = "#fff3cd", "#7a5a00", f"紧 {delta}d"
+    else:
+        bg, color, label = "#eef5ff", "#2f6fed", f"{delta}d"
+    return (
+        f'<span style="padding:2px 8px; border-radius:999px; '
+        f'background:{bg}; color:{color}; font-size:11px; font-weight:700; '
+        f'font-variant-numeric:tabular-nums;">{esc(label)} · {esc(due_date[5:])}</span>'
+    )
+
+
+_STATUS_COLOR = {
+    "进行中": ("#dcf3e3", "#1f7a3e"),
+    "待办":   ("#fff3cd", "#7a5a00"),
+    "完成":   ("#eee", "#888"),
+}
+_PRIORITY_COLOR = {
+    "P0": ("#fce8e8", "#b32a2a"),
+    "P1": ("#fde9d3", "#a05300"),
+    "P2": ("#eef5ff", "#2f6fed"),
+    "P3": ("#eee",    "#666"),
+}
+
+
+def _chip(text: str, palette: tuple[str, str] | None) -> str:
+    if not text:
+        return ""
+    bg, color = palette or ("#eee", "#444")
+    return (
+        f'<span style="padding:2px 8px; border-radius:999px; '
+        f'background:{bg}; color:{color}; font-size:11px; font-weight:700;">'
+        f'{esc(text)}</span>'
+    )
+
+
+def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
+    """┃ Tasks panel ┃ — per-task time + last activity + due chip.
+    Scope: rows are ALL work_items; the time/event columns are scoped to
+    `days`, the last_activity column is all-time.
+
+    Returns "" if work_items table is empty (feature disabled / not synced)."""
+    from daytrace.work_items import list_work_items
+    items = list_work_items(con)
+    if not items:
+        return ""
+    stats = _compute_task_stats(con, days, boundary_hour)
+
+    rows_html = []
+    for wi in items:
+        rid = wi["record_id"]
+        st = stats.get(rid, {})
+        minutes = st.get("minutes", 0)
+        ev_count = st.get("event_count", 0)
+        last_iso = st.get("last_activity")
+        # Compose row
+        status = wi.get("status") or ""
+        priority = wi.get("priority") or ""
+        # External links (first one)
+        ext = wi.get("external_links") or []
+        link_html = ""
+        if isinstance(ext, list) and ext:
+            link_html = (
+                f'<a href="{esc(ext[0])}" target="_blank" rel="noopener" '
+                f'title="{esc(ext[0])}" style="color:#2f6fed; font-size:10px; '
+                f'margin-left:6px;">↗</a>'
+            )
+        # Inactivity warning: P0/P1 & 进行中-or-待办 & no activity in window
+        is_stale = (
+            status in ("进行中", "待办")
+            and priority in ("P0", "P1")
+            and ev_count == 0
+        )
+        title_html = (
+            f'<span style="font-weight:600; color:#3b352e;">{esc(wi.get("title") or "")}</span>'
+            f'{link_html}'
+        )
+        if is_stale:
+            title_html += (
+                '<span style="margin-left:8px; color:#b32a2a; font-size:11px;" '
+                'title="高优先级任务但本期零活动">⚠</span>'
+            )
+
+        time_html = (
+            f'<span style="font-variant-numeric:tabular-nums; font-weight:700;">'
+            f'{_format_value(minutes / 60.0, "hours")}</span>'
+            if minutes > 0 else
+            '<span class="muted" style="font-variant-numeric:tabular-nums;">0</span>'
+        )
+        ev_html = (
+            f'<span style="font-variant-numeric:tabular-nums; color:var(--muted);">'
+            f'{ev_count}</span>'
+            if ev_count > 0 else
+            '<span class="muted">·</span>'
+        )
+
+        rows_html.append(
+            '<tr>'
+            f'<td>{_chip(priority, _PRIORITY_COLOR.get(priority))}</td>'
+            f'<td>{_chip(status, _STATUS_COLOR.get(status))}</td>'
+            f'<td>{title_html}</td>'
+            f'<td style="text-align:right;">{time_html}</td>'
+            f'<td style="text-align:right;">{ev_html}</td>'
+            f'<td style="font-size:11px; color:var(--muted);">{esc(_format_time_ago(last_iso))}</td>'
+            f'<td>{_due_chip_html(wi.get("due_date"))}</td>'
+            '</tr>'
+        )
+
+    # Summary line for the panel header
+    active_p01_stale = sum(
+        1 for wi in items
+        if wi.get("status") in ("进行中", "待办")
+        and wi.get("priority") in ("P0", "P1")
+        and stats.get(wi["record_id"], {}).get("event_count", 0) == 0
+    )
+    total_count = len(items)
+    summary_bits = [f"{total_count} 个任务"]
+    if active_p01_stale:
+        summary_bits.append(f'<span style="color:#b32a2a;">{active_p01_stale} 个 P0/P1 本期零活动</span>')
+    summary_line = " · ".join(summary_bits)
+
+    return (
+        '<section class="card" id="tasks">'
+        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">'
+        '<h3 style="margin:0;">工作项</h3>'
+        '<span class="tag source" style="background:rgba(22,163,74,0.14); color:#16a34a;">Tasks</span>'
+        f'<span class="muted small" style="margin-left:auto;">{summary_line}</span>'
+        '</div>'
+        '<table class="mini-table" style="width:100%;">'
+        '<thead><tr>'
+        '<th style="text-align:left;">P</th>'
+        '<th style="text-align:left;">状态</th>'
+        '<th style="text-align:left;">任务</th>'
+        '<th style="text-align:right;">时长</th>'
+        '<th style="text-align:right;">事件</th>'
+        '<th style="text-align:left;">最近活动</th>'
+        '<th style="text-align:left;">截止</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows_html)}</tbody>'
+        '</table>'
+        '</section>'
+    )
+
+
 def weekly_page(
     db_path: Path, week: str | None,
     *, unit: str | None = None, mode: str | None = None,
@@ -4466,6 +4705,7 @@ def weekly_page(
     # Both are .card so they share the right-column gutter & spacing.
     right_column_body = top_histogram_card + (highlights_card or "")
 
+    tasks_panel_html = _tasks_panel(con, days, bh)
     body = (
         # Top row: Report | (Chart + Highlights stacked)
         '<section class="report-grid">'
@@ -4475,6 +4715,7 @@ def weekly_page(
         # Timeline panel
         + bottom_card
         + view_sync_js
+        + tasks_panel_html
         + day_links_html
     )
 
