@@ -2887,11 +2887,14 @@ _WEEKLY_UNIT_OPTS = [
     ("count", "事件数"),
     ("chars", "字数"),
 ]
+# Order + labels match daily's DIMENSIONS so the dim pills are visually
+# identical across both pages. Key "device" (not "device_id") — _stack_value_of
+# accepts the short alias and resolves to events.device_id internally.
 _WEEKLY_DIM_OPTS = [
-    ("project",   "项目"),
-    ("source",    "数据源"),
-    ("activity",  "活动"),
-    ("device_id", "设备"),
+    ("source",   "来源"),
+    ("project",  "项目"),
+    ("device",   "设备"),
+    ("activity", "活动"),
 ]
 _WEEKLY_VIEW_OPTS = [
     # Histogram has its own standalone card on top, so it's not in this
@@ -3377,7 +3380,7 @@ def _distribution_view_body(
 
     dim_label = {
         "project": "项目", "source": "数据源",
-        "activity": "活动", "device_id": "设备",
+        "activity": "活动", "device": "设备", "device_id": "设备",
     }.get(mode, mode)
 
     # ── Donut (conic-gradient): every visible top item gets its own slice,
@@ -4010,8 +4013,11 @@ def weekly_page(
     valid_views = {v for v, _ in _WEEKLY_VIEW_OPTS}
     if unit not in valid_units:
         unit = "hours"
+    # Legacy bookmarks may carry ?mode=device_id — normalize to "device"
+    if mode == "device_id":
+        mode = "device"
     if mode not in valid_modes:
-        mode = "project"
+        mode = "source"  # match daily's default for consistency
     if view not in valid_views:
         view = "swim"
     valid_top_views = {"chart", "dist"}
