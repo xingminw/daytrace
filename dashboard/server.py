@@ -223,11 +223,9 @@ body.events-page form { height:100%; }
 .channel-cell pre { white-space:pre-wrap; overflow:auto; max-height:240px; max-width:340px; margin:6px 0 0; padding:6px 8px; background:#fff; border:1px solid var(--line); border-radius:8px; font-size:11px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .small { font-size:11px; } .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .timeline-card .tl-tab-group { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-.timeline-card .tl-tabs, .timeline-card .tl-style-tabs { display:flex; gap:4px; flex-wrap:wrap; }
-.timeline-card .tl-tab, .timeline-card .tl-style-tab { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:white; color:#3b352e; font-weight:650; cursor:pointer; }
-.timeline-card .tl-tab.active, .timeline-card .tl-style-tab.active { background:var(--ink); color:white; border-color:var(--ink); }
-.timeline-card .tl-style-tab { background:#fff3cd; border-color:#f0d68b; color:#8a5a00; }
-.timeline-card .tl-style-tab.active { background:#7c5c00; border-color:#7c5c00; color:white; }
+.timeline-card .tl-tabs { display:flex; gap:4px; flex-wrap:wrap; }
+.timeline-card .tl-tab { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:white; color:#3b352e; font-weight:650; cursor:pointer; }
+.timeline-card .tl-tab.active { background:var(--ink); color:white; border-color:var(--ink); }
 .timeline-card .tl-axis-wrap { position:relative; margin:14px 0 6px; }
 /* Shared 24h canvas */
 .timeline-card .tl-axis, .timeline-card .tl-hist { position:relative; height:200px; background:linear-gradient(180deg,#faf6ec,#f3ead8); border:1px solid #e6dcc6; border-radius:12px; overflow:hidden; }
@@ -694,7 +692,7 @@ _COMPOSITION_OTHER_COLOR = "#b8ad95"
 
 
 def composition_pane(items: list[dict[str, Any]], name_keys: list[str] | str,
-                      *, unit_label: str = "events") -> str:
+                      *, unit_label: str = "events", unit: str = "count") -> str:
     """One pane: a large donut (left, half the card) + a colored bar list
     (right, half the card). Donut segments and bar fills share the same
     TIMELINE_PALETTE so colors line up across donut → bars → timeline.
@@ -714,7 +712,7 @@ def composition_pane(items: list[dict[str, Any]], name_keys: list[str] | str,
         return "misc"
 
     items = list(items or [])
-    total = sum(int(i["count"]) for i in items)
+    total = sum(float(i["count"]) for i in items)
     if total <= 0:
         return '<div class="cc-pane-body cc-pane-empty"><div class="label">暂无数据</div></div>'
 
@@ -733,7 +731,7 @@ def composition_pane(items: list[dict[str, Any]], name_keys: list[str] | str,
     pos = 0.0
     for item in items:
         name = _name_of(item)
-        pct = int(item["count"]) / total * 100
+        pct = float(item["count"]) / total * 100
         end = pos + pct
         segs.append(f"{color_for[name]} {pos:.3f}% {end:.3f}%")
         pos = end
@@ -742,17 +740,17 @@ def composition_pane(items: list[dict[str, Any]], name_keys: list[str] | str,
     donut_html = (
         f'<div class="cc-donut" style="background:conic-gradient({", ".join(segs)})">'
         f'<div class="cc-donut-hole">'
-        f'<div class="cc-donut-total">{total}</div>'
+        f'<div class="cc-donut-total">{esc(_format_breakdown_value(total, unit))}</div>'
         f'<div class="cc-donut-label">{esc(unit_label)}</div>'
         f"</div></div>"
     )
 
     # Bars: width ∝ count / max, share% to the right; matched swatch on the left.
-    max_count = max((int(i["count"]) for i in items), default=1)
+    max_count = max((float(i["count"]) for i in items), default=1)
     bar_rows = []
     for item in items[:14]:
         name = _name_of(item)
-        count = int(item["count"])
+        count = float(item["count"])
         width = max(3, count / max_count * 100)
         share = count / total * 100
         color = color_for[name]
@@ -761,7 +759,7 @@ def composition_pane(items: list[dict[str, Any]], name_keys: list[str] | str,
             f'<span class="cc-bar-sw" style="background:{color}"></span>'
             f'<span class="cc-bar-name" title="{esc(name)}">{esc(name)}</span>'
             f'<span class="cc-bar-track"><span class="cc-bar-fill" style="width:{width:.2f}%;background:{color}"></span></span>'
-            f'<span class="cc-bar-count">{count}</span>'
+            f'<span class="cc-bar-count">{esc(_format_breakdown_value(count, unit))}</span>'
             f'<span class="cc-bar-pct">{share:.0f}%</span>'
             f"</div>"
         )
@@ -790,12 +788,12 @@ def composition_card(today: dict[str, Any], *, mode: str = "source", unit: str =
         ("location", today.get("by_location") or [], ["name", "location_id"]),
         ("activity", today.get("by_activity") or [], ["name"]),
     ]
-    unit_label = "chars" if unit == "chars" else "events"
+    unit_label = {"chars": "chars", "hours": "active", "count": "events"}.get(unit, "events")
     panes = []
     for dim_id, items, name_keys in dims:
         cls = "cc-pane show" if dim_id == mode else "cc-pane"
         panes.append(
-            f'<div class="{cls}" data-for="{dim_id}">{composition_pane(items, name_keys, unit_label=unit_label)}</div>'
+            f'<div class="{cls}" data-for="{dim_id}">{composition_pane(items, name_keys, unit_label=unit_label, unit=unit)}</div>'
         )
     return (
         f'<div class="card composition-card" data-mode="{esc(mode)}">'
@@ -1166,10 +1164,12 @@ def event_timeline_card(
         legend_block(c, palettes[c], active=(c == mode)) for c in DIMS
     )
 
+    # Use the global .dim-tab / .dim-tabs styling so this switcher matches
+    # the rest of the page's pill controls (weekly view switcher, dim-bar).
     style_tabs_html = (
-        '<div class="tl-style-tabs" role="tablist" aria-label="视图样式">'
-        '<button type="button" class="tl-style-tab active" data-style="swimlane">泳道</button>'
-        '<button type="button" class="tl-style-tab" data-style="histogram">直方图</button>'
+        '<div class="dim-tabs" role="tablist" aria-label="视图样式" data-role="tl-style-tabs">'
+        '<button type="button" class="dim-tab active" data-style="swimlane">泳道</button>'
+        '<button type="button" class="dim-tab" data-style="histogram">直方图</button>'
         "</div>"
     )
 
@@ -1185,10 +1185,11 @@ def event_timeline_card(
         "var s=document.currentScript;var card=s&&s.closest('.timeline-card');if(!card)return;"
         "var date=card.getAttribute('data-date');"
         "var tip=card.querySelector('.tl-tooltip');"
-        # Style tab handler (mode tabs were removed — global dim-bar drives mode)
-        "card.querySelectorAll('.tl-style-tab').forEach(function(btn){btn.addEventListener('click',function(){"
+        # Style tab handler (mode tabs were removed — global dim-bar drives mode).
+        # Buttons live in [data-role=tl-style-tabs]; reuse .dim-tab styling.
+        "card.querySelectorAll('[data-role=\"tl-style-tabs\"] .dim-tab').forEach(function(btn){btn.addEventListener('click',function(){"
         "card.setAttribute('data-style',btn.dataset.style);"
-        "card.querySelectorAll('.tl-style-tab').forEach(function(b){b.classList.toggle('active',b===btn);});"
+        "card.querySelectorAll('[data-role=\"tl-style-tabs\"] .dim-tab').forEach(function(b){b.classList.toggle('active',b===btn);});"
         "});});"
         # tooltip helpers
         "function chip(label,val,color){if(!val)return '';var sw=color?('<span class=\"tl-tip-sw\" style=\"background:'+color+'\"></span>'):'';return '<span class=\"tl-tip-chip\">'+sw+'<b>'+label+'</b> '+val+'</span>';}"
@@ -1279,45 +1280,110 @@ DIMENSIONS = [
     ("activity", "活动"),
 ]
 
-# Global unit toggle: "条目" weights each event as 1, "字数" weights each
-# event by len(title)+len(summary). Affects donut shares and project-card
-# share bars. Persisted via URL ?unit=chars.
+# Global unit toggle. Affects donut shares, composition bars, project-card
+# share bars, and the unit label inside the donut hole. Persisted via URL
+# ?unit=...
 UNITS = [
     ("count", "条目"),
     ("chars", "字数"),
+    ("hours", "小时"),
 ]
 
 
 def _event_weight(ev: dict, unit: str) -> int:
+    """Per-event weight for the count/chars units. Hours unit uses per-slot
+    proportional split (compute_breakdown_hours) so this helper isn't called
+    for that path."""
     if unit == "chars":
         return int(ev.get("char_count") or 0)
     return 1
 
 
+def _breakdown_fallback_name(field: str) -> str:
+    return {
+        "project": "misc",
+        "device_id": "unknown",
+        "location_id": "unknown",
+        "activity": "未分类",
+    }.get(field, "other")
+
+
+def compute_breakdown_hours(
+    events: list[dict], field: str, *, slot_min: int = 5,
+) -> list[dict]:
+    """Per-5min-slot proportional split: for each slot containing events, the
+    slot's `slot_min` minutes are distributed across `field` values present
+    in that slot proportional to event count. Returns [{name, count, share}]
+    where `count` is MINUTES (float) and shares sum to ~1.0.
+
+    Same algorithm as the weekly main chart's hours mode, so daily and
+    weekly hour totals agree exactly per (day, dim)."""
+    from collections import defaultdict
+    from daytrace.stats import _safe_minute
+
+    per_slot: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    fb = _breakdown_fallback_name(field)
+    for ev in events:
+        m = _safe_minute(ev.get("start"))
+        if m is None:
+            continue
+        name = ev.get(field) or (ev.get("project_guess") if field == "project" else None) or fb
+        per_slot[m // slot_min][str(name)] += 1
+
+    dim_min: dict[str, float] = defaultdict(float)
+    for _slot, counts in per_slot.items():
+        total = sum(counts.values())
+        if total <= 0:
+            continue
+        for name, c in counts.items():
+            dim_min[name] += slot_min * (c / total)
+
+    total_min = sum(dim_min.values()) or 1
+    items = sorted(dim_min.items(), key=lambda kv: -kv[1])
+    return [
+        {"name": n, "count": m, "share": round(m / total_min, 4)}
+        for n, m in items
+    ]
+
+
 def compute_breakdown(events: list[dict], field: str, unit: str = "count") -> list[dict]:
     """Group events by `field`, return [{name, count, share}] desc by count.
 
-    `count` here is the unit-weighted aggregate (events or chars). `share`
-    is normalized over the unit total."""
+    For unit='count' / 'chars': `count` is event count or summed char count.
+    For unit='hours': `count` is minutes (float); see compute_breakdown_hours.
+    `share` is normalized over the unit total."""
+    if unit == "hours":
+        return compute_breakdown_hours(events, field)
     from collections import Counter
     bag: Counter = Counter()
+    fb = _breakdown_fallback_name(field)
     for ev in events:
         name = ev.get(field)
         if not name:
-            # field-specific fallback
-            if field == "project":
-                name = ev.get("project_guess") or "misc"
-            elif field == "device_id":
-                name = "unknown"
-            elif field == "location_id":
-                name = "unknown"
-            elif field == "activity":
-                name = "未分类"
-            else:
-                name = "other"
+            name = ev.get("project_guess") if field == "project" else None
+            if not name:
+                name = fb
         bag[str(name)] += _event_weight(ev, unit)
     total = sum(bag.values()) or 1
     return [{"name": n, "count": c, "share": round(c / total, 4)} for n, c in bag.most_common()]
+
+
+def _format_breakdown_value(v: float, unit: str) -> str:
+    """Render a breakdown row's `count` field as user-visible text. Hours mode
+    treats `count` as minutes."""
+    if unit == "hours":
+        m = int(round(v))
+        if m < 60:
+            return f"{m}m"
+        h, mm = divmod(m, 60)
+        return f"{h}h{mm:02d}m" if mm else f"{h}h"
+    if unit == "chars":
+        if v >= 10000:
+            return f"{v/1000:.0f}k"
+        if v >= 1000:
+            return f"{v/1000:.1f}k"
+        return f"{int(v)}"
+    return f"{int(v)}"
 
 
 def _mode_link(path: str, params: dict[str, str | None]) -> str:
@@ -1968,7 +2034,24 @@ def project_cards_section(
         for r in rows:
             r["chars"] = char_per_project.get(r["project"], 0)
             r["share"] = r["chars"] / total_chars
-    rows.sort(key=lambda r: -(r.get("chars", r.get("event_count", 0)) if unit == "chars" else r.get("event_count", 0)))
+
+    # If hours unit, recompute per-project minutes via per-5min-slot proportional
+    # split (same algorithm as the weekly main chart). Shares sum to 1 because
+    # each slot is allocated exactly slot_min minutes across its dim values.
+    if unit == "hours" and day_events:
+        hours_items = compute_breakdown_hours(day_events, "project")
+        by_name = {it["name"]: it for it in hours_items}
+        for r in rows:
+            it = by_name.get(r["project"])
+            r["hours_min"] = it["count"] if it else 0.0
+            r["share"] = (it["share"] if it else 0.0)
+
+    if unit == "chars":
+        rows.sort(key=lambda r: -r.get("chars", r.get("event_count", 0)))
+    elif unit == "hours":
+        rows.sort(key=lambda r: -r.get("hours_min", 0))
+    else:
+        rows.sort(key=lambda r: -r.get("event_count", 0))
 
     cards = []
     for i, prow in enumerate(rows):
@@ -1979,7 +2062,7 @@ def project_cards_section(
         ).fetchall()
         channels = {r["channel"]: r["value_json"] for r in channel_rows}
         cards.append(_render_project_card(date, prow, channels, unit=unit, open_by_default=(i < top_n_open)))
-    sub = "按字数排序" if unit == "chars" else "按条目排序"
+    sub = {"chars": "按字数排序", "hours": "按时长排序"}.get(unit, "按条目排序")
     return (
         '<section class="project-cards-section">'
         f'<h2 class="section-title">📁 项目分项 · {len(rows)} 个 <span class="muted small">· {sub}</span></h2>'
