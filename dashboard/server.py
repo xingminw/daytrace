@@ -1455,11 +1455,11 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         today["by_device"]   = compute_breakdown(day_events, "device_id",   unit)
         today["by_location"] = compute_breakdown(day_events, "location_id", unit)
         today["by_activity"] = compute_breakdown(day_events, "activity",    unit)
-    valid_styles = {"swimlane", "histogram"}
-    if style not in valid_styles:
-        style = "swimlane"
-    timeline_html = event_timeline_card(day_events, date or "", mode=mode, style=style)
-    composition_html = composition_card(today, mode=mode, unit=unit)
+    # Map daily's existing mode names → weekly's _stack_value_of conventions.
+    # daily uses "device" (-> device_id) and "location" (-> location_id);
+    # _stack_value_of now accepts those aliases. The composition_card still
+    # gets the original mode string, so its per-pane data attrs stay
+    # backwards compatible.
 
     # Lazy-regenerate stats channels if the day_report row is missing or
     # stale. AI channels stay untouched (those are expensive — user triggers
@@ -1521,76 +1521,242 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         if date else ""
     )
 
-    # Global control bar — day-nav on the left, unit toggle (条目/字数) and
-    # dimension selector on the right. Both selectors are cross-card concerns
-    # that affect every visualization on the page.
-    dim_tabs = "".join(
-        f'<button type="button" class="dim-tab{" active" if dim_id == mode else ""}" data-mode="{dim_id}">{label}</button>'
+    # Global dim-bar — day-nav + dim pills. Unit pills moved into the top
+    # chart card (they only affect the histogram + distribution, not the
+    # swim-lane). Mirrors the weekly layout exactly.
+    valid_top_views = {"chart", "dist"}
+    top_view = (style if style in valid_top_views else "chart")  # repurpose `style` arg
+
+    dim_pill_links = "".join(
+        f'<a class="dim-tab{" active" if dim_id == mode else ""}" '
+        f'data-param="mode" data-value="{dim_id}" '
+        f'href="{esc(_mode_link("/today", {"date": date, "mode": dim_id if dim_id != "source" else None, "unit": unit if unit != "count" else None}))}">'
+        f'{label}</a>'
         for dim_id, label in DIMENSIONS
-    )
-    unit_tabs = "".join(
-        f'<button type="button" class="unit-tab{" active" if u_id == unit else ""}" data-unit="{u_id}">{label}</button>'
-        for u_id, label in UNITS
     )
     dim_bar = (
         f'<section class="dim-bar">'
         f'<div class="day-nav">{day_nav_inner}</div>'
         f'<div class="dim-bar-right">'
-        f'<div class="unit-tabs" title="按条目数或字数统计">{unit_tabs}</div>'
-        f'<div class="dim-tabs">{dim_tabs}</div>'
+        f'<div class="dim-tabs" title="按哪个维度堆叠/上色（影响所有视图）">{dim_pill_links}</div>'
         f'</div>'
         f"</section>"
     )
-    dim_sync_js = (
-        "<script>(function(){"
-        "function apply(mode){"
-        "document.querySelectorAll('.dim-tab').forEach(function(b){b.classList.toggle('active',b.dataset.mode===mode);});"
-        "document.querySelectorAll('.composition-card,.timeline-card').forEach(function(c){c.setAttribute('data-mode',mode);});"
-        "document.querySelectorAll('.composition-card .cc-pane').forEach(function(p){p.classList.toggle('show',p.dataset.for===mode);});"
-        "document.querySelectorAll('.timeline-card .tl-legend').forEach(function(l){l.classList.toggle('show',l.dataset.for===mode);});"
-        "var url=new URL(location.href);if(mode==='source'){url.searchParams.delete('mode');}else{url.searchParams.set('mode',mode);}"
-        "history.replaceState({},'',url);"
-        # Rewrite same-page links (day-nav etc.) so any in-page navigation
-        # keeps the mode without us threading it everywhere server-side.
-        "document.querySelectorAll('a[href^=\"/today\"]').forEach(function(a){try{var u=new URL(a.href,location.origin);if(mode==='source'){u.searchParams.delete('mode');}else{u.searchParams.set('mode',mode);}a.href=u.pathname+(u.search||'');}catch(e){}});"
-        "}"
-        "document.querySelectorAll('.dim-tab').forEach(function(btn){btn.addEventListener('click',function(){apply(btn.dataset.mode);});});"
-        # Unit toggle reloads — the breakdowns are recomputed server-side.
-        # Save scrollY to sessionStorage before reload, restore on next load.
-        # This keeps users in the project card they were inspecting.
-        "var SCROLL_KEY='daytrace.today.scrollY';"
-        "var saved=sessionStorage.getItem(SCROLL_KEY);"
-        "if(saved!==null){window.scrollTo(0,parseInt(saved,10)||0);sessionStorage.removeItem(SCROLL_KEY);}"
-        "document.querySelectorAll('.unit-tab').forEach(function(btn){btn.addEventListener('click',function(){"
-        "if(btn.classList.contains('active'))return;"
-        "sessionStorage.setItem(SCROLL_KEY,String(window.scrollY));"
-        "var u=btn.dataset.unit;var url=new URL(location.href);"
-        "if(u==='count'){url.searchParams.delete('unit');}else{url.searchParams.set('unit',u);}"
-        "location.href=url.toString();"
-        "});});"
-        "})();</script>"
+
+    # Build daily top-chart-card (直方图 + 分布) — mirrors weekly's structure
+    boundary_h = stats.DAY_BOUNDARY_HOUR if False else 4  # default; keep simple
+    from daytrace import stats as _daily_stats
+    boundary_h = _daily_stats.DAY_BOUNDARY_HOUR
+
+    # Per-hour stack (24 bins) for histogram
+    per_hour, per_hour_totals = _daily_per_hour_stack(
+        day_events, boundary_h, mode=mode, unit=unit,
+    )
+    # Overall counter across hours — drives palette + distribution view.
+    # Reuse the same palette helper as weekly so colors match the swim-lane.
+    top_names, palette, overall_counter = _compute_palette_for_week(per_hour)
+
+    histogram_body = _daily_histogram_body(
+        per_hour=per_hour, per_hour_totals=per_hour_totals,
+        unit=unit, mode=mode, top_names=top_names, palette=palette,
+        boundary_hour=boundary_h, chart_height_px=220,
+    )
+    distribution_body = _distribution_view_body(
+        overall=overall_counter, palette=palette, unit=unit, mode=mode,
+    )
+
+    # Unit pills go INSIDE this card (they only matter for chart + dist)
+    unit_pill_links = "".join(
+        f'<a class="unit-tab{" active" if u_id == unit else ""}" '
+        f'data-param="unit" data-value="{u_id}" '
+        f'href="{esc(_mode_link("/today", {"date": date, "mode": mode if mode != "source" else None, "unit": u_id if u_id != "count" else None}))}">'
+        f'{label}</a>'
+        for u_id, label in UNITS
+    )
+    top_chart_switcher = (
+        '<div class="dim-tabs" data-role="tc-switcher">'
+        f'<button type="button" class="dim-tab{" active" if top_view == "chart" else ""}" data-view="chart">直方图</button>'
+        f'<button type="button" class="dim-tab{" active" if top_view == "dist" else ""}" data-view="dist">分布</button>'
+        '</div>'
+    )
+    unit_label_daily = dict(UNITS).get(unit, unit)
+    dim_label_daily = dict(DIMENSIONS).get(mode, mode)
+    daily_top_chart_card = (
+        f'<div class="card top-chart-card" id="top-chart" data-tc-view="{esc(top_view)}">'
+        '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">'
+        f'<h3 style="margin:0;">每小时 {esc(unit_label_daily)} <span class="muted small" style="font-weight:500;">· 维度: {esc(dim_label_daily)}</span></h3>'
+        '<div style="margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
+        f'<span class="muted small" style="font-weight:600;">单位</span>'
+        f'<div class="unit-tabs">{unit_pill_links}</div>'
+        f'{top_chart_switcher}'
+        '</div>'
+        '</div>'
+        f'<div class="tc-pane" data-pane="chart">{histogram_body}</div>'
+        f'<div class="tc-pane" data-pane="dist">{distribution_body}</div>'
+        '</div>'
+    )
+
+    # Highlights / suggestions card — mirrors weekly's right column under
+    # the chart. Reuse the existing daily AI overview shape (highlights +
+    # concerns) but rebrand the concerns as suggestions if you ever swap
+    # the channel. For now we keep ✨ Highlights / ⚠️ Concerns labels.
+    highlights_concerns_html = _render_highlights_concerns_card(ai_overview)
+    right_column_body = daily_top_chart_card + (highlights_concerns_html or "")
+
+    # Bottom swim-lane card — reuse the weekly module with days=[date] so
+    # the rendering is literally identical (single row covering 24h, ticks
+    # colored by the current dim mode). Filter pills sit above as a shared
+    # control.
+    sf_param = qs_swim_filter if False else None  # placeholder
+    sf = "all"
+    swim_body = (
+        _weekly_swimlane_card(
+            events=day_events, days=[date or ""], boundary_hour=boundary_h,
+            stack_by=mode, top_names=top_names, palette=palette,
+            swim_filter=sf,
+        ) if date else ""
+    )
+    # Filter pills — All + each top-N value, same pattern as weekly
+    filter_pills = [
+        '<button type="button" class="dim-tab'
+        + (' active' if sf == 'all' else '')
+        + '" data-filter="all">全部</button>'
+    ]
+    for n in top_names:
+        if overall_counter.get(n, 0) <= 0:
+            continue
+        color = palette.get(n, _WEEKLY_OTHER_COLOR)
+        cls = "dim-tab active" if sf == n else "dim-tab"
+        swatch = (
+            f'<span style="display:inline-block; width:8px; height:8px; '
+            f'border-radius:50%; background:{color}; margin-right:6px; '
+            f'vertical-align:middle;"></span>'
+        )
+        filter_pills.append(
+            f'<button type="button" class="{cls}" data-filter="{esc(n)}">'
+            f'{swatch}{esc(n)}'
+            f'<span class="muted" style="margin-left:6px; font-weight:500; font-size:11px;">'
+            f'×{int(overall_counter[n]) if isinstance(overall_counter[n], (int, float)) else overall_counter[n]}</span>'
+            f'</button>'
+        )
+    daily_filter_bar = (
+        '<div data-role="swim-filter" '
+        'style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; '
+        'margin:8px 0 12px;">'
+        '<span class="muted small" style="margin-right:4px; font-weight:600;">筛选</span>'
+        + "".join(filter_pills) +
+        '</div>'
+    )
+    daily_swim_card = (
+        f'<section class="card weekly-viz" id="chart" data-view="swim" data-filter="{esc(sf)}">'
+        '<div style="display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap;">'
+        '<h3 style="margin:0;">时间线</h3>'
+        '</div>'
+        + daily_filter_bar +
+        '<div class="wv-pane" data-pane="swim" style="display:block;">' + swim_body + '</div>'
+        '</section>'
+    )
+
+    # Page JS — handles dim/unit pill live-URL nav (scroll preservation),
+    # top-chart-card view switching, swim filter (no heatmap on daily so
+    # the heat-specific branch from weekly is skipped).
+    daily_sync_js = (
+        '<script>(function(){'
+        'var KEY="daytrace.today.scrollY";'
+        'var saved=sessionStorage.getItem(KEY);'
+        'if(saved!==null){window.scrollTo(0,parseInt(saved,10)||0);sessionStorage.removeItem(KEY);}'
+        # Live-URL nav for all data-param pills (dim + unit pills page-wide)
+        'document.querySelectorAll("a[data-param]").forEach(function(a){'
+        'a.addEventListener("click",function(e){'
+        'if(a.classList.contains("active")){e.preventDefault();return;}'
+        'e.preventDefault();'
+        'sessionStorage.setItem(KEY,String(window.scrollY));'
+        'try{var u=new URL(location.href);'
+        'u.searchParams.set(a.dataset.param,a.dataset.value);'
+        'location.href=u.toString();}catch(err){location.href=a.href;}'
+        '});});'
+        # Top chart switcher
+        'var tc=document.querySelector(".top-chart-card");'
+        'if(tc){'
+        'tc.querySelectorAll("[data-role=\\"tc-switcher\\"] .dim-tab").forEach(function(btn){'
+        'btn.addEventListener("click",function(){'
+        'var v=btn.dataset.view;'
+        'tc.setAttribute("data-tc-view",v);'
+        'tc.querySelectorAll("[data-role=\\"tc-switcher\\"] .dim-tab").forEach(function(b){'
+        'b.classList.toggle("active",b.dataset.view===v);});'
+        'try{var u=new URL(location.href);'
+        'if(v==="chart"){u.searchParams.delete("style");}else{u.searchParams.set("style",v);}'
+        'history.replaceState({},"",u);}catch(e){}'
+        '});});}'
+        # Donut hover (top-chart-card distribution view)
+        'var donut=document.querySelector(".top-chart-card .cc-donut[data-segments]");'
+        'if(donut){'
+        'var dSegs=[];try{dSegs=JSON.parse(donut.dataset.segments||"[]");}catch(e){}'
+        'var dWrap=donut.parentElement;dWrap.style.position="relative";'
+        'var dTip=document.createElement("div");'
+        'dTip.style.cssText="position:absolute;pointer-events:none;z-index:10;background:rgba(34,28,18,.95);color:#fff7e8;border-radius:10px;padding:7px 11px;box-shadow:0 10px 26px rgba(0,0,0,.28);font-size:12px;max-width:260px;line-height:1.45;display:none;white-space:nowrap;";'
+        'dWrap.appendChild(dTip);'
+        'function dEsc(s){return String(s==null?"":s).replace(/[&<>\\"]/g,function(c){return({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"})[c];});}'
+        'donut.addEventListener("mousemove",function(ev){'
+        'var r=donut.getBoundingClientRect();'
+        'var cx=r.left+r.width/2,cy=r.top+r.height/2;'
+        'var dx=ev.clientX-cx,dy=ev.clientY-cy;'
+        'var dist=Math.sqrt(dx*dx+dy*dy);'
+        'var outerR=r.width/2;var innerR=outerR*(124/210);'
+        'if(dist<innerR||dist>outerR){dTip.style.display="none";return;}'
+        'var a=Math.atan2(dx,-dy);if(a<0)a+=2*Math.PI;'
+        'var pct=a/(2*Math.PI)*100;'
+        'var seg=null;'
+        'for(var i=0;i<dSegs.length;i++){if(pct>=dSegs[i].start&&pct<dSegs[i].end){seg=dSegs[i];break;}}'
+        'if(!seg)seg=dSegs[dSegs.length-1];'
+        'if(!seg){dTip.style.display="none";return;}'
+        'dTip.innerHTML="<div style=\\"font-weight:700;margin-bottom:3px;\\"><span style=\\"display:inline-block;width:10px;height:10px;border-radius:2px;background:"+seg.color+";margin-right:6px;vertical-align:middle;\\"></span>"+dEsc(seg.name)+"</div>"+'
+        '"<div>"+dEsc(seg.label)+" · "+(seg.share*100).toFixed(1)+"%</div>";'
+        'dTip.style.display="block";'
+        'var pr=dWrap.getBoundingClientRect();'
+        'var x=ev.clientX-pr.left+14;var y=ev.clientY-pr.top+14;'
+        'if(x+dTip.offsetWidth>pr.width-4)x=pr.width-dTip.offsetWidth-4;'
+        'dTip.style.left=x+"px";dTip.style.top=y+"px";'
+        '});'
+        'donut.addEventListener("mouseleave",function(){dTip.style.display="none";});'
+        '}'
+        # Swim-lane filter (JS-only, no heatmap on daily)
+        'var card=document.querySelector(".weekly-viz");'
+        'if(card){'
+        'function applyFilter(v){'
+        'card.setAttribute("data-filter",v);'
+        'card.querySelectorAll(".tl-swim-tick").forEach(function(t){'
+        't.style.display=(v==="all"||t.dataset.value===v)?"":"none";});'
+        'card.querySelectorAll(".tl-swim-row").forEach(function(row){'
+        'var c=row.querySelectorAll(\'.tl-swim-tick:not([style*="display: none"])\').length;'
+        'var b=row.querySelector("[data-row-count]");if(b)b.textContent="×"+c;});'
+        'card.querySelectorAll("[data-role=\\"swim-filter\\"] .dim-tab").forEach(function(b){'
+        'b.classList.toggle("active",b.dataset.filter===v);});'
+        'try{var u=new URL(location.href);'
+        'if(v==="all"){u.searchParams.delete("swim_filter");}else{u.searchParams.set("swim_filter",v);}'
+        'history.replaceState({},"",u);}catch(e){}}'
+        'card.querySelectorAll("[data-role=\\"swim-filter\\"] .dim-tab").forEach(function(btn){'
+        'btn.addEventListener("click",function(){applyFilter(btn.dataset.filter);});});'
+        'var init=card.getAttribute("data-filter")||"all";'
+        'if(init!=="all"){applyFilter(init);}'
+        '}'
+        '})();</script>'
     )
 
     project_cards_html = (
         project_cards_section(con, date, day_events=day_events, unit=unit, top_n_open=3)
         if date else ""
     )
-    highlights_concerns_html = _render_highlights_concerns_card(ai_overview)
 
     content = f"""
 {dim_bar}
 <section class="report-grid">
   <div class="card daily-report"><div class="bucket-head"><h2>每日 Report · {esc(date or '无日期')}</h2><span class="tag source">Daily</span></div>{rich_daily_body}</div>
-  <div class="right-column">
-    {composition_html}
-    {highlights_concerns_html}
-  </div>
+  <div class="right-column">{right_column_body}</div>
 </section>
-<section class="timeline-section">
-  {timeline_html}
-</section>
+{daily_swim_card}
 {project_cards_html}
-{dim_sync_js}
+{daily_sync_js}
 """
     # Calendar control: thread `mode` so picking a date on the header keeps it.
     cal_hidden = {"mode": mode} if mode != "source" else {}
@@ -2598,7 +2764,11 @@ def _stack_value_of(ev: dict, stack_by: str) -> str:
         return _project_of(ev)
     if stack_by == "activity":
         return str(ev.get("activity") or "未分类")
-    return str(ev.get(stack_by) or "unknown")  # source / device_id
+    if stack_by == "device":
+        return str(ev.get("device_id") or "unknown")
+    if stack_by == "location":
+        return str(ev.get("location_id") or "unknown")
+    return str(ev.get(stack_by) or "unknown")  # source / device_id / etc
 
 
 def _per_day_stack(
@@ -3546,6 +3716,171 @@ def _vs_last_week_card(diffs: list[dict]) -> str:
         '<th style="text-align:right;">上周</th>'
         '<th style="text-align:right;">Δ</th></tr></thead>'
         f'<tbody>{"".join(rows_html)}</tbody></table></section>'
+    )
+
+
+def _daily_per_hour_stack(
+    events: list[dict], boundary_hour: int,
+    *, mode: str, unit: str,
+) -> tuple[dict[int, dict[str, float]], dict[int, float]]:
+    """For each shifted-hour 0..23 (0 = boundary_hour, 23 = boundary_hour+23
+    mod 24), return {dim_value: weight} + per-hour totals.
+
+    unit='hours': per-5min-slot proportional split (same algorithm as the
+    weekly main chart, just bucketed into hour bins instead of day bins).
+    Per-hour total = active_minutes in that hour, in hours.
+
+    unit='count' / 'chars': simple per-event weight summed per (hour, dim).
+    """
+    from collections import defaultdict
+    from daytrace.stats import _safe_minute
+
+    per_hour: dict[int, dict[str, float]] = {h: defaultdict(float) for h in range(24)}
+
+    if unit == "hours":
+        # Aggregate per 5-min slot, then assign to hour bin.
+        per_slot: dict[int, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for ev in events:
+            m = _safe_minute(ev.get("start"))
+            if m is None:
+                continue
+            slot = m // 5
+            v = _stack_value_of(ev, mode)
+            per_slot[slot][v] += 1
+        for slot, counts in per_slot.items():
+            total = sum(counts.values())
+            if total <= 0:
+                continue
+            clock_hour = (slot * 5) // 60
+            shifted_h = (clock_hour - boundary_hour) % 24
+            for v, c in counts.items():
+                # 5 min * proportion / 60 = hours
+                per_hour[shifted_h][v] += (5 * (c / total)) / 60.0
+    else:
+        for ev in events:
+            m = _safe_minute(ev.get("start"))
+            if m is None:
+                continue
+            clock_hour = m // 60
+            shifted_h = (clock_hour - boundary_hour) % 24
+            v = _stack_value_of(ev, mode)
+            w = int(ev.get("char_count") or 0) if unit == "chars" else 1
+            per_hour[shifted_h][v] += w
+
+    per_hour_out = {h: dict(b) for h, b in per_hour.items()}
+    totals = {h: sum(b.values()) for h, b in per_hour_out.items()}
+    return per_hour_out, totals
+
+
+def _daily_histogram_body(
+    *, per_hour: dict[int, dict[str, float]],
+    per_hour_totals: dict[int, float], unit: str, mode: str,
+    top_names: list[str], palette: dict[str, str],
+    boundary_hour: int, chart_height_px: int = 220,
+) -> str:
+    """24-bar stacked histogram mirroring _main_chart_card's look but for
+    hours within one day. X-axis labels = shifted clock hours
+    (boundary_hour, +1, …, +23). Same Y-axis tick + grid + bar styling."""
+    from collections import Counter
+
+    overall: Counter = Counter()
+    for bag in per_hour.values():
+        for k, v in bag.items():
+            overall[k] += v
+
+    def fold(bag: dict[str, float]) -> list[tuple[str, float]]:
+        kept = []
+        other = 0.0
+        for k, v in bag.items():
+            if k in palette:
+                kept.append((k, v))
+            else:
+                other += v
+        kept.sort(key=lambda kv: -kv[1])
+        if other > 0:
+            kept.append(("其它", other))
+        return kept
+
+    raw_max = max(per_hour_totals.values()) if per_hour_totals else 0
+    if raw_max <= 0:
+        return '<div class="muted">该维度今日无可用数据</div>'
+
+    axis_max, axis_ticks = _nice_axis_max(raw_max, unit)
+    Y_AXIS_W = 40
+
+    y_ticks_html = []
+    grid_lines_html = []
+    for t in axis_ticks:
+        pct = (t / axis_max) * 100
+        y_ticks_html.append(
+            f'<div style="position:absolute; right:6px; bottom:calc({pct:.2f}% - 7px); '
+            f'font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; line-height:1;">'
+            f'{_format_value(t, unit)}</div>'
+        )
+        grid_lines_html.append(
+            f'<div style="position:absolute; left:0; right:0; bottom:{pct:.2f}%; '
+            f'height:0; border-top:1px dashed #d9ccaf; pointer-events:none;"></div>'
+        )
+
+    # 24 bars from shifted_h=0 to 23. Show every-other hour label so the
+    # X axis doesn't crowd.
+    bars_html = []
+    x_labels_html = []
+    for shifted_h in range(24):
+        clock_hour = (boundary_hour + shifted_h) % 24
+        bag = fold(per_hour.get(shifted_h, {}))
+        total = per_hour_totals.get(shifted_h, 0.0)
+        bar_pct = (total / axis_max) * 100 if axis_max else 0
+        tooltip_lines = [f"{clock_hour:02d}:00 · {_format_value(total, unit)}"]
+        tooltip_lines.extend(f"  {k}: {_format_value(v, unit)}" for k, v in bag if v > 0)
+        tooltip = "\n".join(tooltip_lines)
+        segs = []
+        for k, v in bag:
+            if v <= 0:
+                continue
+            seg_pct = (v / total) * 100 if total > 0 else 0
+            color = palette.get(k, _WEEKLY_OTHER_COLOR)
+            segs.append(
+                f'<div title="{esc(k)}: {_format_value(v, unit)}" '
+                f'style="height:{seg_pct:.2f}%; background:{color}; '
+                f'border-bottom:1px solid rgba(255,255,255,0.55);"></div>'
+            )
+        bars_html.append(
+            f'<div title="{esc(tooltip)}" '
+            f'style="flex:1; min-width:0; display:flex; justify-content:center; align-items:flex-end; '
+            f'height:100%; position:relative; z-index:1;">'
+            f'<div style="width:74%; height:{bar_pct:.2f}%; display:flex; flex-direction:column-reverse; '
+            f'border-radius:3px 3px 0 0; overflow:hidden; background:#f1ece2; min-height:1px;">'
+            + "".join(segs) +
+            '</div>'
+            '</div>'
+        )
+        # Show label every 2 hours to avoid crowding
+        if shifted_h % 2 == 0:
+            x_labels_html.append(
+                f'<div style="flex:1; min-width:0; text-align:center; padding-top:5px;">'
+                f'<div style="font-size:10.5px; color:var(--muted); font-variant-numeric:tabular-nums;">{clock_hour:02d}</div>'
+                '</div>'
+            )
+        else:
+            x_labels_html.append('<div style="flex:1; min-width:0;"></div>')
+
+    return (
+        '<div style="padding:8px 4px 4px;">'
+        f'<div style="display:flex; align-items:stretch; height:{chart_height_px}px;">'
+        f'<div style="position:relative; width:{Y_AXIS_W}px; flex:none;">'
+        + "".join(y_ticks_html) +
+        '</div>'
+        '<div style="position:relative; flex:1;">'
+        + "".join(grid_lines_html) +
+        '<div style="position:absolute; inset:0; display:flex; gap:2px; align-items:flex-end;">'
+        + "".join(bars_html) +
+        '</div></div>'
+        '</div>'
+        f'<div style="display:flex; gap:2px; padding-left:{Y_AXIS_W}px;">'
+        + "".join(x_labels_html) +
+        '</div>'
+        '</div>'
     )
 
 
