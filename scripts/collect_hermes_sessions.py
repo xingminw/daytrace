@@ -84,32 +84,63 @@ def session_sidecar_path(root: Path, session_id: str) -> Path:
     return root / f"session_{session_id}.json"
 
 
+_MAX_TEXT_CHARS = 8000  # hard cap on per-message text we'll keep
+
+
+def _extract_list_text(items) -> str:
+    """Pull text-typed parts out of a list of content items, dropping
+    image / file / data-URL segments that would otherwise fill the field
+    with megabytes of base64."""
+    parts: list[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            item_type = item.get("type")
+            if item_type in {"text", "input_text"} and item.get("text"):
+                parts.append(str(item.get("text")))
+            # image_url / image / file / etc → silently dropped
+            continue
+        if isinstance(item, str):
+            parts.append(item)
+    return "\n".join(p.strip() for p in parts if p and p.strip()).strip()
+
+
 def extract_content_text(raw_content) -> str:
     """Return user-visible text from Hermes message content.
 
     Feishu image messages can be stored as content arrays containing one text
     part plus large data:image/base64 parts. Only the text part should become a
     DayTrace input event; otherwise screenshots fill Title/Content with base64.
-    """
+
+    Hermes sometimes pre-stringifies the content list to its Python repr
+    (single-quoted dicts), so when we get a string that obviously LOOKS like
+    a list-of-dicts we try to parse it back before extraction. Falls back to
+    a stripped raw string + truncation if parsing fails."""
+    import ast
+    import json as _json
+
     if raw_content is None:
         return ""
-    if isinstance(raw_content, str):
-        return raw_content.strip()
     if isinstance(raw_content, list):
-        parts: list[str] = []
-        for item in raw_content:
-            if isinstance(item, dict):
-                item_type = item.get("type")
-                if item_type in {"text", "input_text"} and item.get("text"):
-                    parts.append(str(item.get("text")))
-                continue
-            if isinstance(item, str):
-                parts.append(item)
-        return "\n".join(part.strip() for part in parts if part and part.strip()).strip()
+        return _extract_list_text(raw_content)[:_MAX_TEXT_CHARS]
     if isinstance(raw_content, dict):
-        text = raw_content.get("text") if isinstance(raw_content, dict) else None
-        return str(text).strip() if text else ""
-    return str(raw_content).strip()
+        text = raw_content.get("text")
+        return (str(text).strip() if text else "")[:_MAX_TEXT_CHARS]
+    if isinstance(raw_content, str):
+        s = raw_content.strip()
+        # Heuristic: stringified Python list of dicts (e.g. content stored
+        # via str(list_obj) before JSONL write). Try ast.literal_eval first
+        # (handles single quotes), then strict JSON.
+        if s.startswith("[{") or s.startswith("[ "):
+            for parser in (ast.literal_eval, _json.loads):
+                try:
+                    parsed = parser(s)
+                except Exception:
+                    continue
+                if isinstance(parsed, list):
+                    return _extract_list_text(parsed)[:_MAX_TEXT_CHARS]
+                break
+        return s[:_MAX_TEXT_CHARS]
+    return str(raw_content).strip()[:_MAX_TEXT_CHARS]
 
 
 def load_channel_names() -> dict[str, str]:
