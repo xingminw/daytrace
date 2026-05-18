@@ -232,6 +232,180 @@ def pending_dates(
     }
 
 
+def plan_device_pulls(
+    con: sqlite3.Connection,
+    *,
+    device_ids: list[str],
+    target_date: str | None = None,
+    lookback_days: int = 7,
+    hard_cutoff_days: int = 30,
+    always_redo_recent: int = 2,
+) -> dict:
+    """Per-(device, shifted-day) plan: which (device, date) pairs need a pull?
+
+    Rules:
+      - For each device in `device_ids`, for each day in [target-lookback, target]:
+          * needs_pull if no prior successful attempt (last_success_at IS NULL)
+          * needs_pull if day falls in always_redo_recent window
+          * otherwise skip (we already have it)
+      - Days older than hard_cutoff_days are NEVER re-attempted, even if never
+        succeeded — keeps the log bounded and avoids forever-retrying a dead day.
+
+    Returns:
+      {
+        "target_date": str,
+        "window": {"start": str, "end": str, "hard_cutoff": str},
+        "pulls": [{"device_id", "date", "reason"}, ...],
+        "skipped_old": [{"device_id", "date"}, ...],
+      }
+    """
+    from datetime import date as _date, timedelta
+    from . import stats
+
+    if target_date is None:
+        from datetime import datetime
+        now = datetime.now()
+        if now.hour < stats.DAY_BOUNDARY_HOUR:
+            target_date = (now.date() - timedelta(days=1)).isoformat()
+        else:
+            target_date = now.date().isoformat()
+
+    target = _date.fromisoformat(target_date)
+    start = (target - timedelta(days=lookback_days)).isoformat()
+    end = target.isoformat()
+    hard_cutoff = (target - timedelta(days=hard_cutoff_days)).isoformat()
+
+    # Existing log rows for these devices in (or near) the window
+    placeholders = ",".join("?" * len(device_ids)) if device_ids else "''"
+    log_rows = con.execute(
+        f"""
+        SELECT device_id, date, last_success_at
+          FROM device_pull_log
+         WHERE device_id IN ({placeholders})
+           AND date BETWEEN ? AND ?
+        """,
+        (*device_ids, hard_cutoff, end),
+    ).fetchall() if device_ids else []
+    succeeded: set[tuple[str, str]] = {
+        (r["device_id"], r["date"]) for r in log_rows if r["last_success_at"]
+    }
+
+    recent = {
+        (target - timedelta(days=i)).isoformat()
+        for i in range(always_redo_recent)
+    }
+
+    pulls = []
+    skipped_old = []
+    # Enumerate every day in [start..end] (not just dates with events — we
+    # explicitly want to attempt pulls even on days the local hub has nothing).
+    cur = _date.fromisoformat(start)
+    target_d = target
+    while cur <= target_d:
+        d = cur.isoformat()
+        for dev in device_ids:
+            if d in recent:
+                pulls.append({"device_id": dev, "date": d, "reason": "always_redo_recent"})
+            elif (dev, d) not in succeeded:
+                pulls.append({"device_id": dev, "date": d, "reason": "never_succeeded"})
+            # else: skip, we already have it
+        cur = cur + timedelta(days=1)
+
+    return {
+        "target_date": target_date,
+        "window": {"start": start, "end": end, "hard_cutoff": hard_cutoff},
+        "pulls": pulls,
+        "skipped_old": skipped_old,
+    }
+
+
+def record_pull_attempt(
+    con: sqlite3.Connection,
+    *,
+    device_id: str,
+    date: str,
+    success: bool,
+    event_count: int | None = None,
+    error: str | None = None,
+) -> None:
+    """Upsert one (device, date) pull attempt. `last_success_at` is only
+    advanced on success, so a later failure doesn't erase the fact that we
+    once had data for that day."""
+    from datetime import datetime
+
+    now = datetime.now().isoformat(timespec="seconds")
+    if success:
+        con.execute(
+            """
+            INSERT INTO device_pull_log
+                (device_id, date, last_attempt_at, last_success_at,
+                 last_event_count, last_error)
+            VALUES (?, ?, ?, ?, ?, NULL)
+            ON CONFLICT(device_id, date) DO UPDATE SET
+                last_attempt_at  = excluded.last_attempt_at,
+                last_success_at  = excluded.last_success_at,
+                last_event_count = excluded.last_event_count,
+                last_error       = NULL
+            """,
+            (device_id, date, now, now, event_count),
+        )
+    else:
+        con.execute(
+            """
+            INSERT INTO device_pull_log
+                (device_id, date, last_attempt_at, last_success_at,
+                 last_event_count, last_error)
+            VALUES (?, ?, ?, NULL, NULL, ?)
+            ON CONFLICT(device_id, date) DO UPDATE SET
+                last_attempt_at = excluded.last_attempt_at,
+                last_error      = excluded.last_error
+            """,
+            (device_id, date, now, error),
+        )
+    con.commit()
+
+
+def pull_status_matrix(
+    con: sqlite3.Connection,
+    *,
+    device_ids: list[str],
+    target_date: str | None = None,
+    lookback_days: int = 7,
+) -> list[dict]:
+    """Flat list of (device_id, date, last_attempt_at, last_success_at, last_error)
+    rows for the window, suitable for human-readable status display."""
+    from datetime import date as _date, timedelta
+    from . import stats
+
+    if target_date is None:
+        from datetime import datetime
+        now = datetime.now()
+        if now.hour < stats.DAY_BOUNDARY_HOUR:
+            target_date = (now.date() - timedelta(days=1)).isoformat()
+        else:
+            target_date = now.date().isoformat()
+
+    target = _date.fromisoformat(target_date)
+    start = (target - timedelta(days=lookback_days)).isoformat()
+    end = target.isoformat()
+
+    if not device_ids:
+        return []
+    placeholders = ",".join("?" * len(device_ids))
+    rows = con.execute(
+        f"""
+        SELECT device_id, date, last_attempt_at, last_success_at,
+               last_event_count, last_error
+          FROM device_pull_log
+         WHERE device_id IN ({placeholders})
+           AND date BETWEEN ? AND ?
+         ORDER BY device_id, date
+        """,
+        (*device_ids, start, end),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def _maybe_json(text: str | None):
     if text is None or text == "":
         return None

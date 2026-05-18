@@ -50,3 +50,7 @@ inbox/
 .env
 .env.*
 !.env.example
+
+# Generated launchd / cron config — they embed live API keys
+ops/*.plist
+ops/*-local.*

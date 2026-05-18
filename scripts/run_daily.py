@@ -1,24 +1,26 @@
 #!/usr/bin/env python3
-"""Single-entrypoint daily runner — wires together collect → upload → import
-→ regenerate so cron / launchd doesn't have to call five separate scripts.
+"""Single-entrypoint daily runner — wires together collect → ssh+rsync pull
+→ import → regenerate so cron / launchd doesn't have to call five scripts.
 
-Two modes, picked via `--role`:
+Subcommands:
 
-  branch  : collect events from a device config, upload to Feishu Drive.
-            Used on satellite machines (omen-wsl, ipad-via-shortcut, etc.)
-            that produce data but don't keep the DB.
+  status   : dry-run; print which dates would be (re-)processed and, with
+             --devices, the per-device pull matrix. JSON on stdout so a
+             scheduler can parse it.
 
-  hub     : collect own events too (this Mac is also a producer), upload,
-            pull every other device's day, import the inbox, regen all
-            stats + AI for the day. End-to-end nightly.
+  catchup  : the daily entrypoint. For every pending (device, date) pair
+             (per device_pull_log), either run collect_from_config locally
+             or ssh into the remote, run it there, and rsync the inbox slice
+             back. Then import everything and regenerate any day whose
+             events_hash changed.
 
 By default `--date` is "yesterday under the shifted-day boundary" (so a
 run scheduled for 04:30 picks up the work day that just ended at 04:00).
 
 Designed to be cron-safe:
   - idempotent: re-running for the same day is a no-op for cached stages
-  - safe-to-skip: each stage logs + continues on failure
-  - one-line invocation so launchd / cron stays simple
+  - per-device, per-day state in device_pull_log: a remote offline today
+    is retried tomorrow without losing visibility
   - log to stdout (cron captures), plus optional --log-file
 """
 
@@ -89,31 +91,6 @@ def yesterday_shifted() -> str:
     return now.date().isoformat()
 
 
-def cmd_branch(args: argparse.Namespace) -> int:
-    """Collect + upload. Doesn't touch the local DB."""
-    date = args.date or yesterday_shifted()
-    config = args.config
-    inbox_token = args.inbox_token
-    identity = args.as_identity
-    print(f"branch run: date={date} config={config} identity={identity}", flush=True)
-
-    with Step("collect", crash=False):
-        run_cmd(["python3", "scripts/collect_from_config.py",
-                 "--config", config, "--date", date])
-
-    with Step("upload-to-feishu-drive", crash=False):
-        run_cmd([
-            "python3", "scripts/feishu_drive_sync.py",
-            "--inbox-token", inbox_token,
-            "--as", identity,
-            "upload-date",
-            "--config", config,
-            "--date", date,
-            "--if-exists", "overwrite",
-        ])
-    return 0
-
-
 def cmd_status(args: argparse.Namespace) -> int:
     """Dry-run: print which dates would be (re-)processed if catchup ran now.
 
@@ -123,7 +100,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     """
     import json
     from daytrace.db import connect, init_db
-    from daytrace.daily_report import pending_dates
+    from daytrace.daily_report import pending_dates, pull_status_matrix
 
     con = connect(args.db); init_db(con)
     plan = pending_dates(
@@ -132,117 +109,218 @@ def cmd_status(args: argparse.Namespace) -> int:
         lookback_days=args.lookback_days,
         always_redo_recent=args.always_redo_recent,
     )
-    print(json.dumps(plan, ensure_ascii=False, indent=2))
-    return 0 if plan["to_run"] else 0  # status command never fails
+    out = {"pending_dates": plan}
+
+    # Per-device pull matrix, if any devices were specified.
+    if args.devices:
+        out["device_pulls"] = pull_status_matrix(
+            con,
+            device_ids=args.devices,
+            target_date=args.date,
+            lookback_days=args.lookback_days,
+        )
+
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+
+    # Pretty per-device table to stderr so JSON on stdout stays clean.
+    if args.devices and out.get("device_pulls"):
+        print("\ndevice               date         pulled?  events  last_attempt", file=sys.stderr)
+        for r in out["device_pulls"]:
+            ok = "✓" if r["last_success_at"] else "✗"
+            ev = r["last_event_count"] if r["last_event_count"] is not None else "-"
+            why = r["last_success_at"] or r["last_error"] or "(never)"
+            print(f"{r['device_id']:<20} {r['date']}   {ok:<7}  {ev!s:<6}  {why}",
+                  file=sys.stderr)
+    return 0
+
+
+def _parse_ssh_remote(spec: str) -> dict:
+    """Parse "device_id=ssh_alias:remote_repo[:remote_config_yaml]".
+
+    Examples:
+      omen-wsl=mtl-tail:/mnt/d/research-programs/daytrace
+      omen-wsl=mtl-tail:/mnt/d/research-programs/daytrace:config/devices/omen-wsl.yaml
+
+    The remote config path defaults to `config/devices/<device_id>.yaml`,
+    which is the project's convention.
+    """
+    if "=" not in spec:
+        raise ValueError(f"--remote expected 'device_id=ssh:path[:config]', got {spec!r}")
+    device_id, rest = spec.split("=", 1)
+    parts = rest.split(":", 2)
+    if len(parts) < 2:
+        raise ValueError(f"--remote rest needs ssh:path, got {rest!r}")
+    ssh_alias = parts[0]
+    remote_repo = parts[1]
+    remote_config = parts[2] if len(parts) == 3 else f"config/devices/{device_id}.yaml"
+    return {
+        "device_id": device_id,
+        "ssh_alias": ssh_alias,
+        "remote_repo": remote_repo,
+        "remote_config": remote_config,
+    }
+
+
+def remote_collect_and_pull(remote: dict, date: str) -> None:
+    """For one remote device on one date:
+       1) ssh into it, ask it to run collect_from_config locally
+       2) rsync its inbox/<device>/<date>/ down to our local inbox/.
+
+    Idempotent. Remote machine doesn't need its own cron — hub drives it.
+    """
+    dev = remote["device_id"]
+    ssh_alias = remote["ssh_alias"]
+    remote_repo = remote["remote_repo"]
+    remote_config = remote["remote_config"]
+
+    # 1) remote collect — writes <remote_repo>/inbox/<dev>/<date>/*.jsonl
+    remote_cmd = (
+        f"export PATH=$HOME/.npm-global/bin:$PATH && "
+        f"cd {shlex.quote(remote_repo)} && "
+        f"python3 scripts/collect_from_config.py "
+        f"--config {shlex.quote(remote_config)} "
+        f"--date {shlex.quote(date)}"
+    )
+    run_cmd(["ssh", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes",
+             ssh_alias, remote_cmd])
+
+    # 2) rsync remote inbox slice down. Trailing slashes matter: src/ → dst/
+    local_target = REPO_ROOT / "inbox" / dev / date
+    local_target.mkdir(parents=True, exist_ok=True)
+    src = f"{ssh_alias}:{remote_repo}/inbox/{dev}/{date}/"
+    run_cmd(["rsync", "-av", "--delete", src, f"{local_target}/"])
+
+
+def _device_id_from_config(config_path: str) -> str:
+    """Read just `device.id` from a collector YAML."""
+    from daytrace.collector_config import load_collector_config
+    return load_collector_config(config_path)["device"]["id"]
+
+
+def _read_inbox_manifest_count(device_id: str, date: str) -> int | None:
+    """After a collect (local or rsync'd back), read inbox/<dev>/<date>/manifest.json
+    and return total_events. Returns None if the manifest isn't there yet."""
+    import json
+    p = REPO_ROOT / "inbox" / device_id / date / "manifest.json"
+    if not p.exists():
+        return None
+    try:
+        return int(json.loads(p.read_text(encoding="utf-8")).get("total_events", 0))
+    except Exception:
+        return None
 
 
 def cmd_catchup(args: argparse.Namespace) -> int:
-    """For each date that needs (re-)processing, run the hub pipeline.
+    """SSH-direct catchup with per-(device, date) state tracking.
 
-    Idempotent: cache hits make re-running a settled date essentially
-    free; new events get picked up via the events_hash check. Safe to
-    invoke every night even if nothing changed.
+    Two phases:
+      1) PULL — for every (device, date) the plan says we still need,
+         either collect locally (hub) or ssh-collect+rsync from a remote.
+         Every attempt (success or failure) is recorded in device_pull_log,
+         so an unreachable remote shows up explicitly and gets retried on
+         the next run instead of silently being "fresh forever".
+      2) REGEN — import everything into events, then run pending_dates and
+         regenerate_day_from_db on any date whose events_hash changed.
+
+    Pre-reqs: ssh aliases configured (~/.ssh/config); each remote has a
+    checked-out daytrace repo at the path given in --remote.
     """
     from daytrace.db import connect, init_db
-    from daytrace.daily_report import pending_dates
+    from daytrace.daily_report import (
+        pending_dates, plan_device_pulls, record_pull_attempt,
+        regenerate_day_from_db,
+    )
 
     con = connect(args.db); init_db(con)
-    plan = pending_dates(
+
+    remotes = [_parse_ssh_remote(s) for s in args.remote]
+    remote_by_id = {r["device_id"]: r for r in remotes}
+    hub_device_id = _device_id_from_config(args.config)
+    all_device_ids = [hub_device_id] + list(remote_by_id.keys())
+
+    # ── Phase 1: pull per (device, date) ─────────────────────────────────
+    plan = plan_device_pulls(
         con,
+        device_ids=all_device_ids,
         target_date=args.date,
+        lookback_days=args.lookback_days,
+        hard_cutoff_days=args.hard_cutoff_days,
+        always_redo_recent=args.always_redo_recent,
+    )
+    pulls = plan["pulls"]
+    print(
+        f"catchup phase-1: target={plan['target_date']} window={plan['window']} "
+        f"devices={all_device_ids} pulls_planned={len(pulls)}",
+        flush=True,
+    )
+
+    pull_failures: list[tuple[str, str]] = []
+    for p in pulls:
+        dev = p["device_id"]; d = p["date"]; why = p["reason"]
+        print(f"\n── pull {dev} {d} ({why}) ──", flush=True)
+        try:
+            if dev == hub_device_id:
+                with Step(f"collect-local/{d}", crash=True):
+                    run_cmd(["python3", "scripts/collect_from_config.py",
+                             "--config", args.config, "--date", d])
+            else:
+                r = remote_by_id[dev]
+                with Step(f"pull-remote/{dev}/{d}", crash=True):
+                    remote_collect_and_pull(r, d)
+            count = _read_inbox_manifest_count(dev, d)
+            record_pull_attempt(
+                con, device_id=dev, date=d, success=True, event_count=count,
+            )
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            print(f"  !! pull failed: {err}", flush=True)
+            record_pull_attempt(
+                con, device_id=dev, date=d, success=False, error=err,
+            )
+            pull_failures.append((dev, d))
+
+    # ── Phase 2: import + regen ──────────────────────────────────────────
+    print(f"\n── phase-2: import + regen ──", flush=True)
+    try:
+        with Step("import-inbox", crash=True):
+            run_cmd(["python3", "scripts/import_inbox.py"])
+    except Exception as e:
+        print(f"!!! import-inbox failed: {type(e).__name__}: {e}", flush=True)
+        return 1
+
+    rep_plan = pending_dates(
+        con, target_date=args.date,
         lookback_days=args.lookback_days,
         always_redo_recent=args.always_redo_recent,
     )
-    to_run = plan["to_run"]
+    to_run = rep_plan["to_run"]
+    regen_failures: list[str] = []
     if not to_run:
-        print(f"catchup: nothing to do (target={plan['target_date']})", flush=True)
-        return 0
+        print(f"  nothing to regenerate (target={rep_plan['target_date']})", flush=True)
+    else:
+        print(f"  regen days: {to_run}", flush=True)
+        for d in to_run:
+            try:
+                with Step(f"regen/{d}", crash=True):
+                    rep = regenerate_day_from_db(con, d, include_ai=True)
+                    cost = con.execute(
+                        "SELECT COALESCE(SUM(cost_usd),0) FROM day_channel "
+                        "WHERE date=? AND generator='ai'", (d,)
+                    ).fetchone()[0]
+                    print(f"    events={rep.total_events}  ai_cost=${cost:.4f}", flush=True)
+            except Exception as e:
+                print(f"!!! regen {d} failed: {type(e).__name__}: {e}", flush=True)
+                regen_failures.append(d)
 
     print(
-        f"catchup: target={plan['target_date']}  to_run={to_run}  "
-        f"(missing={plan['missing']}, stale={plan['stale']})",
+        f"\ncatchup done: "
+        f"pulls={len(pulls)-len(pull_failures)}/{len(pulls)} OK, "
+        f"regens={len(to_run)-len(regen_failures)}/{len(to_run)} OK"
+        + (f"\n  pull_failures={pull_failures}" if pull_failures else "")
+        + (f"\n  regen_failures={regen_failures}" if regen_failures else ""),
         flush=True,
     )
-
-    failures = []
-    for d in to_run:
-        print(f"\n──────── {d} ────────", flush=True)
-        sub = argparse.Namespace(
-            date=d,
-            config=args.config,
-            inbox_token=args.inbox_token,
-            as_identity=args.as_identity,
-            pull_devices=args.pull_devices,
-        )
-        try:
-            cmd_hub(sub)
-        except Exception as e:
-            print(f"!!! day {d} failed: {type(e).__name__}: {e}", flush=True)
-            failures.append(d)
-
-    print(
-        f"\ncatchup done: {len(to_run) - len(failures)}/{len(to_run)} succeeded"
-        + (f", failed: {failures}" if failures else ""),
-        flush=True,
-    )
-    return 1 if failures else 0
-
-
-def cmd_hub(args: argparse.Namespace) -> int:
-    """Branch work + pull every other device + import + regen."""
-    date = args.date or yesterday_shifted()
-    config = args.config
-    inbox_token = args.inbox_token
-    identity = args.as_identity
-    other_devices = args.pull_devices
-    print(f"hub run: date={date} config={config} pull={other_devices}", flush=True)
-
-    # 1) Be a branch for our own machine
-    with Step("collect-own", crash=False):
-        run_cmd(["python3", "scripts/collect_from_config.py",
-                 "--config", config, "--date", date])
-
-    with Step("upload-own", crash=False):
-        run_cmd([
-            "python3", "scripts/feishu_drive_sync.py",
-            "--inbox-token", inbox_token,
-            "--as", identity,
-            "upload-date",
-            "--config", config,
-            "--date", date,
-            "--if-exists", "overwrite",
-        ])
-
-    # 2) Pull every other device's contribution to the same date
-    for dev in other_devices:
-        with Step(f"pull/{dev}", crash=False):
-            run_cmd([
-                "python3", "scripts/feishu_drive_sync.py",
-                "--inbox-token", inbox_token,
-                "--as", identity,
-                "pull",
-                "--device", dev,
-                "--date", date,
-                "--force",   # we want today's data even if ledger says pulled
-            ])
-
-    # 3) Import every jsonl that landed in inbox into the SQLite DB
-    with Step("import-inbox", crash=True):  # this one we want loud failures
-        run_cmd(["python3", "scripts/import_inbox.py"])
-
-    # 4) Regenerate stats + AI for the day (also makes report card up-to-date)
-    with Step("regenerate-day-report", crash=True):
-        from daytrace.db import connect, init_db
-        from daytrace.daily_report import regenerate_day_from_db
-        con = connect("data/daytrace.sqlite"); init_db(con)
-        rep = regenerate_day_from_db(con, date, include_ai=True)
-        cost = con.execute(
-            "SELECT COALESCE(SUM(cost_usd), 0) FROM day_channel "
-            "WHERE date = ? AND generator = 'ai'", (date,)
-        ).fetchone()[0]
-        print(f"    events={rep.total_events}  ai_cost=${cost:.4f}", flush=True)
-
-    return 0
+    return 1 if (pull_failures or regen_failures) else 0
 
 
 def main() -> int:
@@ -255,26 +333,8 @@ def main() -> int:
     )
     sub = parser.add_subparsers(dest="role", required=True)
 
-    b = sub.add_parser("branch", help="collect + upload (satellite machine)")
-    b.add_argument("--config", required=True, help="device config YAML")
-    b.add_argument("--date", help="YYYY-MM-DD; defaults to shifted-day yesterday")
-    b.add_argument("--inbox-token", required=True, help="Feishu Drive folder token")
-    b.add_argument("--as", dest="as_identity", default="user", choices=["bot", "user"])
-    b.set_defaults(func=cmd_branch)
-
-    h = sub.add_parser("hub", help="branch work + pull + import + regen (single date)")
-    h.add_argument("--config", required=True, help="this hub's own device config YAML")
-    h.add_argument("--date", help="YYYY-MM-DD; defaults to shifted-day yesterday")
-    h.add_argument("--inbox-token", required=True, help="Feishu Drive folder token")
-    h.add_argument("--as", dest="as_identity", default="user", choices=["bot", "user"])
-    h.add_argument(
-        "--pull-devices", nargs="*", default=[],
-        help="device IDs to pull (e.g. omen-wsl)",
-    )
-    h.set_defaults(func=cmd_hub)
-
-    # `status` and `catchup` are designed for an external scheduler (Hermes,
-    # cron, launchd) to ask "what's pending?" and "do all of it" without
+    # `status` and `catchup` are designed for an external scheduler
+    # (cron / launchd) to ask "what's pending?" and "do all of it" without
     # threading per-day flags. Idempotent — safe to run on any cadence.
     s = sub.add_parser("status", help="dry-run: which dates would be (re-)processed?")
     s.add_argument("--db", default="data/daytrace.sqlite")
@@ -283,23 +343,30 @@ def main() -> int:
                    help="scan this many days back for stale/missing dates")
     s.add_argument("--always-redo-recent", type=int, default=2,
                    help="always re-run the N most recent days (cache makes this cheap)")
+    s.add_argument("--devices", nargs="*", default=[],
+                   help="also print per-device pull matrix for these device IDs")
     s.set_defaults(func=cmd_status)
 
-    c = sub.add_parser("catchup", help="run every pending date (use this from cron / Hermes)")
-    c.add_argument("--config", required=True, help="this hub's own device config YAML")
-    c.add_argument("--db", default="data/daytrace.sqlite")
-    c.add_argument("--inbox-token", required=True, help="Feishu Drive folder token")
-    c.add_argument("--as", dest="as_identity", default="user", choices=["bot", "user"])
-    c.add_argument(
-        "--pull-devices", nargs="*", default=[],
-        help="device IDs to pull (e.g. omen-wsl)",
+    # `catchup` is the daily entrypoint: collect local + ssh-pull each remote
+    # for every pending (device, date) pair, then import + regen.
+    cs = sub.add_parser(
+        "catchup",
+        help="pull all pending (device, date) pairs via ssh+rsync, then import + regen",
     )
-    c.add_argument("--date", help="YYYY-MM-DD target; defaults to shifted-day yesterday")
-    c.add_argument("--lookback-days", type=int, default=7,
-                   help="scan this many days back for stale/missing dates")
-    c.add_argument("--always-redo-recent", type=int, default=2,
-                   help="always re-run the N most recent days (cache-cheap)")
-    c.set_defaults(func=cmd_catchup)
+    cs.add_argument("--config", required=True, help="this hub's own device config YAML")
+    cs.add_argument("--db", default="data/daytrace.sqlite")
+    cs.add_argument(
+        "--remote", action="append", default=[],
+        help="repeatable: device_id=ssh_alias:remote_repo[:remote_config_yaml]",
+    )
+    cs.add_argument("--date", help="YYYY-MM-DD target; defaults to shifted-day yesterday")
+    cs.add_argument("--lookback-days", type=int, default=7,
+                    help="scan this many days back for stale/missing dates")
+    cs.add_argument("--always-redo-recent", type=int, default=2,
+                    help="always re-run the N most recent days (cache-cheap)")
+    cs.add_argument("--hard-cutoff-days", type=int, default=30,
+                    help="don't bother retrying pulls older than N days (keeps log bounded)")
+    cs.set_defaults(func=cmd_catchup)
 
     args = parser.parse_args()
 

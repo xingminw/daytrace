@@ -7,7 +7,7 @@ from typing import Iterable, Any
 
 from .schema import TraceEvent
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 DEFAULT_DEVICE_ID = "Mac"
 DEFAULT_LOCATION_ID = "unknown"
 DEFAULT_COLLECTOR_ID = "hub-local"
@@ -192,6 +192,21 @@ CREATE TABLE IF NOT EXISTS event_activity_labels (
   FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_event_activity_labels_label ON event_activity_labels(label);
+-- Per-(device, shifted-day) pull bookkeeping for the SSH-direct catchup loop.
+-- Hub records every attempted pull from a remote device; pending_dates uses
+-- this to detect "remote was offline that day, must retry" independently of
+-- the events_hash signal (which can't tell missing data from "no events").
+-- date is the shifted day the pull was for (NOT the wall-clock day we ran).
+CREATE TABLE IF NOT EXISTS device_pull_log (
+  device_id        TEXT NOT NULL,
+  date             TEXT NOT NULL,            -- shifted day, YYYY-MM-DD
+  last_attempt_at  TEXT NOT NULL,
+  last_success_at  TEXT,                     -- NULL until first success
+  last_event_count INTEGER,
+  last_error       TEXT,                     -- NULL on success
+  PRIMARY KEY (device_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_device_pull_log_date ON device_pull_log(date);
 """
 
 
