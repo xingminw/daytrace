@@ -47,6 +47,10 @@ body.events-page form { height:100%; }
 .weekly-viz .wv-pane { display:none; }
 .weekly-viz[data-view="swim"] .wv-pane[data-pane="swim"] { display:block; }
 .weekly-viz[data-view="heat"] .wv-pane[data-pane="heat"] { display:block; }
+/* Weekly top-chart card: histogram vs promoted-legend distribution view. */
+.top-chart-card .tc-pane { display:none; }
+.top-chart-card[data-tc-view="chart"] .tc-pane[data-pane="chart"] { display:block; }
+.top-chart-card[data-tc-view="dist"]  .tc-pane[data-pane="dist"]  { display:block; }
 .card { background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:14px; padding:12px; box-shadow:0 8px 18px rgba(65,45,10,.05); }
 .metric { font-size:26px; font-weight:850; letter-spacing:-0.04em; }.metric-small { font-size:18px; font-weight:850; }.label { color:var(--muted); margin-top:3px; font-size:12px; } section { margin-top:12px; } h2 { font-size:16px; margin:0 0 8px; } h3 { margin:0 0 5px; font-size:14px; }
 .bar { display:flex; align-items:center; gap:10px; margin:9px 0; }.bar-name { width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }.bar-track { flex:1; height:10px; border-radius:999px; background:#ece3d2; overflow:hidden; }.bar-fill { height:100%; background:linear-gradient(90deg,#2f6fed,#7b61ff); border-radius:999px; }.bar-count { width:42px; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
@@ -2935,10 +2939,11 @@ def _weekly_swimlane_card(
 
 def _compute_palette_for_week(
     per_day: dict[str, dict[str, float]],
-) -> tuple[list[str], dict[str, str]]:
+) -> tuple[list[str], dict[str, str], "Counter"]:
     """Top-N dim values across the week → distinct palette colors, rest grey.
-    Returned so other cards (swim-lane, legend) can reuse the same mapping
-    and stay color-consistent with the main chart."""
+    Returns (top_names, palette, overall_counter). The Counter is the summed
+    per-dim totals across the week — distribution view + breakdown tables
+    can reuse it instead of re-aggregating."""
     from collections import Counter
     overall: Counter = Counter()
     for bag in per_day.values():
@@ -2947,7 +2952,7 @@ def _compute_palette_for_week(
     top = [n for n, _ in overall.most_common(10)]
     palette = _palette_for(top)
     palette["其它"] = _WEEKLY_OTHER_COLOR
-    return top, palette
+    return top, palette, overall
 
 
 def _nice_axis_max(raw_max: float, unit: str) -> tuple[float, list[float]]:
@@ -3077,43 +3082,70 @@ def _main_chart_card(
             '</div>'
         )
 
-    # Legend (reuses .tl-legend-item / .tl-swatch from the daily timeline CSS)
-    legend = []
-    for k in [n for n in top if overall[n] > 0]:
-        color = palette[k]
-        total = overall[k]
-        legend.append(
-            f'<span class="tl-legend-item">'
-            f'<span class="tl-swatch" style="background:{color};"></span>'
-            f'<span>{esc(k)}</span>'
-            f'<span class="muted" style="font-size:11px; font-variant-numeric:tabular-nums;">{_format_value(total, unit)}</span>'
-            f'</span>'
-        )
-
     return (
         '<div style="padding:8px 4px 4px;">'
         # Chart row: Y-axis column | chart area
         f'<div style="display:flex; align-items:stretch; height:{chart_height_px}px;">'
-        # Y-axis labels column
         f'<div style="position:relative; width:{Y_AXIS_W}px; flex:none;">'
         + "".join(y_ticks_html) +
         '</div>'
-        # Chart area (grid lines absolutely positioned, bars in flex row)
         '<div style="position:relative; flex:1;">'
         + "".join(grid_lines_html) +
         '<div style="position:absolute; inset:0; display:flex; gap:6px; align-items:flex-end;">'
         + "".join(bars_html) +
         '</div></div>'
         '</div>'
-        # X-axis labels row (offset to match the bars area)
         f'<div style="display:flex; gap:6px; padding-left:{Y_AXIS_W}px;">'
         + "".join(x_labels_html) +
         '</div>'
         '</div>'
-        # Legend
-        '<div style="display:flex; flex-wrap:wrap; gap:6px 14px; padding:10px 8px 0;'
-        f' margin-left:{Y_AXIS_W}px; border-top:1px dashed #eadfcd; font-size:12px;">'
-        + "".join(legend) +
+    )
+
+
+def _distribution_view_body(
+    *, overall: "Counter", palette: dict[str, str], unit: str, mode: str,
+) -> str:
+    """Promoted-legend view: one horizontal bar per dim value, sorted desc.
+    Shares the palette + value formatter with the histogram so colors and
+    units line up. Top 12 + "其它" rollup below."""
+    items = overall.most_common(12)
+    if not items:
+        return '<div class="muted">本周该维度无可用数据</div>'
+
+    rest_total = sum(v for _, v in overall.most_common()[12:])
+    if rest_total > 0:
+        items = items + [("其它", rest_total)]
+    grand_total = sum(v for _, v in overall.items()) or 1
+    max_val = max(v for _, v in items) or 1
+    dim_label = {
+        "project": "项目", "source": "数据源",
+        "activity": "活动", "device_id": "设备",
+    }.get(mode, mode)
+
+    rows_html = []
+    for name, value in items:
+        color = palette.get(name, _WEEKLY_OTHER_COLOR)
+        share_pct = value / grand_total * 100
+        bar_pct = value / max_val * 100
+        rows_html.append(
+            '<div style="display:grid; grid-template-columns:14px minmax(140px,1.2fr) minmax(160px,2.5fr) 64px 44px; '
+            'align-items:center; gap:10px; padding:5px 0;">'
+            f'<span style="width:12px; height:12px; border-radius:3px; background:{color}; display:inline-block;"></span>'
+            f'<span class="cc-bar-name" title="{esc(name)}" style="font-weight:600; color:#3b352e;">{esc(name)}</span>'
+            f'<span style="height:10px; background:#ece3d2; border-radius:999px; overflow:hidden;">'
+            f'<span style="display:block; height:100%; width:{bar_pct:.2f}%; background:{color}; border-radius:999px;"></span>'
+            f'</span>'
+            f'<span style="text-align:right; font-size:13px; font-weight:700; font-variant-numeric:tabular-nums;">{esc(_format_value(value, unit))}</span>'
+            f'<span style="text-align:right; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums;">{share_pct:.0f}%</span>'
+            '</div>'
+        )
+
+    return (
+        '<div style="padding:4px 8px;">'
+        f'<div class="muted small" style="margin-bottom:6px;">'
+        f'按{esc(dim_label)}排序 · 共 {len(items)} 项'
+        '</div>'
+        + "".join(rows_html) +
         '</div>'
     )
 
@@ -3489,7 +3521,7 @@ def weekly_page(
         per_day_stack, per_day_totals = _per_day_stack(
             events, days, bh, stack_by=mode, unit=unit,
         )
-    top_names, palette = _compute_palette_for_week(per_day_stack)
+    top_names, palette, overall_dim_totals = _compute_palette_for_week(per_day_stack)
 
     # AI summary
     ai_summary = _ai_weekly_summary(
@@ -3518,17 +3550,35 @@ def weekly_page(
         '</div>'
     )
 
-    # RIGHT card of top row: standalone histogram (responds to dim/unit, no view-switcher)
+    # RIGHT card of top row: two views CSS-toggled inside one card.
+    #   - 直方图 (default): per-day stacked bars with Y axis + grid
+    #   - 分布:  the legend promoted to a real chart — top-N items as
+    #            horizontal bars sorted by total; shares the palette with
+    #            the histogram so the same name = the same color.
     main_chart_body = _main_chart_card(
         days=days, per_day=per_day_stack, per_day_totals=per_day_totals,
         unit=unit, stack_by=mode, top_names=top_names, palette=palette,
         chart_height_px=200,
     )
+    dist_view_body = _distribution_view_body(
+        overall=overall_dim_totals, palette=palette, unit=unit, mode=mode,
+    )
+    top_chart_switcher = (
+        '<div class="dim-tabs" data-role="tc-switcher" style="margin-left:auto;">'
+        '<button type="button" class="dim-tab active" data-view="chart">直方图</button>'
+        '<button type="button" class="dim-tab" data-view="dist">分布</button>'
+        '</div>'
+    )
+    unit_label = dict(_WEEKLY_UNIT_OPTS).get(unit, unit)
+    dim_label = dict(_WEEKLY_DIM_OPTS).get(mode, mode)
     top_histogram_card = (
-        '<div class="card" id="top-chart">'
-        f'<h3 style="margin:0 0 6px;">直方图 · 每日 {esc(dict(_WEEKLY_UNIT_OPTS).get(unit, unit))}</h3>'
-        f'<div class="muted small" style="margin-bottom:6px;">维度: {esc(dict(_WEEKLY_DIM_OPTS).get(mode, mode))}</div>'
-        f'{main_chart_body}'
+        '<div class="card top-chart-card" id="top-chart" data-tc-view="chart">'
+        '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px;">'
+        f'<h3 style="margin:0;">每日 {esc(unit_label)} <span class="muted small" style="font-weight:500;">· 维度: {esc(dim_label)}</span></h3>'
+        f'{top_chart_switcher}'
+        '</div>'
+        f'<div class="tc-pane" data-pane="chart">{main_chart_body}</div>'
+        f'<div class="tc-pane" data-pane="dist">{dist_view_body}</div>'
         '</div>'
     )
 
@@ -3583,7 +3633,7 @@ def weekly_page(
         'sessionStorage.setItem(KEY,String(window.scrollY));});});'
         # ── (2) bottom view switcher (CSS attr toggle) ──
         'var card=document.querySelector(".weekly-viz");'
-        'if(!card)return;'
+        'if(card){'
         'card.querySelectorAll("[data-role=\\"wv-switcher\\"] .dim-tab").forEach(function(btn){'
         'btn.addEventListener("click",function(){'
         'var v=btn.dataset.view;'
@@ -3592,7 +3642,17 @@ def weekly_page(
         'b.classList.toggle("active",b.dataset.view===v);});'
         'try{var u=new URL(location.href);u.searchParams.set("view",v);'
         'history.replaceState({},"",u);}catch(e){}'
-        '});});'
+        '});});}'
+        # ── (3) top chart card switcher: histogram vs distribution ──
+        'var tc=document.querySelector(".top-chart-card");'
+        'if(tc){'
+        'tc.querySelectorAll("[data-role=\\"tc-switcher\\"] .dim-tab").forEach(function(btn){'
+        'btn.addEventListener("click",function(){'
+        'var v=btn.dataset.view;'
+        'tc.setAttribute("data-tc-view",v);'
+        'tc.querySelectorAll("[data-role=\\"tc-switcher\\"] .dim-tab").forEach(function(b){'
+        'b.classList.toggle("active",b.dataset.view===v);});'
+        '});});}'
         '})();</script>'
     )
 
