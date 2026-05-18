@@ -59,6 +59,10 @@ body.events-page form { height:100%; }
 .dim-tab, .unit-tab { font-size:12.5px; padding:4px 14px; border-radius:999px; border:none; background:transparent; color:#3b352e; font-weight:650; cursor:pointer; transition:background .12s, color .12s; }
 .dim-tab:hover, .unit-tab:hover { background:rgba(0,0,0,.04); }
 .dim-tab.active, .unit-tab.active { background:var(--ink); color:white; }.analysis-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:12px; }.wide-card { grid-column:1 / -1; }
+/* Tasks panels: 任务 + 审稿 side-by-side (2 cols), collapses to 1 col
+   when narrow or when the toggle picks a single table. */
+.tasks-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:start; }
+@media (max-width:1100px) { .tasks-grid { grid-template-columns: 1fr; } }
 /* Weekly view-switcher card: only the active view's pane is visible.
    Toggling .weekly-viz[data-view] flips visibility with no reload (no scroll jump). */
 .weekly-viz .wv-pane { display:none; }
@@ -4456,7 +4460,8 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
     if not cards_html:
         return ""
 
-    # Top selector pill bar — JS toggles visibility of each card
+    # Top selector pill bar — JS toggles visibility of each card and
+    # collapses/expands the 2-col grid accordingly.
     pills = ['<button type="button" class="dim-tab active" data-table-pick="all">全部</button>']
     for tk in table_order:
         pills.append(
@@ -4473,20 +4478,25 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         '<script>(function(){'
         'var bar=document.querySelector(\'[data-role="tasks-table-pick"]\');'
         'if(!bar)return;'
-        'bar.querySelectorAll(".dim-tab").forEach(function(btn){'
-        'btn.addEventListener("click",function(){'
-        'var pick=btn.dataset.tablePick;'
-        'bar.querySelectorAll(".dim-tab").forEach(function(b){b.classList.toggle("active",b===btn);});'
+        'var grid=document.querySelector(".tasks-grid");'
+        'function apply(pick){'
+        'bar.querySelectorAll(".dim-tab").forEach(function(b){'
+        'b.classList.toggle("active",b.dataset.tablePick===pick);});'
         'document.querySelectorAll(".tasks-card").forEach(function(c){'
         'c.style.display=(pick==="all"||c.dataset.tableKey===pick)?"":"none";});'
-        '});});'
+        'if(grid){grid.style.gridTemplateColumns=(pick==="all")?"":"1fr";}'
+        '}'
+        'bar.querySelectorAll(".dim-tab").forEach(function(btn){'
+        'btn.addEventListener("click",function(){apply(btn.dataset.tablePick);});});'
         '})();</script>'
     )
 
     return (
         '<section style="margin-top:12px;" id="tasks-region">'
         f'{pill_bar}'
-        + "".join(cards_html)
+        '<div class="tasks-grid">'
+        + "".join(cards_html) +
+        '</div>'
         + toggle_js
         + '</section>'
     )

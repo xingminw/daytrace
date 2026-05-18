@@ -305,13 +305,12 @@ def cmd_catchup(args: argparse.Namespace) -> int:
             if cfg is None:
                 print("    (work_items disabled / no config; skipping)", flush=True)
             else:
-                stats = wi.sync_from_feishu(
-                    con, app_token=cfg["app_token"], table_id=cfg["table_id"],
-                    as_identity=cfg.get("as", "user"),
-                )
+                sync_stats = wi.sync_from_feishu(con, cfg)
+                total_fetched = sum(t.get("fetched", 0) for t in sync_stats.get("tables", []))
                 links = wi.rebuild_links(con, lookback_days=30)
                 print(
-                    f"    work_items: fetched={stats['fetched']} "
+                    f"    work_items: fetched={total_fetched} across "
+                    f"{len(sync_stats.get('tables', []))} table(s)  "
                     f"links={links['links_inserted']}",
                     flush=True,
                 )
@@ -369,21 +368,18 @@ def cmd_work_items_sync(args: argparse.Namespace) -> int:
         return 0
 
     con = connect(args.db); init_db(con)
-    print(
-        f"work-items-sync: pulling table {cfg['table_id']} from "
-        f"app {cfg['app_token']} as {cfg['as']}...",
-        flush=True,
-    )
-    try:
-        sync_stats = wi.sync_from_feishu(
-            con, app_token=cfg["app_token"], table_id=cfg["table_id"],
-            as_identity=cfg.get("as", "user"),
-        )
-    except Exception as e:
-        print(f"!!! sync failed: {type(e).__name__}: {e}", flush=True)
-        return 1
-    print(f"  fetched={sync_stats['fetched']}  upserted={sync_stats['upserted']}",
-          flush=True)
+    tables = [t["name"] for t in cfg.get("tables", [])]
+    print(f"work-items-sync: pulling {len(tables)} table(s): {tables}", flush=True)
+    sync_stats = wi.sync_from_feishu(con, cfg)
+    for entry in sync_stats.get("tables", []):
+        if entry.get("error"):
+            print(f"  ✗ {entry['name']}: {entry['error']}", flush=True)
+        else:
+            print(
+                f"  ✓ {entry['name']}: fetched={entry['fetched']} "
+                f"upserted={entry['upserted']}",
+                flush=True,
+            )
 
     link_stats = wi.rebuild_links(con, lookback_days=args.lookback_days)
     print(
