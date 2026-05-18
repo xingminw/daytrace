@@ -42,6 +42,12 @@ body.events-page form { height:100%; }
 .dim-tab, .unit-tab { font-size:12.5px; padding:4px 14px; border-radius:999px; border:none; background:transparent; color:#3b352e; font-weight:650; cursor:pointer; transition:background .12s, color .12s; }
 .dim-tab:hover, .unit-tab:hover { background:rgba(0,0,0,.04); }
 .dim-tab.active, .unit-tab.active { background:var(--ink); color:white; }.analysis-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:12px; }.wide-card { grid-column:1 / -1; }
+/* Weekly view-switcher card: only the active view's pane is visible.
+   Toggling .weekly-viz[data-view] flips visibility with no reload (no scroll jump). */
+.weekly-viz .wv-pane { display:none; }
+.weekly-viz[data-view="chart"] .wv-pane[data-pane="chart"] { display:block; }
+.weekly-viz[data-view="swim"]  .wv-pane[data-pane="swim"]  { display:block; }
+.weekly-viz[data-view="heat"]  .wv-pane[data-pane="heat"]  { display:block; }
 .card { background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:14px; padding:12px; box-shadow:0 8px 18px rgba(65,45,10,.05); }
 .metric { font-size:26px; font-weight:850; letter-spacing:-0.04em; }.metric-small { font-size:18px; font-weight:850; }.label { color:var(--muted); margin-top:3px; font-size:12px; } section { margin-top:12px; } h2 { font-size:16px; margin:0 0 8px; } h3 { margin:0 0 5px; font-size:14px; }
 .bar { display:flex; align-items:center; gap:10px; margin:9px 0; }.bar-name { width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }.bar-track { flex:1; height:10px; border-radius:999px; background:#ece3d2; overflow:hidden; }.bar-fill { height:100%; background:linear-gradient(90deg,#2f6fed,#7b61ff); border-radius:999px; }.bar-count { width:42px; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
@@ -2790,13 +2796,46 @@ def _compute_palette_for_week(
     return top, palette
 
 
+def _nice_axis_max(raw_max: float, unit: str) -> tuple[float, list[float]]:
+    """Round raw_max up to a nice number and pick 4-5 evenly-spaced ticks.
+    Mirrors the convention the daily report's tl-y-tick uses."""
+    if raw_max <= 0:
+        return 1.0, [0]
+    # candidate step sizes per unit — pick the smallest step that puts
+    # at most 5 ticks between 0 and raw_max
+    import math
+    if unit == "hours":
+        candidates = [0.5, 1, 2, 3, 4, 6, 8, 12]
+    elif unit == "chars":
+        candidates = [500, 1000, 2000, 5000, 10000, 20000, 50000, 100000]
+    else:  # count
+        candidates = [5, 10, 20, 50, 100, 200, 500, 1000, 2000]
+    for step in candidates:
+        n_ticks = math.ceil(raw_max / step)
+        if n_ticks <= 5:
+            nice_max = step * n_ticks
+            ticks = [step * i for i in range(n_ticks + 1)]
+            return nice_max, ticks
+    step = candidates[-1]
+    n_ticks = math.ceil(raw_max / step)
+    return step * n_ticks, [step * i for i in range(n_ticks + 1)]
+
+
 def _main_chart_card(
     *, days: list[str], per_day: dict[str, dict[str, float]],
     per_day_totals: dict[str, float], unit: str, stack_by: str,
     top_names: list[str], palette: dict[str, str],
+    chart_height_px: int = 200,
 ) -> str:
-    """7-day stacked bar chart body. Each bar = one day; segments = stack_by dim.
-    Returns inner HTML; the caller wraps it in the view-switcher card."""
+    """7-day stacked bar chart with Y-axis ticks, grid lines, and a legend.
+
+    Layout:
+      ┌──────────────────────────────────────┐
+      │  ┃ Y-axis labels    [stacked bars]  │
+      │  ┃ (e.g. 8h, 4h, 0)                  │
+      │  └──── 日期标签 ───────────────────  │
+      │  legend swatches                      │
+      └──────────────────────────────────────┘"""
     from datetime import date as _date
     from collections import Counter
 
@@ -2819,66 +2858,107 @@ def _main_chart_card(
             kept.append(("其它", other))
         return kept
 
-    max_total = max(per_day_totals.values()) if per_day_totals else 0
-    if max_total <= 0:
+    raw_max = max(per_day_totals.values()) if per_day_totals else 0
+    if raw_max <= 0:
         return '<div class="muted">本周该维度无可用数据</div>'
 
-    BAR_HEIGHT_PX = 220
+    axis_max, axis_ticks = _nice_axis_max(raw_max, unit)
+
+    # Y-axis tick labels (left of chart) and horizontal grid lines (across chart)
+    Y_AXIS_W = 40
+    y_ticks_html = []
+    grid_lines_html = []
+    for t in axis_ticks:
+        pct_from_bottom = (t / axis_max) * 100
+        y_ticks_html.append(
+            f'<div style="position:absolute; right:6px; bottom:calc({pct_from_bottom:.2f}% - 7px); '
+            f'font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; line-height:1;">'
+            f'{_format_value(t, unit)}</div>'
+        )
+        grid_lines_html.append(
+            f'<div style="position:absolute; left:0; right:0; bottom:{pct_from_bottom:.2f}%; '
+            f'height:0; border-top:1px dashed #d9ccaf; pointer-events:none;"></div>'
+        )
+
+    # Each day = one stacked bar (anchored to bottom of chart area)
     bars_html = []
+    x_labels_html = []
     for d in days:
         bag = fold(per_day.get(d, {}))
         total = per_day_totals.get(d, 0.0)
         wd = _WEEK_ZH[_date.fromisoformat(d).weekday()]
-        # Each segment height in px is proportional to its share of max_total.
+        bar_pct = (total / axis_max) * 100
         segments = []
-        # Tooltip content: per-segment breakdown
         tooltip = f"{d} 周{wd} · {_format_value(total, unit)}\n" + "\n".join(
             f"  {k}: {_format_value(v, unit)}" for k, v in bag if v > 0
         )
         for k, v in bag:
             if v <= 0:
                 continue
-            h_px = (v / max_total) * BAR_HEIGHT_PX
+            seg_pct = (v / total) * 100 if total > 0 else 0
             color = palette.get(k, _WEEKLY_OTHER_COLOR)
             segments.append(
                 f'<div title="{esc(k)}: {_format_value(v, unit)}" '
-                f'style="height:{h_px:.1f}px; background:{color}; '
+                f'style="height:{seg_pct:.2f}%; background:{color}; '
                 f'border-bottom:1px solid rgba(255,255,255,0.55);"></div>'
             )
-        # Stack from top → tallest first; flex-end aligns to baseline.
         bars_html.append(
             f'<div title="{esc(tooltip)}" '
-            f'style="flex:1; min-width:0; display:flex; flex-direction:column; align-items:center; gap:5px;">'
-            f'<div style="height:{BAR_HEIGHT_PX}px; width:78%; display:flex; flex-direction:column-reverse; '
-            f'border-radius:5px 5px 0 0; overflow:hidden; background:#f1ece2;">'
+            f'style="flex:1; min-width:0; display:flex; justify-content:center; align-items:flex-end; '
+            f'height:100%; position:relative; z-index:1;">'
+            f'<div style="width:62%; height:{bar_pct:.2f}%; display:flex; flex-direction:column-reverse; '
+            f'border-radius:4px 4px 0 0; overflow:hidden; background:#f1ece2; min-height:2px;">'
             + "".join(segments) +
             '</div>'
-            f'<div style="font-size:12px; font-weight:600; color:var(--ink); font-variant-numeric:tabular-nums;">{_format_value(total, unit)}</div>'
-            f'<div style="font-size:11px; color:var(--muted);">周{wd}</div>'
+            # value above the bar
+            f'<div style="position:absolute; left:0; right:0; bottom:calc({bar_pct:.2f}% + 4px); '
+            f'text-align:center; font-size:10.5px; font-weight:700; color:var(--ink); '
+            f'font-variant-numeric:tabular-nums; pointer-events:none;">{_format_value(total, unit)}</div>'
+            '</div>'
+        )
+        x_labels_html.append(
+            f'<div style="flex:1; min-width:0; text-align:center; padding-top:6px;">'
+            f'<div style="font-size:11px; font-weight:600; color:#3b352e;">周{wd}</div>'
             f'<div style="font-size:10px; color:#bbb; font-variant-numeric:tabular-nums;">{esc(d[5:])}</div>'
-            f'</div>'
+            '</div>'
         )
 
-    # Legend
+    # Legend (reuses .tl-legend-item / .tl-swatch from the daily timeline CSS)
     legend = []
     for k in [n for n in top if overall[n] > 0]:
         color = palette[k]
         total = overall[k]
         legend.append(
-            f'<span style="display:inline-flex; align-items:center; gap:6px; margin-right:14px;">'
-            f'<span style="width:10px; height:10px; border-radius:3px; background:{color}; display:inline-block;"></span>'
-            f'<span style="font-size:12px;">{esc(k)}</span>'
-            f'<span style="font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums;">{_format_value(total, unit)}</span>'
+            f'<span class="tl-legend-item">'
+            f'<span class="tl-swatch" style="background:{color};"></span>'
+            f'<span>{esc(k)}</span>'
+            f'<span class="muted" style="font-size:11px; font-variant-numeric:tabular-nums;">{_format_value(total, unit)}</span>'
             f'</span>'
         )
-    if "其它" in [k for k in fold({n: overall[n] for n in overall}) [0:1]]:
-        pass  # legend already covers top-N; "其它" segment is self-explanatory
 
     return (
-        '<div style="display:flex; gap:8px; align-items:flex-end; padding:6px 4px 12px;">'
-        + "".join(bars_html) +
+        '<div style="padding:8px 4px 4px;">'
+        # Chart row: Y-axis column | chart area
+        f'<div style="display:flex; align-items:stretch; height:{chart_height_px}px;">'
+        # Y-axis labels column
+        f'<div style="position:relative; width:{Y_AXIS_W}px; flex:none;">'
+        + "".join(y_ticks_html) +
         '</div>'
-        '<div style="display:flex; flex-wrap:wrap; gap:4px; padding-top:6px; border-top:1px dashed #eadfcd;">'
+        # Chart area (grid lines absolutely positioned, bars in flex row)
+        '<div style="position:relative; flex:1;">'
+        + "".join(grid_lines_html) +
+        '<div style="position:absolute; inset:0; display:flex; gap:6px; align-items:flex-end;">'
+        + "".join(bars_html) +
+        '</div></div>'
+        '</div>'
+        # X-axis labels row (offset to match the bars area)
+        f'<div style="display:flex; gap:6px; padding-left:{Y_AXIS_W}px;">'
+        + "".join(x_labels_html) +
+        '</div>'
+        '</div>'
+        # Legend
+        '<div style="display:flex; flex-wrap:wrap; gap:6px 14px; padding:10px 8px 0;'
+        f' margin-left:{Y_AXIS_W}px; border-top:1px dashed #eadfcd; font-size:12px;">'
         + "".join(legend) +
         '</div>'
     )
@@ -3281,40 +3361,72 @@ def weekly_page(
         '</div>'
     )
 
-    # RIGHT card (highlights + suggestions)
-    highlights_card = _ai_highlights_card(ai_summary)
-    right_column_html = highlights_card or (
-        '<div class="card"><div class="muted small">'
-        '✨ Highlights / 💡 Suggestions 还没生成 '
-        '（DEEPSEEK_API_KEY 未设置或本周尚无事件）'
-        '</div></div>'
+    # RIGHT card of top row: standalone histogram (responds to dim/unit, no view-switcher)
+    main_chart_body = _main_chart_card(
+        days=days, per_day=per_day_stack, per_day_totals=per_day_totals,
+        unit=unit, stack_by=mode, top_names=top_names, palette=palette,
+        chart_height_px=200,
+    )
+    top_histogram_card = (
+        '<div class="card" id="top-chart">'
+        f'<h3 style="margin:0 0 6px;">直方图 · 每日 {esc(dict(_WEEKLY_UNIT_OPTS).get(unit, unit))}</h3>'
+        f'<div class="muted small" style="margin-bottom:6px;">维度: {esc(dict(_WEEKLY_DIM_OPTS).get(mode, mode))}</div>'
+        f'{main_chart_body}'
+        '</div>'
     )
 
-    # Main viz card — view switcher + selected view body
-    view_switcher = _view_switcher_pills(week=week, mode=mode, unit=unit, view=view)
-    view_title = {"chart": "直方图（每日堆叠）", "swim": "本周时间线（泳道）",
-                  "heat": "活跃时段热力图（24h × 7d）"}[view]
-    if view == "chart":
-        view_body = _main_chart_card(
-            days=days, per_day=per_day_stack, per_day_totals=per_day_totals,
-            unit=unit, stack_by=mode, top_names=top_names, palette=palette,
-        )
-    elif view == "swim":
-        view_body = _weekly_swimlane_card(
-            events=events, days=days, boundary_hour=bh,
-            stack_by=mode, top_names=top_names, palette=palette,
-        ) or '<div class="muted">本周无事件</div>'
-    else:  # heat
-        view_body = _hour_heatmap_card(events, days, bh) or '<div class="muted">本周无事件</div>'
+    # Highlights / suggestions card (full-width below top row)
+    highlights_card = _ai_highlights_card(ai_summary)
 
-    main_viz_card = (
-        '<section class="card" id="chart">'
-        f'<div style="display:flex; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap;">'
-        f'<h3 style="margin:0;">{esc(view_title)}</h3>'
-        f'<div style="margin-left:auto;">{view_switcher}</div>'
+    # Bottom view-switcher card — CSS-driven (no reload), mirrors daily timeline-card.
+    # All 3 view bodies are rendered to DOM; data-view attribute on the card root
+    # decides which is visible via the .wv-* CSS rules.
+    swim_body = (
+        _weekly_swimlane_card(events=events, days=days, boundary_hour=bh,
+                              stack_by=mode, top_names=top_names, palette=palette)
+        or '<div class="muted">本周无事件</div>'
+    )
+    heat_body = (
+        _hour_heatmap_card(events, days, bh)
+        or '<div class="muted">本周无事件</div>'
+    )
+
+    bottom_switcher_pills = (
+        '<div class="dim-tabs" data-role="wv-switcher">'
+        + "".join(
+            f'<button type="button" class="dim-tab{" active" if v_id == view else ""}" '
+            f'data-view="{v_id}">{label}</button>'
+            for v_id, label in _WEEKLY_VIEW_OPTS
+        )
+        + '</div>'
+    )
+    bottom_card = (
+        f'<section class="card weekly-viz" id="chart" data-view="{esc(view)}">'
+        '<div style="display:flex; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap;">'
+        '<h3 style="margin:0;">视图切换</h3>'
+        f'<div style="margin-left:auto;">{bottom_switcher_pills}</div>'
         '</div>'
-        f'{view_body}'
+        '<div class="wv-pane" data-pane="chart">' + main_chart_body + '</div>'
+        '<div class="wv-pane" data-pane="swim">' + swim_body + '</div>'
+        '<div class="wv-pane" data-pane="heat">' + heat_body + '</div>'
         '</section>'
+    )
+
+    # JS: switch bottom card view via CSS attr + URL replaceState (no reload, no scroll jump)
+    view_sync_js = (
+        '<script>(function(){'
+        'var card=document.querySelector(".weekly-viz");'
+        'if(!card)return;'
+        'card.querySelectorAll("[data-role=\\"wv-switcher\\"] .dim-tab").forEach(function(btn){'
+        'btn.addEventListener("click",function(){'
+        'var v=btn.dataset.view;'
+        'card.setAttribute("data-view",v);'
+        'card.querySelectorAll("[data-role=\\"wv-switcher\\"] .dim-tab").forEach(function(b){'
+        'b.classList.toggle("active",b.dataset.view===v);});'
+        'try{var u=new URL(location.href);u.searchParams.set("view",v);'
+        'history.replaceState({},"",u);}catch(e){}'
+        '});});'
+        '})();</script>'
     )
 
     # Per-day links
@@ -3327,11 +3439,16 @@ def weekly_page(
 
     body = (
         dim_bar
+        # Top row: AI summary | standalone histogram
         + '<section class="report-grid">'
         + weekly_report_card
-        + '<div class="right-column">' + right_column_html + '</div>'
+        + '<div class="right-column">' + top_histogram_card + '</div>'
         + '</section>'
-        + main_viz_card
+        # Highlights / suggestions (full width)
+        + (highlights_card or '')
+        # Bottom switcher card (chart/swim/heat, CSS-toggled)
+        + bottom_card
+        + view_sync_js
         + '<div class="section-grid">'
         + _breakdown_card("项目分布（本周）", by_project, total_events)
         + _breakdown_card("数据源分布（本周）", by_source, total_events)
