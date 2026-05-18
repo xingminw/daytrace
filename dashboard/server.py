@@ -61,6 +61,9 @@ body.events-page form { height:100%; }
 .dim-tab.active, .unit-tab.active { background:var(--ink); color:white; }.analysis-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:12px; }.wide-card { grid-column:1 / -1; }
 /* Tasks panels: 任务 + 审稿 side-by-side (2 cols), collapses to 1 col
    when narrow or when the toggle picks a single table. */
+.day-jumps { display:flex; flex-wrap:wrap; gap:6px; }
+.day-jump { display:inline-flex; align-items:center; padding:4px 10px; border:1px solid var(--line); background:white; border-radius:999px; font-size:12px; font-weight:600; color:var(--ink); text-decoration:none; white-space:nowrap; }
+.day-jump:hover { background:#fdf6e3; }
 .tasks-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:start; }
 @media (max-width:1100px) { .tasks-grid { grid-template-columns: 1fr; } }
 /* Two display modes:
@@ -4363,13 +4366,21 @@ def weekly_page(
         '})();</script>'
     )
 
-    # Per-day links
+    # Per-day links — single horizontal row, each opens in a new tab.
     from datetime import date as _date
-    day_links = " · ".join(
-        f'<a href="/today?date={d}">{d[5:]}（周{_WEEK_ZH[_date.fromisoformat(d).weekday()]}）</a>'
+    day_chips = "".join(
+        f'<a href="/today?date={d}" target="_blank" rel="noopener" '
+        f'class="day-jump">{d[5:]} 周{_WEEK_ZH[_date.fromisoformat(d).weekday()]}</a>'
         for d in days
     )
-    day_links_html = f'<section class="card"><h3>跳到每日报告</h3><div>{day_links}</div></section>'
+    day_links_html = (
+        '<section class="card" style="margin-top:12px;">'
+        '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">'
+        '<h3 style="margin:0;">跳到每日报告</h3>'
+        f'<div class="day-jumps">{day_chips}</div>'
+        '</div>'
+        '</section>'
+    )
 
     # Right column: histogram on top, highlights/suggestions below (stacked).
     # Both are .card so they share the right-column gutter & spacing.
