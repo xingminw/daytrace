@@ -1581,10 +1581,12 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     )
     unit_label_daily = dict(UNITS).get(unit, unit)
     dim_label_daily = dict(DIMENSIONS).get(mode, mode)
+    # ┃ Chart panel ┃ — histogram (24 hourly bars) + 分布 (donut+bars)
     daily_top_chart_card = (
         f'<div class="card top-chart-card" id="top-chart" data-tc-view="{esc(top_view)}">'
         '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">'
         f'<h3 style="margin:0;">每小时 {esc(unit_label_daily)} <span class="muted small" style="font-weight:500;">· 维度: {esc(dim_label_daily)}</span></h3>'
+        '<span class="tag source" style="background:rgba(47,111,237,0.12); color:#2f6fed;">Chart</span>'
         '<div style="margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
         f'<span class="muted small" style="font-weight:600;">单位</span>'
         f'<div class="unit-tabs">{unit_pill_links}</div>'
@@ -1647,10 +1649,12 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         + "".join(filter_pills) +
         '</div>'
     )
+    # ┃ Timeline panel ┃ — 24h swim-lane + filter pills
     daily_swim_card = (
         f'<section class="card weekly-viz" id="chart" data-view="swim" data-filter="{esc(sf)}">'
         '<div style="display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap;">'
         '<h3 style="margin:0;">时间线</h3>'
+        '<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">Timeline</span>'
         '</div>'
         + daily_filter_bar +
         '<div class="wv-pane" data-pane="swim" style="display:block;">' + swim_body + '</div>'
@@ -1743,19 +1747,27 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         '})();</script>'
     )
 
-    project_cards_html = (
-        project_cards_section(con, date, day_events=day_events, unit=unit, top_n_open=3)
-        if date else ""
-    )
-
+    # Page layout — named panels for sharing vocabulary with the user:
+    #   ┌──────────────────────────┐
+    #   │ dim-bar                  │  ← global controls (day-nav + mode)
+    #   ├─────────────┬────────────┤
+    #   │ Report      │ Chart      │  ← top row (2 cols)
+    #   │ panel       ├────────────┤
+    #   │ (daily-     │ Highlights │
+    #   │  report)    │ panel      │
+    #   ├─────────────┴────────────┤
+    #   │ Timeline panel           │  ← swim-lane + filter pills
+    #   │ (weekly-viz)             │
+    #   └──────────────────────────┘
+    # Project cards section dropped — the chart/distribution panels above
+    # already convey project-level breakdowns at the page level.
     content = f"""
 {dim_bar}
 <section class="report-grid">
-  <div class="card daily-report"><div class="bucket-head"><h2>每日 Report · {esc(date or '无日期')}</h2><span class="tag source">Daily</span></div>{rich_daily_body}</div>
+  <div class="card daily-report"><div class="bucket-head"><h2>每日 Report · {esc(date or '无日期')}</h2><span class="tag source">Report</span></div>{rich_daily_body}</div>
   <div class="right-column">{right_column_body}</div>
 </section>
 {daily_swim_card}
-{project_cards_html}
 {daily_sync_js}
 """
     # Calendar control: thread `mode` so picking a date on the header keeps it.
@@ -1968,8 +1980,13 @@ def _render_highlights_concerns_card(overview: dict | None) -> str:
         sections.append(f'<div class="dr-section"><h4>✨ Highlights</h4><ul class="dr-bullets dr-highlights">{hl}</ul></div>')
     if cn:
         sections.append(f'<div class="dr-section"><h4>⚠️ Concerns</h4><ul class="dr-bullets dr-concerns">{cn}</ul></div>')
+    # ┃ Highlights panel ┃ — AI ✨ + ⚠️ bullet lists
     return (
         '<div class="card highlights-card">'
+        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">'
+        '<h3 style="margin:0;">AI 速读</h3>'
+        '<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">Highlights</span>'
+        '</div>'
         f'<div class="dr-grid">{"".join(sections)}</div>'
         '</div>'
     )
@@ -3267,9 +3284,23 @@ def _main_chart_card(
             '</div>'
         )
 
+    # Legend strip (top-N values with palette swatches + totals)
+    legend_items = "".join(
+        f'<span class="tl-legend-item">'
+        f'<span class="tl-swatch" style="background:{palette.get(k, _WEEKLY_OTHER_COLOR)};"></span>'
+        f'{esc(k)} <span class="muted">{esc(_format_value(overall[k], unit))}</span>'
+        '</span>'
+        for k in top if overall.get(k, 0) > 0
+    )
+    legend_html = (
+        '<div style="display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px 8px 0;'
+        f' margin-left:{Y_AXIS_W}px; border-top:1px dashed #eadfcd; font-size:12px;">'
+        + legend_items +
+        '</div>'
+    ) if legend_items else ""
+
     return (
         '<div style="padding:8px 4px 4px;">'
-        # Chart row: Y-axis column | chart area
         f'<div style="display:flex; align-items:stretch; height:{chart_height_px}px;">'
         f'<div style="position:relative; width:{Y_AXIS_W}px; flex:none;">'
         + "".join(y_ticks_html) +
@@ -3284,6 +3315,7 @@ def _main_chart_card(
         + "".join(x_labels_html) +
         '</div>'
         '</div>'
+        + legend_html
     )
 
 
@@ -3681,8 +3713,13 @@ def _ai_highlights_card(summary: dict | None) -> str:
         sections.append(f'<div class="dr-section"><h4>✨ 关键进展</h4><ul class="dr-bullets dr-highlights">{hl}</ul></div>')
     if sg:
         sections.append(f'<div class="dr-section"><h4>💡 下周观察</h4><ul class="dr-bullets dr-concerns">{sg}</ul></div>')
+    # ┃ Highlights panel ┃ — AI ✨ 关键进展 + 💡 下周观察
     return (
         '<div class="card highlights-card">'
+        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:6px;">'
+        '<h3 style="margin:0;">AI 速读</h3>'
+        '<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">Highlights</span>'
+        '</div>'
         f'<div class="dr-grid">{"".join(sections)}</div>'
         '</div>'
     )
@@ -3865,6 +3902,21 @@ def _daily_histogram_body(
         else:
             x_labels_html.append('<div style="flex:1; min-width:0;"></div>')
 
+    # Legend strip — top-N value swatches + totals (mirrors weekly histogram)
+    legend_items = "".join(
+        f'<span class="tl-legend-item">'
+        f'<span class="tl-swatch" style="background:{palette.get(k, _WEEKLY_OTHER_COLOR)};"></span>'
+        f'{esc(k)} <span class="muted">{esc(_format_value(overall[k], unit))}</span>'
+        '</span>'
+        for k in top_names if overall.get(k, 0) > 0
+    )
+    legend_html = (
+        '<div style="display:flex; flex-wrap:wrap; gap:6px 14px; padding:8px 8px 0;'
+        f' margin-left:{Y_AXIS_W}px; border-top:1px dashed #eadfcd; font-size:12px;">'
+        + legend_items +
+        '</div>'
+    ) if legend_items else ""
+
     return (
         '<div style="padding:8px 4px 4px;">'
         f'<div style="display:flex; align-items:stretch; height:{chart_height_px}px;">'
@@ -3881,6 +3933,7 @@ def _daily_histogram_body(
         + "".join(x_labels_html) +
         '</div>'
         '</div>'
+        + legend_html
     )
 
 
@@ -4005,10 +4058,10 @@ def weekly_page(
         active_days=active_days, ai_cost=ai_cost,
     )
 
-    # LEFT card (stats + AI overview) — mirrors daily's .card.daily-report
+    # ┃ Report panel ┃ — stats strip + AI narrative
     weekly_report_card = (
         '<div class="card daily-report">'
-        f'<div class="bucket-head"><h2>周报 · {esc(week)}</h2><span class="tag source">Weekly</span></div>'
+        f'<div class="bucket-head"><h2>周报 · {esc(week)}</h2><span class="tag source">Report</span></div>'
         f'{stats_strip}'
         f'{_ai_summary_body(ai_summary)}'
         '</div>'
@@ -4043,10 +4096,12 @@ def weekly_page(
     )
     unit_label = dict(_WEEKLY_UNIT_OPTS).get(unit, unit)
     dim_label = dict(_WEEKLY_DIM_OPTS).get(mode, mode)
+    # ┃ Chart panel ┃ — histogram (7 daily bars) + 分布 (donut+bars)
     top_histogram_card = (
         f'<div class="card top-chart-card" id="top-chart" data-tc-view="{esc(top_view)}">'
         '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">'
         f'<h3 style="margin:0;">每日 {esc(unit_label)} <span class="muted small" style="font-weight:500;">· 维度: {esc(dim_label)}</span></h3>'
+        '<span class="tag source" style="background:rgba(47,111,237,0.12); color:#2f6fed;">Chart</span>'
         '<div style="margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
         f'<span class="muted small" style="font-weight:600;">单位</span>{unit_pills}'
         f'{top_chart_switcher}'
@@ -4121,14 +4176,15 @@ def weekly_page(
         )
         + '</div>'
     )
+    # ┃ Timeline panel ┃ — 24h swim-lane + heat 双视图 + 筛选 pill
     bottom_card = (
         f'<section class="card weekly-viz" id="chart" data-view="{esc(view)}" '
         f'data-filter="{esc(sf)}">'
         '<div style="display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap;">'
-        '<h3 style="margin:0;">视图切换</h3>'
+        '<h3 style="margin:0;">时间线</h3>'
+        '<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">Timeline</span>'
         f'<div style="margin-left:auto;">{bottom_switcher_pills}</div>'
         '</div>'
-        # Shared filter pill bar (controls both swim ticks and heat cells)
         + shared_filter_bar +
         '<div class="wv-pane" data-pane="swim">' + swim_body + '</div>'
         '<div class="wv-pane" data-pane="heat">' + heat_body + '</div>'
