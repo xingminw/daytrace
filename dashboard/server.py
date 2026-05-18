@@ -145,6 +145,9 @@ body.events-page form { height:100%; }
 .dr-sep { border:0; border-top:1px dashed #eadfcd; margin:14px 0 12px; height:0; }
 .dr-trend { display:flex; align-items:center; gap:10px; font-size:13px; line-height:1.55; padding:6px 12px; background:#fff7e8; border:1px solid #f0d68b; border-radius:10px; margin-bottom:8px; }
 .dr-trend-text { color:#362f27; }
+/* Slim trend closer sitting under the narrative in the Report card —
+   chip + 1 sentence, no box, just a thin top border for visual hand-off. */
+.dr-trend-closer { display:flex; align-items:center; gap:10px; font-size:13px; line-height:1.55; padding-top:10px; margin-top:6px; border-top:1px dashed #eadfcd; cursor:help; }
 .dr-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin:0 0 12px; }
 @media (max-width:900px) { .dr-grid { grid-template-columns:1fr; } }
 .dr-section h4 { margin:0 0 6px; font-size:12.5px; font-weight:700; color:#4d4438; letter-spacing:.04em; }
@@ -1018,12 +1021,20 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
             "运行 backfill 后可看到 AI 速读)</div>"
         )
     else:
-        # v3 layout: Report panel keeps Dashboard (facts) + 总览 (headline +
-        # narrative + key_moves) only. 趋势/关键进展/建议 move out to the
-        # full-width Insights card below the top row.
+        # v4 layout: Report card = Dashboard (4 tiles) + 总览 (headline +
+        # narrative) + 趋势 (chip + 1 sentence as a closer). Insights card
+        # below the top row hosts the 3-column 进展/节奏/跟进 grid.
+        daily_ai_cost = con.execute(
+            "SELECT COALESCE(SUM(cost_usd), 0) FROM day_channel "
+            "WHERE date=? AND generator='ai'", (date,)
+        ).fetchone()[0] or 0.0
         rich_daily_body = (
-            _render_dashboard_section(dict(day_report_row), day_channels, date or "")
+            _render_dashboard_section(
+                dict(day_report_row), day_channels, date or "",
+                ai_cost=float(daily_ai_cost),
+            )
             + _render_overview_section(ai_overview)
+            + _render_trend_closer(ai_overview, ai_continuity)
         )
 
     dates_desc = all_dates
@@ -1478,10 +1489,11 @@ def _section_header(label: str) -> str:
 
 def _render_dashboard_section(
     header: dict, channels: dict[str, str | None], date_val: str,
+    *, ai_cost: float | None = None,
 ) -> str:
-    """Dashboard section — 4-tile stats strip only. The old separate
-    'facts' rows (最长专注 / 峰值) folded into the tile sub-rows."""
-    return _render_stats_strip_compact(header, channels)
+    """Dashboard section — 4-tile stats strip only. Folds 最长专注 (was
+    its own line) into a tile and adds an AI 花费 tile parallel to weekly."""
+    return _render_stats_strip_compact(header, channels, ai_cost=ai_cost)
 
 
 def _render_overview_section(overview_payload: dict | None) -> str:
@@ -1553,57 +1565,68 @@ def _render_recommendations_section(overview_payload: dict | None) -> str:
 # can hover the title and see what prompt the model received for that
 # column. Plain `title=` attribute (browser-native tooltip; zero JS).
 _INSIGHTS_TOOLTIPS = {
-    "trend":       "AI 引导:对比昨天/上周,描述工作重心、节奏、产出有什么变化(只 1 句,不复述事件量)",
-    "highlights":  "AI 引导:今天/本周真正完成或推进了哪些具体事(合并 PR、提交、上线...) — 不要数字复述,不要写'高频活动'",
-    "suggestions": "AI 引导:针对你个人的下一步行动(具体项目+具体动作); 包括\"继续推 X\"和\"Y 已 N 天没碰,该回来\"; 不要给系统/工具建议,不要泛化效率说教",
+    "highlights":   "AI 引导:今天/本周真正推进的飞书任务+具体动作(用任务全名);只看 [task:X] 标签事件;不要数字复述,不要列没关联任务的游离工作",
+    "work_pattern": "AI 引导:基于【今日时间数据 vs 近 7 天均值】的对比观察(例:'23:31 收工,比平时晚 1h')。必须 grounded 在数字;❌不允许'合理作息''减少切换'之类空话",
+    "suggestions":  "AI 引导:只看任务清单做前瞻提醒(未推进/deadline 临近/未提交);用任务全名;❌不要回顾今天该做啥(归 highlights),不要给系统/工具建议",
 }
 
 
-def _render_insights_card(overview_payload: dict | None, *, continuity: dict | None = None) -> str:
-    """Full-width 3-column Insights card. The three columns are strictly
-    parallel: same emoji-prefixed title (with `title=` AI-prompt tooltip),
-    same bullet-list body — so they read as peers, not as a special box
-    plus two lists. Empty columns show `(无)`."""
-    if not overview_payload:
-        return ""
-
-    # ── column 1: trend — render as a SINGLE bullet so it's structurally
-    #    identical to the other two columns (no special yellow box).
+def _render_trend_closer(overview_payload: dict | None, continuity: dict | None) -> str:
+    """Trend chip + 1-sentence comparison rendered as a slim closer below
+    the Report-card narrative. Took over the standalone Insights column;
+    here we render it as a single horizontal strip so it visually wraps
+    up the overview without competing for vertical space."""
     direction = ""
     comparison = ""
-    tr = overview_payload.get("trend")
-    if isinstance(tr, dict):
-        direction = tr.get("direction") or ""
-        comparison = tr.get("comparison") or ""
+    if overview_payload:
+        tr = overview_payload.get("trend")
+        if isinstance(tr, dict):
+            direction = tr.get("direction") or ""
+            comparison = tr.get("comparison") or ""
     if not direction and continuity:
         direction = continuity.get("momentum") or ""
         comparison = continuity.get("relation_to_yesterday") or ""
-    trend_items: list[str] = []
-    if direction or comparison:
-        chip = _momentum_chip(direction) if direction else ""
-        text = f' {esc(comparison)}' if comparison else ""
-        trend_items.append(f"<li>{chip}{text}</li>")
+    if not direction and not comparison:
+        return ""
+    return (
+        '<div class="dr-trend-closer" '
+        'title="AI 引导:对比昨天,描述工作重心、节奏、产出的整体变化(只 1 句)">'
+        + (_momentum_chip(direction) if direction else "")
+        + (f'<span class="dr-trend-text">{esc(comparison)}</span>' if comparison else "")
+        + '</div>'
+    )
 
-    # ── column 2: highlights
+
+def _render_insights_card(overview_payload: dict | None, *, continuity: dict | None = None) -> str:
+    """Full-width 3-column Insights card. Three structurally identical
+    columns; trend moved to a closer on the Report card itself.
+
+    Columns:
+      🚀 关键任务进展   (highlights — what got pushed forward, task-named)
+      ⏰ 时间安排回顾   (work_pattern — today vs 7d baseline; data-grounded)
+      🔔 任务跟进提醒   (suggestions — forward-looking task watch list)
+    """
+    if not overview_payload:
+        return ""
+
     highlights = overview_payload.get("highlights") or []
-
-    # ── column 3: suggestions (v8) — fall back to v7 recommendations
+    work_pattern = overview_payload.get("work_pattern") or []
     suggestions = overview_payload.get("suggestions")
     if not suggestions:
+        # v7-v11 backward compat
         suggestions = overview_payload.get("recommendations") or []
 
-    def _col(emoji: str, label: str, key: str, items: list[str], pre_rendered: list[str] | None = None) -> str:
+    # Hide the whole card if all three columns are empty — happens when
+    # the AI run failed or we're showing very old / stub data.
+    if not (highlights or work_pattern or suggestions):
+        return ""
+
+    def _col(emoji: str, label: str, key: str, items: list[str]) -> str:
         tip = _INSIGHTS_TOOLTIPS.get(key, "")
-        if pre_rendered is not None:
-            body_html = (
-                f'<ul>{"".join(pre_rendered)}</ul>' if pre_rendered
-                else '<div class="muted">(无)</div>'
-            )
-        else:
-            body_html = (
-                f'<ul>{"".join(f"<li>{esc(x)}</li>" for x in items)}</ul>' if items
-                else '<div class="muted">(无)</div>'
-            )
+        body_html = (
+            f'<ul>{"".join(f"<li>{esc(x)}</li>" for x in items)}</ul>' if items
+            else '<div class="muted">(无)</div>'
+        )
         return (
             '<div class="insights-col">'
             f'<h4 title="{esc(tip)}">{emoji} {esc(label)}</h4>'
@@ -1618,9 +1641,9 @@ def _render_insights_card(overview_payload: dict | None, *, continuity: dict | N
         '<span class="muted small">悬停每列标题查看 AI 引导词</span>'
         '</div>'
         '<div class="insights-grid">'
-        + _col("📈", "变化趋势",  "trend",       [], pre_rendered=trend_items)
-        + _col("🚀", "关键进展",  "highlights",  highlights)
-        + _col("🎯", "建议",      "suggestions", suggestions)
+        + _col("🚀", "关键任务进展", "highlights",   highlights)
+        + _col("⏰", "时间安排回顾", "work_pattern", work_pattern)
+        + _col("🔔", "任务跟进提醒", "suggestions",  suggestions)
         + '</div>'
         '</section>'
     )
@@ -1660,16 +1683,15 @@ def _render_facts_block(date_val: str, channels: dict[str, str | None]) -> str:
     return '<div class="dr-facts">' + "".join(f"<div class='dr-fact'>{f}</div>" for f in facts) + "</div>"
 
 
-def _render_stats_strip_compact(header: dict, channels: dict[str, str | None]) -> str:
+def _render_stats_strip_compact(header: dict, channels: dict[str, str | None], *, ai_cost: float | None = None) -> str:
     """4-tile compact stats strip for the daily report card. Mirrors the
-    weekly card's 4-tile layout (events / active / span / longest focus)
-    with a small sub-row under each main number for context (switches,
-    span endpoints, etc.). 峰值 is dropped — it was just noise."""
-    time_span = _safe_load_json(channels.get("time_span")) or {}
+    weekly card's 4-tile layout. Tiles:
+      事件总数 (+ 切换 N 次) · 活跃总时长 · 最长专注 (+ 时段·项目) · AI 花费 (当天累计)
+    时间跨度 dropped — value was inaccurate and just visual noise.
+    峰值 dropped — irrelevant in a daily context."""
     switches = _safe_load_json(channels.get("context_switches")) or {}
     longest  = _safe_load_json(channels.get("longest_focus_block")) or {}
 
-    first, last = time_span.get("first") or "?", time_span.get("last") or "?"
     sw_count = switches.get("count", 0)
 
     if longest:
@@ -1681,6 +1703,9 @@ def _render_stats_strip_compact(header: dict, channels: dict[str, str | None]) -
     else:
         focus_num = "—"
         focus_sub = "(无)"
+
+    cost_num = f"${ai_cost:.3f}" if ai_cost is not None else "—"
+    cost_sub = "当天累计" if ai_cost is not None else "(未运行 AI)"
 
     def _tile(num: str, lbl: str, sub: str | None) -> str:
         sub_html = (
@@ -1697,10 +1722,10 @@ def _render_stats_strip_compact(header: dict, channels: dict[str, str | None]) -
 
     return (
         '<div class="dr-stats-compact">'
-        + _tile(str(header["total_events"]), "EVENTS", f"切换 {sw_count} 次")
-        + _tile(_format_duration_short(header["active_minutes"]), "ACTIVE", None)
-        + _tile(f"{first}–{last}", "SPAN", None)
-        + _tile(focus_num, "LONGEST FOCUS", focus_sub)
+        + _tile(str(header["total_events"]), "事件总数", f"切换 {sw_count} 次")
+        + _tile(_format_duration_short(header["active_minutes"]), "活跃总时长", None)
+        + _tile(focus_num, "最长专注", focus_sub)
+        + _tile(cost_num, "AI 花费", cost_sub)
         + '</div>'
     )
 
@@ -3182,8 +3207,9 @@ def _ai_weekly_summary(
         '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
         '    "comparison": "1 句 (≤60 字) 描述工作重心/节奏 vs 上周有什么变化, 不要复述事件量"\n'
         '  },\n'
-        '  "highlights":  ["1-3 条本周真正完成或推进的具体事项, 每条 ≤40 字"],\n'
-        '  "suggestions": ["1-3 条下周针对 ta 个人的行动 (具体项目+动作); 可以包含\'继续推 X\'、\'Y 该收尾\'、\'Z 已停 N 天该回来看看\'; 每条 ≤50 字"]\n'
+        '  "highlights":   ["🚀 关键任务进展 — 1-3 条本周真正推进的飞书任务+具体动作 (用任务全名), 每条 ≤40 字"],\n'
+        '  "work_pattern": ["⏰ 时间安排回顾 — 0-2 条本周节奏观察 (活跃总时长 vs 上周、活跃天数、有没有大块专注/碎片化); 必须 grounded 在数字; 没明显特征就留空"],\n'
+        '  "suggestions":  ["🔔 任务跟进提醒 — 1-3 条下周该盯的任务 (deadline / 已停 N 天 / 未提交); 用任务全名; ❌ 不要回顾本周该做啥"]\n'
         "}"
     )
     system = (
@@ -3215,7 +3241,7 @@ def _ai_weekly_summary(
                 raise ShapeError("overview.narrative must be string")
         elif not isinstance(payload.get("narrative"), str):
             raise ShapeError("missing 'overview' (or legacy 'narrative')")
-        for k in ("highlights", "suggestions", "recommendations", "concerns"):
+        for k in ("highlights", "work_pattern", "suggestions", "recommendations", "concerns"):
             if not isinstance(payload.get(k, []), list):
                 raise ShapeError(f"{k} must be list")
         # Legacy renames so cached values keep working through one cycle.
@@ -3225,7 +3251,7 @@ def _ai_weekly_summary(
 
     try:
         resp = ai_client.call_json_validated(
-            system=system, user=user, validator=_validator, max_tokens=900,
+            system=system, user=user, validator=_validator, max_tokens=2000,
         )
     except Exception as e:
         return {"_error": f"{type(e).__name__}: {e}"}
@@ -3272,7 +3298,7 @@ def _weekly_stats_strip(
         f'<div class="dr-stat">'
         f'<span class="dr-stat-num">${ai_cost:.3f}</span>'
         f'<span class="dr-stat-lbl">AI 报告花费</span>'
-        f'<span class="muted" style="font-size:10.5px; margin-top:2px;">DeepSeek · 含周报</span></div>'
+        f'<span class="muted" style="font-size:10.5px; margin-top:2px;">本周累计</span></div>'
         '</div>'
     )
 

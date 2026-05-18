@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v11"  # v11 = enforce task-name (vs project-name) phrasing; drop top项目 from stats
+AI_VERSION = "v12"  # v12 = 3-column Insights (highlights / work_pattern / suggestions) + 7d baseline
 
 
 # ----- Shape validators ------------------------------------------------
@@ -122,6 +122,10 @@ def validate_overview(payload):
 
     highlights = _require_list_of_str(payload, "highlights", default_empty=True)
 
+    # work_pattern is v12 (Insights column 2: ⏰ 时间安排回顾). Grounded in
+    # today's time data vs the 7-day baseline. Optional / may be empty.
+    work_pattern = _require_list_of_str(payload, "work_pattern", default_empty=True)
+
     # suggestions is the v8 name; v7 used `recommendations`.
     if "suggestions" in payload:
         suggestions = _require_list_of_str(payload, "suggestions", default_empty=True)
@@ -133,11 +137,12 @@ def validate_overview(payload):
         suggestions = [str(c).strip() for c in payload["concerns"] if isinstance(c, str) and c.strip()]
 
     return {
-        "headline":    headline,
-        "overview":    overview_obj,
-        "trend":       trend_obj,
-        "highlights":  highlights,
-        "suggestions": suggestions,
+        "headline":     headline,
+        "overview":     overview_obj,
+        "trend":        trend_obj,
+        "highlights":   highlights,
+        "work_pattern": work_pattern,
+        "suggestions":  suggestions,
     }
 
 
@@ -323,6 +328,89 @@ def _read_day_channel(con: sqlite3.Connection, date: str, channel: str):
         return None
 
 
+def _compute_recent_baseline(con: sqlite3.Connection, date: str, days: int = 7) -> dict:
+    """Average of key time-pattern stats over the `days` days strictly
+    before `date`. Reads channels `time_span`, `longest_focus_block`,
+    `context_switches`, `active_minutes` from day_channel. Returns:
+        {first_hhmm, last_hhmm, longest_focus_min, switches, active_min,
+         sample_days}  — sample_days < days when history is short.
+    All values are integers (minutes) or HH:MM strings. None of these
+    keys are present if zero history rows were found."""
+    rows = con.execute(
+        """
+        SELECT date, channel, value_json
+          FROM day_channel
+         WHERE date < ?
+           AND channel IN ('time_span','longest_focus_block','context_switches','active_minutes')
+         ORDER BY date DESC
+         LIMIT ?
+        """,
+        (date, days * 4),
+    ).fetchall()
+    if not rows:
+        return {}
+    from collections import defaultdict
+    by_date: dict[str, dict[str, dict]] = defaultdict(dict)
+    for r in rows:
+        try:
+            v = json.loads(r["value_json"]) if r["value_json"] else None
+        except Exception:
+            continue
+        if v is not None:
+            by_date[r["date"]][r["channel"]] = v
+    dated = sorted(by_date.items(), key=lambda kv: kv[0], reverse=True)[:days]
+    if not dated:
+        return {}
+
+    def _to_min(hhmm: str) -> int | None:
+        try:
+            h, m = hhmm.split(":")
+            return int(h) * 60 + int(m)
+        except Exception:
+            return None
+    def _from_min(total: int) -> str:
+        return f"{total // 60:02d}:{total % 60:02d}"
+
+    firsts, lasts, focuses, switches, actives = [], [], [], [], []
+    for _, channels in dated:
+        ts = channels.get("time_span") or {}
+        lfb = channels.get("longest_focus_block") or {}
+        cs = channels.get("context_switches") or {}
+        am = channels.get("active_minutes") or {}
+        if (f := _to_min(ts.get("first") or "")) is not None: firsts.append(f)
+        if (l := _to_min(ts.get("last")  or "")) is not None: lasts.append(l)
+        if lfb.get("duration_min"): focuses.append(int(lfb["duration_min"]))
+        if cs.get("count") is not None: switches.append(int(cs["count"]))
+        if am.get("total") is not None: actives.append(int(am["total"]))
+
+    def _avg(xs: list[int]) -> int | None:
+        return round(sum(xs) / len(xs)) if xs else None
+
+    avg_first = _avg(firsts);  avg_last = _avg(lasts)
+    return {
+        "sample_days":       len(dated),
+        "first_hhmm":        _from_min(avg_first) if avg_first is not None else None,
+        "last_hhmm":         _from_min(avg_last)  if avg_last  is not None else None,
+        "longest_focus_min": _avg(focuses),
+        "switches":          _avg(switches),
+        "active_min":        _avg(actives),
+    }
+
+
+def _format_baseline(baseline: dict) -> str:
+    """One-line baseline block for the prompt. Empty when no history."""
+    if not baseline or not baseline.get("sample_days"):
+        return ""
+    sd = baseline["sample_days"]
+    bits = []
+    if baseline.get("first_hhmm"):        bits.append(f"首次活跃 ~{baseline['first_hhmm']}")
+    if baseline.get("last_hhmm"):         bits.append(f"收工 ~{baseline['last_hhmm']}")
+    if baseline.get("active_min") is not None:        bits.append(f"活跃 ~{baseline['active_min']} min")
+    if baseline.get("longest_focus_min") is not None: bits.append(f"最长专注 ~{baseline['longest_focus_min']} min")
+    if baseline.get("switches") is not None:          bits.append(f"切换 ~{baseline['switches']} 次")
+    return f"近 {sd} 天均值: " + " · ".join(bits)
+
+
 def _stats_summary(con: sqlite3.Connection, date: str) -> str:
     """A one-shot text digest of the day-level stats channels, for LLM prompt.
 
@@ -360,38 +448,53 @@ def _stats_summary(con: sqlite3.Connection, date: str) -> str:
 # ---- channel: ai_overview ---------------------------------------------
 
 OVERVIEW_SYSTEM = (
-    "你是一位软件工程师的私人工作复盘助手。\n\n"
-    "你的读者是这位工程师本人。输入会先给你一份**活跃任务清单**(飞书任务表),"
-    "再给事件清单 — 事件已预标 [task:X] 或 [proj:Y] 前缀。\n\n"
-    "**核心原则 — 任务视角而非项目视角**:\n"
-    "  • narrative / highlights / suggestions 里提到的具体活动, **必须用"
-    "任务清单里的完整任务标题**, 例如 ‘DayTrace 应用开发’, 不要简写成 "
-    "‘DayTrace’ 或 ‘daytrace’; 不要用事件里的 [proj:Y] 项目名 (daytrace / "
-    "daily-manager / misc) 当主体。\n"
-    "  • 只有当一组事件**没有任何 [task:X] 标签**时, 才退而用项目名描述, "
-    "并明确说‘游离工作’/‘未关联任务’。\n"
-    "  • 任务清单上**今天没出现**的任务也可以在 suggestions 里点出来 "
-    "(例: ‘X 任务已 N 天没碰, deadline 临近’)。\n\n"
-    "你要写的是: ta 今天**作为一个人**在推进哪些任务、有什么产出、接下来怎么走。\n\n"
+    "你是一位软件工程师的私人工作复盘助手。读者是这位工程师本人。\n\n"
+    "输入会按顺序给你:\n"
+    "  1. 活跃任务清单 (飞书任务表)\n"
+    "  2. 近 N 天基线 (用于和今天对比)\n"
+    "  3. 今日骨架统计 (时长、专注块、切换、来源分布)\n"
+    "  4. 事件清单 (按时间, 预标 [task:X] / [proj:Y])\n\n"
+    "输出 6 个字段, 每个字段定位**严格不同**:\n"
+    "  • headline + overview.narrative — 今天整体怎么过的, 叙事段落\n"
+    "  • trend — 和昨天比的整体方向 (chip + 1 句)\n"
+    "  • **highlights (🚀 关键任务进展)** — 今天**已经做了**的具体任务推进, "
+    "用任务全名 + 动作\n"
+    "  • **work_pattern (⏰ 时间安排回顾)** — 今天的**时间数据 vs 基线**, "
+    "必须 grounded 在数字 (例: ‘23:31 收工, 比平时晚 1h’); 没基线就留空\n"
+    "  • **suggestions (🔔 任务跟进提醒)** — **明天/未来**该盯的任务 "
+    "(deadline / N 天没碰 / 未提交); 不要回顾今天该做啥\n\n"
+    "**任务视角硬规则**:\n"
+    "  • narrative / highlights / suggestions 里提到的活动, 必须用任务清单"
+    "**完整标题** (例: ‘DayTrace 应用开发’, 不是 ‘DayTrace’ 或 ‘daytrace’)。\n"
+    "  • [proj:Y] 是游离工作, narrative 一笔带过, 不进 highlights/suggestions。\n\n"
     "**禁止**:\n"
-    "  ❌ 用项目名代替任务名 (例: 写‘DayTrace’而不是‘DayTrace 应用开发’)\n"
-    "  ❌ 对数据本身提建议 ('梳理 misc 类别'、'合并项目名')\n"
-    "  ❌ 对系统/工具提建议 ('配置 webhook'、'增加分类规则')\n"
-    "  ❌ 泛化效率说教 ('减少 context switching')\n"
-    "  ❌ 数字复述 ('今天 191 个事件、69 次切换')\n\n"
+    "  ❌ highlights 和 work_pattern 内容重叠 (一个讲做了啥, 一个讲怎么做的)\n"
+    "  ❌ suggestions 写回顾性内容 (那归 highlights)\n"
+    "  ❌ work_pattern 写空话 ('合理作息'、'减少切换') — 不带基线对比就不写\n"
+    "  ❌ 用项目名代替任务名\n"
+    "  ❌ 对数据本身/系统/工具提建议\n"
+    "  ❌ 泛化效率说教、数字复述\n\n"
     "严格只输出 JSON, 不要 Markdown 代码块, 不要解释。"
 )
 
 
-def _overview_user(date: str, stats_text: str, events_text: str, tasks_text: str) -> str:
+def _overview_user(
+    date: str, stats_text: str, events_text: str, tasks_text: str,
+    baseline_text: str,
+) -> str:
     tasks_block = (
         f"【活跃任务清单 — 来自飞书任务表, 优先以任务视角描述】\n{tasks_text}\n\n"
         if tasks_text else "【活跃任务清单】(无)\n\n"
     )
+    baseline_block = (
+        f"【基线 — 用于 work_pattern 对比, 不要照搬】\n{baseline_text}\n\n"
+        if baseline_text else ""
+    )
     return (
         f"【日期】{date}\n\n"
         f"{tasks_block}"
-        f"【骨架统计 — 供你参考节奏, 不要照搬数字】\n{stats_text}\n\n"
+        f"{baseline_block}"
+        f"【今日骨架统计】\n{stats_text}\n\n"
         f"【事件清单, 按时间; 前缀 [task:X] 表示已关联到任务 X, [proj:Y] 表示游离项目】\n{events_text}\n\n"
         "【输出 JSON, 严格按此 shape, 每个字段都要有】\n"
         '{\n'
@@ -403,8 +506,9 @@ def _overview_user(date: str, stats_text: str, events_text: str, tasks_text: str
         '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
         '    "comparison": "1 句 (≤60 字) 描述工作重心/节奏 vs 昨天有什么变化, 不要复述事件量"\n'
         '  },\n'
-        '  "highlights":  ["1-3 条今天真正完成或推进的事 (合并 PR、提交、上线...), 每条 ≤40 字; 不要写\'高频活动\'之类"],\n'
-        '  "suggestions": ["1-3 条针对 ta 个人的下一步行动 (具体到项目和动作); 可以是\'明天继续推 X\'、\'Y 已 3 天没碰, 该回来看看\'; 每条 ≤50 字"]\n'
+        '  "highlights":   ["🚀 关键任务进展 — 1-3 条今天真正推进的飞书任务及其具体动作 (用任务全名), 每条 ≤40 字; 不要写数字复述, 不要列没关联任务的游离工作"],\n'
+        '  "work_pattern": ["⏰ 时间安排回顾 — 0-3 条基于【今日骨架统计 vs 近 N 天均值】的具体观察, 必须 grounded 在数字上 (例: \'23:31 收工, 比平时晚 1h\', \'最长专注 155 min, 比均值长 60%\', \'切换 69 次但因为有大块专注, 不算碎\'); ❌ 不要写空话 (\'合理作息\'、\'减少切换\'); 没基线就留空数组"],\n'
+        '  "suggestions":  ["🔔 任务跟进提醒 — 1-3 条前瞻性提醒, 只看任务清单 (未推进 / deadline 临近 / 未提交), 每条用任务全名 + 具体提醒, 每条 ≤50 字; ❌ 不要回顾今天该做啥 (那归 highlights), 不要写空话"]\n'
         '}'
     )
 
@@ -415,7 +519,7 @@ def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> Ch
             "headline": f"{ctx.date} 无事件",
             "overview": {"narrative": "今天没有记录到事件。"},
             "trend": None,
-            "highlights": [], "suggestions": [],
+            "highlights": [], "work_pattern": [], "suggestions": [],
         })
     if not ai_client.is_available():
         return ChannelResult(value=None)  # written as JSON null, error=None
@@ -423,11 +527,13 @@ def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> Ch
     events_text = _format_events_inline(events, task_map=task_map)
     stats_text = _stats_summary(ctx.con, ctx.date)
     tasks_text = _load_active_task_context(ctx.con)
+    baseline = _compute_recent_baseline(ctx.con, ctx.date)
+    baseline_text = _format_baseline(baseline)
     resp = ai_client.call_json_validated(
         system=OVERVIEW_SYSTEM,
-        user=_overview_user(ctx.date, stats_text, events_text, tasks_text),
+        user=_overview_user(ctx.date, stats_text, events_text, tasks_text, baseline_text),
         validator=validate_overview,
-        max_tokens=1200,
+        max_tokens=2400,
     )
     return ChannelResult(
         value=resp.json,
