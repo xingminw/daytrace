@@ -3142,19 +3142,37 @@ def _distribution_view_body(
     }.get(mode, mode)
 
     # ── Donut (conic-gradient): every visible top item gets its own slice,
-    # everything beyond top-12 rolls into a single 其它 grey slice.
-    segs: list[str] = []
+    # everything beyond top-12 rolls into a single 其它 grey slice. We also
+    # encode each segment's [start, end, name, value, color] as JSON so the
+    # hover JS can do angle-based lookup (conic-gradient is one DOM node).
+    import json as _json
+    segs_css: list[str] = []
+    segs_data: list[dict] = []
     pos = 0.0
     for name, value in items_top:
         color = palette.get(name, _WEEKLY_OTHER_COLOR)
         pct = value / grand_total * 100
         end = pos + pct
-        segs.append(f"{color} {pos:.3f}% {end:.3f}%")
+        segs_css.append(f"{color} {pos:.3f}% {end:.3f}%")
+        segs_data.append({
+            "name": name, "color": color,
+            "start": round(pos, 3), "end": round(end, 3),
+            "label": _format_value(value, unit),
+            "share": round(value / grand_total, 4),
+        })
         pos = end
     if rest_total > 0:
-        segs.append(f"{_WEEKLY_OTHER_COLOR} {pos:.3f}% 100%")
+        segs_css.append(f"{_WEEKLY_OTHER_COLOR} {pos:.3f}% 100%")
+        segs_data.append({
+            "name": "其它", "color": _WEEKLY_OTHER_COLOR,
+            "start": round(pos, 3), "end": 100.0,
+            "label": _format_value(rest_total, unit),
+            "share": round(rest_total / grand_total, 4),
+        })
+    segments_attr = esc(_json.dumps(segs_data, ensure_ascii=False))
     donut_html = (
-        f'<div class="cc-donut" style="background:conic-gradient({", ".join(segs)})">'
+        f'<div class="cc-donut" data-segments="{segments_attr}" '
+        f'style="background:conic-gradient({", ".join(segs_css)})">'
         '<div class="cc-donut-hole">'
         f'<div class="cc-donut-total">{esc(_format_value(grand_total, unit))}</div>'
         f'<div class="cc-donut-label">{esc(dim_label)}</div>'
@@ -3889,6 +3907,40 @@ def weekly_page(
         # Initial filter from server-rendered active state
         'var init=card.getAttribute("data-filter")||"all";'
         'if(init!=="all"){applyFilter(init);}'
+        '}'
+        # ── (4a) donut hover: conic-gradient is one DOM node, so we read
+        # cursor angle from center, look up which segment that angle is in
+        # via the data-segments JSON, then float a tooltip beside the cursor.
+        'var donut=document.querySelector(".top-chart-card .cc-donut[data-segments]");'
+        'if(donut){'
+        'var dSegs=[];try{dSegs=JSON.parse(donut.dataset.segments||"[]");}catch(e){}'
+        'var dWrap=donut.parentElement;dWrap.style.position="relative";'
+        'var dTip=document.createElement("div");'
+        'dTip.style.cssText="position:absolute;pointer-events:none;z-index:10;background:rgba(34,28,18,.95);color:#fff7e8;border-radius:10px;padding:7px 11px;box-shadow:0 10px 26px rgba(0,0,0,.28);font-size:12px;max-width:260px;line-height:1.45;display:none;white-space:nowrap;";'
+        'dWrap.appendChild(dTip);'
+        'function dEsc(s){return String(s==null?"":s).replace(/[&<>\\"]/g,function(c){return({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"})[c];});}'
+        'donut.addEventListener("mousemove",function(ev){'
+        'var r=donut.getBoundingClientRect();'
+        'var cx=r.left+r.width/2,cy=r.top+r.height/2;'
+        'var dx=ev.clientX-cx,dy=ev.clientY-cy;'
+        'var dist=Math.sqrt(dx*dx+dy*dy);'
+        'var outerR=r.width/2;var innerR=outerR*(124/210);'
+        'if(dist<innerR||dist>outerR){dTip.style.display="none";return;}'
+        'var a=Math.atan2(dx,-dy);if(a<0)a+=2*Math.PI;'
+        'var pct=a/(2*Math.PI)*100;'
+        'var seg=null;'
+        'for(var i=0;i<dSegs.length;i++){if(pct>=dSegs[i].start&&pct<dSegs[i].end){seg=dSegs[i];break;}}'
+        'if(!seg)seg=dSegs[dSegs.length-1];'
+        'if(!seg){dTip.style.display="none";return;}'
+        'dTip.innerHTML="<div style=\\"font-weight:700;margin-bottom:3px;\\"><span style=\\"display:inline-block;width:10px;height:10px;border-radius:2px;background:"+seg.color+";margin-right:6px;vertical-align:middle;\\"></span>"+dEsc(seg.name)+"</div>"+'
+        '"<div>"+dEsc(seg.label)+" · "+(seg.share*100).toFixed(1)+"%</div>";'
+        'dTip.style.display="block";'
+        'var pr=dWrap.getBoundingClientRect();'
+        'var x=ev.clientX-pr.left+14;var y=ev.clientY-pr.top+14;'
+        'if(x+dTip.offsetWidth>pr.width-4)x=pr.width-dTip.offsetWidth-4;'
+        'dTip.style.left=x+"px";dTip.style.top=y+"px";'
+        '});'
+        'donut.addEventListener("mouseleave",function(){dTip.style.display="none";});'
         '}'
         # ── (4) top chart card switcher (histogram vs distribution) ──
         'var tc=document.querySelector(".top-chart-card");'
