@@ -886,6 +886,7 @@ SWIMLANE_MAX_LANES = 8       # top-N categories get their own lane; rest -> "其
 def event_timeline_card(
     events: list[dict[str, Any]], date: str,
     *, mode: str = "source", boundary_hour: int | None = None,
+    style: str = "swimlane",
 ) -> str:
     """A 24h horizontal timeline with three switchable view styles and three
     switchable color-by dimensions. All views share one tooltip element so
@@ -1170,10 +1171,12 @@ def event_timeline_card(
 
     # Use the global .dim-tab / .dim-tabs styling so this switcher matches
     # the rest of the page's pill controls (weekly view switcher, dim-bar).
+    if style not in ("swimlane", "histogram"):
+        style = "swimlane"
     style_tabs_html = (
         '<div class="dim-tabs" role="tablist" aria-label="视图样式" data-role="tl-style-tabs">'
-        '<button type="button" class="dim-tab active" data-style="swimlane">泳道</button>'
-        '<button type="button" class="dim-tab" data-style="histogram">直方图</button>'
+        f'<button type="button" class="dim-tab{" active" if style == "swimlane" else ""}" data-style="swimlane">泳道</button>'
+        f'<button type="button" class="dim-tab{" active" if style == "histogram" else ""}" data-style="histogram">直方图</button>'
         "</div>"
     )
 
@@ -1189,11 +1192,15 @@ def event_timeline_card(
         "var s=document.currentScript;var card=s&&s.closest('.timeline-card');if(!card)return;"
         "var date=card.getAttribute('data-date');"
         "var tip=card.querySelector('.tl-tooltip');"
-        # Style tab handler (mode tabs were removed — global dim-bar drives mode).
-        # Buttons live in [data-role=tl-style-tabs]; reuse .dim-tab styling.
+        # Style tab handler: flip data-style + persist in URL via replaceState
+        # so unit-tab reloads (or any other in-page nav) keep the chosen style.
         "card.querySelectorAll('[data-role=\"tl-style-tabs\"] .dim-tab').forEach(function(btn){btn.addEventListener('click',function(){"
-        "card.setAttribute('data-style',btn.dataset.style);"
+        "var s=btn.dataset.style;"
+        "card.setAttribute('data-style',s);"
         "card.querySelectorAll('[data-role=\"tl-style-tabs\"] .dim-tab').forEach(function(b){b.classList.toggle('active',b===btn);});"
+        "try{var u=new URL(location.href);"
+        "if(s==='swimlane'){u.searchParams.delete('style');}else{u.searchParams.set('style',s);}"
+        "history.replaceState({},'',u);}catch(e){}"
         "});});"
         # tooltip helpers
         "function chip(label,val,color){if(!val)return '';var sw=color?('<span class=\"tl-tip-sw\" style=\"background:'+color+'\"></span>'):'';return '<span class=\"tl-tip-chip\">'+sw+'<b>'+label+'</b> '+val+'</span>';}"
@@ -1215,7 +1222,7 @@ def event_timeline_card(
     )
 
     return (
-        f'<div class="card wide-card timeline-card" data-mode="{esc(mode)}" data-style="swimlane" data-date="{esc(date or "")}">'
+        f'<div class="card wide-card timeline-card" data-mode="{esc(mode)}" data-style="{esc(style)}" data-date="{esc(date or "")}">'
         f'<div class="bucket-head"><h2>一天时间轴 · {esc(date or "")}</h2>'
         f'<div class="tl-tab-group">{style_tabs_html}</div>'
         f"</div>"
@@ -1396,7 +1403,7 @@ def _mode_link(path: str, params: dict[str, str | None]) -> str:
     return f"{path}?{qs}" if qs else path
 
 
-def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: str | None = None):
+def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: str | None = None, style: str | None = None):
     valid_modes = {dim_id for dim_id, _ in DIMENSIONS}
     if mode not in valid_modes:
         mode = "source"
@@ -1448,7 +1455,10 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         today["by_device"]   = compute_breakdown(day_events, "device_id",   unit)
         today["by_location"] = compute_breakdown(day_events, "location_id", unit)
         today["by_activity"] = compute_breakdown(day_events, "activity",    unit)
-    timeline_html = event_timeline_card(day_events, date or "", mode=mode)
+    valid_styles = {"swimlane", "histogram"}
+    if style not in valid_styles:
+        style = "swimlane"
+    timeline_html = event_timeline_card(day_events, date or "", mode=mode, style=style)
     composition_html = composition_card(today, mode=mode, unit=unit)
 
     # Lazy-regenerate stats channels if the day_report row is missing or
@@ -2706,13 +2716,24 @@ def _weekly_url(
 
 def _pill_bar(
     *, css_class: str, options: list[tuple[str, str]], current: str,
-    href_for: callable,
+    href_for: callable, param_name: str | None = None,
 ) -> str:
-    """Render a `.dim-tabs` / `.unit-tabs` pill group with active state."""
+    """Render a `.dim-tabs` / `.unit-tabs` pill group with active state.
+
+    `param_name` (e.g. "mode" / "unit") is stamped onto each anchor as
+    `data-param` + `data-value`. The page-level JS reads these and rebuilds
+    the target URL off `location.href` at click time — so any state that
+    other handlers set via replaceState (view, top_view, swim_filter…)
+    survives navigation instead of being baked in at server-render time."""
     chips = []
     for value, label in options:
         cls = f"{css_class} active" if value == current else css_class
-        chips.append(f'<a class="{cls}" href="{esc(href_for(value))}">{esc(label)}</a>')
+        data_attrs = ""
+        if param_name:
+            data_attrs = f' data-param="{esc(param_name)}" data-value="{esc(value)}"'
+        chips.append(
+            f'<a class="{cls}"{data_attrs} href="{esc(href_for(value))}">{esc(label)}</a>'
+        )
     container = "dim-tabs" if "dim-tab" in css_class else "unit-tabs"
     return f'<div class="{container}">{"".join(chips)}</div>'
 
@@ -2735,15 +2756,13 @@ def _weekly_dim_bar(
     )
     unit_bar = _pill_bar(
         css_class="unit-tab", options=_WEEKLY_UNIT_OPTS, current=unit,
-        href_for=lambda v: _weekly_url(
-            week=week, mode=mode, unit=v, view=view,
-        ),
+        href_for=lambda v: _weekly_url(week=week, mode=mode, unit=v, view=view),
+        param_name="unit",
     )
     dim_bar = _pill_bar(
         css_class="dim-tab", options=_WEEKLY_DIM_OPTS, current=mode,
-        href_for=lambda v: _weekly_url(
-            week=week, mode=v, unit=unit, view=view,
-        ),
+        href_for=lambda v: _weekly_url(week=week, mode=v, unit=unit, view=view),
+        param_name="mode",
     )
     return (
         '<section class="dim-bar">'
@@ -3492,6 +3511,7 @@ def weekly_page(
     db_path: Path, week: str | None,
     *, unit: str | None = None, mode: str | None = None,
     view: str | None = None, swim_filter: str | None = None,
+    top_view: str | None = None,
 ) -> str:
     """ISO-week page mirroring the daily report's layout:
 
@@ -3522,6 +3542,9 @@ def weekly_page(
         mode = "project"
     if view not in valid_views:
         view = "swim"
+    valid_top_views = {"chart", "dist"}
+    if top_view not in valid_top_views:
+        top_view = "chart"
 
     con = connect(db_path); init_db(con)
     if not week:
@@ -3621,21 +3644,21 @@ def weekly_page(
     main_chart_body = _main_chart_card(
         days=days, per_day=per_day_stack, per_day_totals=per_day_totals,
         unit=unit, stack_by=mode, top_names=top_names, palette=palette,
-        chart_height_px=200,
+        chart_height_px=260,
     )
     dist_view_body = _distribution_view_body(
         overall=overall_dim_totals, palette=palette, unit=unit, mode=mode,
     )
     top_chart_switcher = (
         '<div class="dim-tabs" data-role="tc-switcher" style="margin-left:auto;">'
-        '<button type="button" class="dim-tab active" data-view="chart">直方图</button>'
-        '<button type="button" class="dim-tab" data-view="dist">分布</button>'
+        f'<button type="button" class="dim-tab{" active" if top_view == "chart" else ""}" data-view="chart">直方图</button>'
+        f'<button type="button" class="dim-tab{" active" if top_view == "dist" else ""}" data-view="dist">分布</button>'
         '</div>'
     )
     unit_label = dict(_WEEKLY_UNIT_OPTS).get(unit, unit)
     dim_label = dict(_WEEKLY_DIM_OPTS).get(mode, mode)
     top_histogram_card = (
-        '<div class="card top-chart-card" id="top-chart" data-tc-view="chart">'
+        f'<div class="card top-chart-card" id="top-chart" data-tc-view="{esc(top_view)}">'
         '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px;">'
         f'<h3 style="margin:0;">每日 {esc(unit_label)} <span class="muted small" style="font-weight:500;">· 维度: {esc(dim_label)}</span></h3>'
         f'{top_chart_switcher}'
@@ -3685,20 +3708,29 @@ def weekly_page(
         '</section>'
     )
 
-    # Page-level JS: (1) save/restore scrollY around dim/unit reloads so clicking
-    # the global dim-bar doesn't jump the viewport, (2) CSS-driven view switch
-    # for the bottom card (no reload, history.replaceState for URL sync).
+    # Page-level JS:
+    #   (1) save/restore scrollY around dim/unit reloads
+    #   (2) intercept dim/unit clicks to navigate via LIVE URL (so any state
+    #       JS has updated via replaceState — view, top_view, swim_filter —
+    #       is preserved across the reload)
+    #   (3) bottom view switcher (CSS attr toggle, replaceState ?view=)
+    #   (4) top-chart view switcher (CSS attr toggle, replaceState ?top_view=)
     view_sync_js = (
         '<script>(function(){'
-        # ── (1) scroll preservation around dim/unit reload ──
+        # ── (1) scroll restore + (2) live-URL navigation for dim/unit pills ──
         'var KEY="daytrace.weekly.scrollY";'
         'var saved=sessionStorage.getItem(KEY);'
         'if(saved!==null){window.scrollTo(0,parseInt(saved,10)||0);sessionStorage.removeItem(KEY);}'
-        'document.querySelectorAll(".dim-bar .dim-tab, .dim-bar .unit-tab").forEach(function(a){'
-        'a.addEventListener("click",function(){'
-        'if(a.classList.contains("active"))return;'
-        'sessionStorage.setItem(KEY,String(window.scrollY));});});'
-        # ── (2) bottom view switcher (CSS attr toggle) ──
+        'document.querySelectorAll(".dim-bar a[data-param]").forEach(function(a){'
+        'a.addEventListener("click",function(e){'
+        'if(a.classList.contains("active")){e.preventDefault();return;}'
+        'e.preventDefault();'
+        'sessionStorage.setItem(KEY,String(window.scrollY));'
+        'try{var u=new URL(location.href);'
+        'u.searchParams.set(a.dataset.param,a.dataset.value);'
+        'location.href=u.toString();}catch(err){location.href=a.href;}'
+        '});});'
+        # ── (3) bottom view switcher (CSS attr toggle) ──
         'var card=document.querySelector(".weekly-viz");'
         'if(card){'
         'card.querySelectorAll("[data-role=\\"wv-switcher\\"] .dim-tab").forEach(function(btn){'
@@ -3710,7 +3742,7 @@ def weekly_page(
         'try{var u=new URL(location.href);u.searchParams.set("view",v);'
         'history.replaceState({},"",u);}catch(e){}'
         '});});}'
-        # ── (3) top chart card switcher: histogram vs distribution ──
+        # ── (4) top chart card switcher (histogram vs distribution) ──
         'var tc=document.querySelector(".top-chart-card");'
         'if(tc){'
         'tc.querySelectorAll("[data-role=\\"tc-switcher\\"] .dim-tab").forEach(function(btn){'
@@ -3719,6 +3751,9 @@ def weekly_page(
         'tc.setAttribute("data-tc-view",v);'
         'tc.querySelectorAll("[data-role=\\"tc-switcher\\"] .dim-tab").forEach(function(b){'
         'b.classList.toggle("active",b.dataset.view===v);});'
+        'try{var u=new URL(location.href);'
+        'if(v==="chart"){u.searchParams.delete("top_view");}else{u.searchParams.set("top_view",v);}'
+        'history.replaceState({},"",u);}catch(e){}'
         '});});}'
         '})();</script>'
     )
@@ -3793,7 +3828,8 @@ class Handler(BaseHTTPRequestHandler):
             elif parsed.path == "/today":
                 mode = qs.get("mode", [None])[0] or None
                 unit = qs.get("unit", [None])[0] or None
-                html_response(self, today_page(self.db_path, date, mode=mode, unit=unit))
+                style = qs.get("style", [None])[0] or None
+                html_response(self, today_page(self.db_path, date, mode=mode, unit=unit, style=style))
             elif parsed.path == "/weekly":
                 week = qs.get("week", [None])[0] or None
                 w_unit = qs.get("unit", [None])[0] or None
@@ -3801,9 +3837,10 @@ class Handler(BaseHTTPRequestHandler):
                 w_mode = qs.get("mode", [None])[0] or qs.get("stack_by", [None])[0] or None
                 w_view = qs.get("view", [None])[0] or None
                 w_swim = qs.get("swim_filter", [None])[0] or None
+                w_top = qs.get("top_view", [None])[0] or None
                 html_response(self, weekly_page(
                     self.db_path, week, unit=w_unit, mode=w_mode,
-                    view=w_view, swim_filter=w_swim,
+                    view=w_view, swim_filter=w_swim, top_view=w_top,
                 ))
             elif parsed.path == "/sources":
                 self.send_response(302)
