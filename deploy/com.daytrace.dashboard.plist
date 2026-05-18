@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  DayTrace dashboard daemon — keeps the local HTTP server alive on port
+  8765 so Tailscale Serve has something to proxy. KeepAlive=true means
+  launchd respawns the process if it ever exits.
+
+  Install:
+    cp deploy/com.daytrace.dashboard.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.daytrace.dashboard.plist
+
+  Verify:
+    curl http://127.0.0.1:8765/today
+    launchctl list | grep daytrace.dashboard
+
+  Logs: data/logs/dashboard.log
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.daytrace.dashboard</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/anaconda3/bin/python3</string>
+    <string>/Users/xingminwang/Projects/daytrace/dashboard/server.py</string>
+    <string>--db</string>
+    <string>/Users/xingminwang/Projects/daytrace/data/daytrace.sqlite</string>
+    <string>--host</string>
+    <string>127.0.0.1</string>
+    <string>--port</string>
+    <string>8765</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/xingminwang/Projects/daytrace</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/anaconda3/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>/Users/xingminwang/Projects/daytrace/data/logs/dashboard.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/xingminwang/Projects/daytrace/data/logs/dashboard.log</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Restart no more than once every 10 s if it keeps dying -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+</dict>
+</plist>

@@ -33,6 +33,45 @@ FEISHU_CONFIG = REPO_ROOT / "config" / "feishu_drive.yaml"
 SECRETS_PATH  = Path.home() / ".daytrace" / "secrets.env"
 
 
+# ───── Dashboard URL (Tailscale Serve) ───────────────────────────────────
+
+def _tailscale_dnsname() -> str | None:
+    """Best-effort: ask the local tailscaled for this machine's MagicDNS
+    name. Empty string when Tailscale isn't installed / not in a tailnet."""
+    try:
+        result = subprocess.run(
+            ["tailscale", "status", "--json"],
+            capture_output=True, text=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+        data = json.loads(result.stdout)
+        # `Self.DNSName` looks like `xingmins-macbook-air.tail24bb1.ts.net.`
+        name = (data.get("Self") or {}).get("DNSName", "").rstrip(".")
+        return name or None
+    except Exception:
+        return None
+
+
+def dashboard_url(*, kind: str, key: str) -> str | None:
+    """Compose the Tailscale-served dashboard URL that opens the *live*
+    report for this date/week. None when no Tailscale Serve config exists."""
+    host = _tailscale_dnsname()
+    if not host:
+        return None
+    # Confirm `tailscale serve status` actually has something running so
+    # we don't hand out broken links. Empty status output = no serve.
+    try:
+        st = subprocess.run(["tailscale", "serve", "status"], capture_output=True, text=True, timeout=5)
+        if "127.0.0.1:8765" not in (st.stdout or "") and "localhost:8765" not in (st.stdout or ""):
+            return None
+    except Exception:
+        return None
+    if kind == "daily":
+        return f"https://{host}/today?date={key}"
+    return f"https://{host}/weekly?week={key}"
+
+
 # ───── Feishu drive ──────────────────────────────────────────────────────
 
 def _load_feishu_config() -> dict:
@@ -117,22 +156,45 @@ def _upload_one(local_path: Path, folder_token: str, remote_name: str | None = N
     return _lark(args, cwd=local_path.parent)
 
 
-def upload_to_feishu_drive(html_path: Path, md_path: Path, *,
-                           kind: str, key: str, quiet: bool = False) -> dict:
-    """Upload both files. Returns {html_url, md_url} (URLs may be None
-    if lark-cli's response shape differs)."""
+def _import_one(local_path: Path, folder_token: str, *,
+                doc_type: str = "docx", name: str | None = None) -> dict:
+    """Import a local file as a Feishu *cloud document* (rendered, editable
+    in-app) — distinct from +upload which stores the file as a raw blob.
+    Used for Markdown → docx so the email link opens a beautiful native
+    Feishu doc instead of a 'download me' file."""
+    local_path = local_path.resolve()
+    args = [
+        "drive", "+import",
+        "--file", "./" + local_path.name,
+        "--type", doc_type,
+        "--folder-token", folder_token,
+    ]
+    if name:
+        args += ["--name", name]
+    return _lark(args, cwd=local_path.parent)
+
+
+def import_md_to_feishu_docs(md_path: Path, *,
+                             kind: str, key: str, quiet: bool = False) -> dict:
+    """Import the Markdown summary as a Feishu *cloud docx* document.
+
+    Docx renders natively in Feishu (in-app and in the browser) with real
+    formatting + clickable links — unlike a raw .md file which would
+    download. This is the link we want to surface in the email body.
+
+    Returns {"docx": url} (or empty dict on failure)."""
     cfg = _ensure_folders()
     folder_token = cfg["daily_token"] if kind == "daily" else cfg["weekly_token"]
-    urls: dict[str, str] = {}
-    for label, path in [("html", html_path), ("md", md_path)]:
-        if not path.exists():
-            continue
-        resp = _upload_one(path, folder_token)
-        data = resp.get("data") or resp
-        url = data.get("url") or data.get("file_url")
-        if url:
-            urls[label] = url
-    return urls
+    if not md_path.exists():
+        return {}
+    resp = _import_one(md_path, folder_token, doc_type="docx", name=key)
+    data = resp.get("data") or resp
+    url = data.get("url") or data.get("file_url")
+    if not url and data.get("token"):
+        url = f"https://www.feishu.cn/docx/{data['token']}"
+    if not quiet:
+        print(f"  ↑ docx  → {url or '(no url)'}")
+    return {"docx": url} if url else {}
 
 
 # ───── Email (Gmail SMTP) ────────────────────────────────────────────────
@@ -158,12 +220,76 @@ def _load_secrets() -> dict:
     return out
 
 
-def email_report(*, kind: str, key: str, md_text: str, html_path: Path | None = None,
-                 quiet: bool = False) -> None:
-    """Send the Markdown content as an email body; attach the HTML
-    archive (when present) so the recipient also has the rich version.
+_EMAIL_CSS = """
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif; color:#2b2722; line-height:1.65; max-width:680px; margin:0 auto; padding:24px; background:#fafaf7; }
+  .links { background:#fff7e8; border:1px dashed #f0d68b; border-radius:10px; padding:14px 16px; margin-bottom:20px; font-size:14px; }
+  .links a { display:block; margin:4px 0; color:#2f6fed; text-decoration:none; font-weight:600; }
+  .links a:hover { text-decoration:underline; }
+  .links .lbl { display:inline-block; min-width:90px; color:#6b6052; font-weight:500; margin-right:6px; }
+  h1 { font-size:24px; margin:24px 0 12px; color:#1a1814; }
+  h2 { font-size:18px; margin:24px 0 8px; color:#1a1814; border-bottom:1px dashed #e0d7c5; padding-bottom:6px; }
+  h3 { font-size:15px; margin:18px 0 6px; color:#3b352e; }
+  p  { margin:8px 0 12px; }
+  strong { color:#1a1814; }
+  ul { margin:6px 0 12px; padding-left:22px; }
+  li { margin:4px 0; }
+  hr { border:0; border-top:1px dashed #e0d7c5; margin:20px 0; }
+  em { color:#7a6f5f; font-style:normal; font-size:13px; }
+  code { background:#f3ecd9; padding:1px 6px; border-radius:4px; font-family:ui-monospace, monospace; font-size:13px; }
+</style>
+""".strip()
 
-    Uses Gmail SMTP over SSL on port 465 with an app password."""
+
+def _md_to_html(md_text: str) -> str:
+    """Render the report Markdown to a Gmail-friendly HTML body. Uses the
+    `markdown` library with the `extra` extension for fenced code etc.,
+    then wraps it in a styled shell. We deliberately do NOT inline the
+    archive HTML's full chart layout — the email body is the digest, the
+    dashboard link is for full interaction."""
+    try:
+        import markdown as _md
+    except ImportError:
+        # Fallback: wrap raw MD in <pre> so it's at least monospaced
+        return f"<!doctype html><html><body><pre>{md_text}</pre></body></html>"
+    body = _md.markdown(md_text, extensions=["extra", "sane_lists"])
+    return f"<!doctype html><html><head><meta charset='utf-8'>{_EMAIL_CSS}</head><body>{body}</body></html>"
+
+
+def _links_block_html(links: dict | None) -> str:
+    if not links:
+        return ""
+    parts = ['<div class="links">']
+    if links.get("dashboard"):
+        parts.append(f'<a href="{links["dashboard"]}"><span class="lbl">🖥 完整 Dashboard</span>{links["dashboard"]}</a>')
+    if links.get("docx"):
+        parts.append(f'<a href="{links["docx"]}"><span class="lbl">📄 飞书文档</span>{links["docx"]}</a>')
+    parts.append('</div>')
+    return "".join(parts)
+
+
+def _links_block_md(links: dict | None) -> str:
+    """Plain-text fallback version for the multipart/alternative text part."""
+    if not links:
+        return ""
+    lines: list[str] = ["快速访问:"]
+    if links.get("dashboard"):
+        lines.append(f"  • 完整 Dashboard: {links['dashboard']}")
+    if links.get("docx"):
+        lines.append(f"  • 飞书文档: {links['docx']}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def email_report(*, kind: str, key: str, md_text: str,
+                 links: dict | None = None,
+                 quiet: bool = False) -> None:
+    """Send a multipart/alternative email:
+      • text/plain part = MD text + plain links list
+      • text/html  part = rendered MD with styled link box at top
+
+    `links` is an optional dict with keys: dashboard, docx — rendered as
+    a box at the top of both parts."""
     secrets = _load_secrets()
     user = secrets.get("DAYTRACE_GMAIL_USER")
     pwd  = secrets.get("DAYTRACE_GMAIL_APP_PASSWORD")
@@ -186,19 +312,20 @@ def email_report(*, kind: str, key: str, md_text: str, html_path: Path | None = 
     if subject_suffix:
         subject = f"{subject} · {subject_suffix}"
 
+    # Build both parts. Prepend the links block to the MD before rendering
+    # so both plain and HTML versions carry them at the top.
+    md_with_links = _links_block_md(links) + md_text
+    html_body = _md_to_html(md_text)
+    # Inject the styled links box right after <body>
+    if links:
+        html_body = html_body.replace("<body>", "<body>" + _links_block_html(links), 1)
+
     msg = EmailMessage()
     msg["Subject"] = subject
     msg["From"] = user
     msg["To"] = to
-    msg.set_content(md_text)
-
-    # Attach HTML so the recipient gets the rich version too.
-    if html_path and html_path.exists():
-        msg.add_attachment(
-            html_path.read_bytes(),
-            maintype="text", subtype="html",
-            filename=f"{key}.html",
-        )
+    msg.set_content(md_with_links)
+    msg.add_alternative(html_body, subtype="html")
 
     if not quiet:
         print(f"[email] sending to {to}: {subject}")
@@ -206,6 +333,4 @@ def email_report(*, kind: str, key: str, md_text: str, html_path: Path | None = 
         smtp.login(user, pwd)
         smtp.send_message(msg)
     if not quiet:
-        print(f"  ✓ sent ({len(md_text)/1024:.1f} KB body"
-              + (f" + {html_path.stat().st_size/1024:.0f} KB attachment" if html_path else "")
-              + ")")
+        print(f"  ✓ sent (md {len(md_with_links)/1024:.1f}KB + html {len(html_body)/1024:.1f}KB)")
