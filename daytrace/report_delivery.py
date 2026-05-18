@@ -222,37 +222,39 @@ def _load_secrets() -> dict:
 
 _EMAIL_CSS = """
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif; color:#2b2722; line-height:1.65; max-width:680px; margin:0 auto; padding:24px; background:#fafaf7; }
-  .links { background:#fff7e8; border:1px dashed #f0d68b; border-radius:10px; padding:14px 16px; margin-bottom:20px; font-size:14px; }
-  .links a { display:block; margin:4px 0; color:#2f6fed; text-decoration:none; font-weight:600; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif; color:#2b2722; font-size:16px; line-height:1.75; max-width:760px; margin:0 auto; padding:32px 28px; background:#fafaf7; }
+  .links { background:#fff7e8; border:1px dashed #f0d68b; border-radius:12px; padding:18px 20px; margin-bottom:26px; font-size:15px; }
+  .links a { display:block; margin:6px 0; color:#2f6fed; text-decoration:none; font-weight:600; line-height:1.5; }
   .links a:hover { text-decoration:underline; }
-  .links .lbl { display:inline-block; min-width:90px; color:#6b6052; font-weight:500; margin-right:6px; }
-  h1 { font-size:24px; margin:24px 0 12px; color:#1a1814; }
-  h2 { font-size:18px; margin:24px 0 8px; color:#1a1814; border-bottom:1px dashed #e0d7c5; padding-bottom:6px; }
-  h3 { font-size:15px; margin:18px 0 6px; color:#3b352e; }
-  p  { margin:8px 0 12px; }
-  strong { color:#1a1814; }
-  ul { margin:6px 0 12px; padding-left:22px; }
-  li { margin:4px 0; }
-  hr { border:0; border-top:1px dashed #e0d7c5; margin:20px 0; }
-  em { color:#7a6f5f; font-style:normal; font-size:13px; }
-  code { background:#f3ecd9; padding:1px 6px; border-radius:4px; font-family:ui-monospace, monospace; font-size:13px; }
+  .links .lbl { display:inline-block; min-width:108px; color:#6b6052; font-weight:500; margin-right:8px; }
+  h1 { font-size:30px; margin:28px 0 14px; color:#1a1814; letter-spacing:-0.01em; }
+  h2 { font-size:22px; margin:32px 0 12px; color:#1a1814; border-bottom:1px dashed #e0d7c5; padding-bottom:8px; letter-spacing:-0.005em; }
+  h3 { font-size:17px; margin:22px 0 8px; color:#3b352e; }
+  p  { margin:12px 0 16px; }
+  strong { color:#1a1814; font-weight:700; }
+  ul { margin:10px 0 16px; padding-left:26px; }
+  li { margin:6px 0; line-height:1.7; }
+  hr { border:0; border-top:1px dashed #e0d7c5; margin:24px 0; }
+  em { color:#7a6f5f; font-style:normal; font-size:14px; }
+  code { background:#f3ecd9; padding:2px 7px; border-radius:5px; font-family:ui-monospace, monospace; font-size:14px; }
+  img { max-width:100%; height:auto; border-radius:8px; margin:16px 0; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
 </style>
 """.strip()
 
 
-def _md_to_html(md_text: str) -> str:
-    """Render the report Markdown to a Gmail-friendly HTML body. Uses the
-    `markdown` library with the `extra` extension for fenced code etc.,
-    then wraps it in a styled shell. We deliberately do NOT inline the
-    archive HTML's full chart layout — the email body is the digest, the
-    dashboard link is for full interaction."""
+def _md_to_html(md_text: str, *, chart_names: list[str] | None = None) -> str:
+    """Render report Markdown to a Gmail-friendly HTML body. Local image
+    references like `![alt](./hist.png)` get rewritten to `<img src="cid:hist.png">`
+    so they pair up with EmailMessage.add_related() entries."""
     try:
         import markdown as _md
     except ImportError:
-        # Fallback: wrap raw MD in <pre> so it's at least monospaced
         return f"<!doctype html><html><body><pre>{md_text}</pre></body></html>"
     body = _md.markdown(md_text, extensions=["extra", "sane_lists"])
+    # Rewrite ./<name>.png references → cid:<name>.png (one for each chart)
+    for name in (chart_names or []):
+        body = body.replace(f'src="./{name}"', f'src="cid:{name}"')
+        body = body.replace(f"src='./{name}'", f'src="cid:{name}"')
     return f"<!doctype html><html><head><meta charset='utf-8'>{_EMAIL_CSS}</head><body>{body}</body></html>"
 
 
@@ -283,13 +285,16 @@ def _links_block_md(links: dict | None) -> str:
 
 def email_report(*, kind: str, key: str, md_text: str,
                  links: dict | None = None,
+                 chart_paths: list[Path] | None = None,
                  quiet: bool = False) -> None:
     """Send a multipart/alternative email:
       • text/plain part = MD text + plain links list
-      • text/html  part = rendered MD with styled link box at top
+      • text/html  part = rendered MD with styled link box at top +
+                          inline PNG charts (cid: references)
 
-    `links` is an optional dict with keys: dashboard, docx — rendered as
-    a box at the top of both parts."""
+    `chart_paths` are local PNG files referenced in the MD as
+    `![name](./<filename>)`; each is attached as a related (inline) part
+    so Gmail/Outlook render them inside the body, not as attachments."""
     secrets = _load_secrets()
     user = secrets.get("DAYTRACE_GMAIL_USER")
     pwd  = secrets.get("DAYTRACE_GMAIL_APP_PASSWORD")
@@ -314,8 +319,9 @@ def email_report(*, kind: str, key: str, md_text: str,
 
     # Build both parts. Prepend the links block to the MD before rendering
     # so both plain and HTML versions carry them at the top.
+    chart_names = [p.name for p in (chart_paths or []) if p.exists()]
     md_with_links = _links_block_md(links) + md_text
-    html_body = _md_to_html(md_text)
+    html_body = _md_to_html(md_text, chart_names=chart_names)
     # Inject the styled links box right after <body>
     if links:
         html_body = html_body.replace("<body>", "<body>" + _links_block_html(links), 1)
@@ -327,10 +333,27 @@ def email_report(*, kind: str, key: str, md_text: str,
     msg.set_content(md_with_links)
     msg.add_alternative(html_body, subtype="html")
 
+    # Inline-attach each chart PNG. add_related() goes on the HTML part
+    # specifically so the cid: references resolve.
+    if chart_paths:
+        html_part = msg.get_payload()[-1]  # the html alternative we just added
+        for p in chart_paths:
+            if not p.exists():
+                continue
+            html_part.add_related(
+                p.read_bytes(),
+                maintype="image", subtype="png",
+                cid=f"<{p.name}>",  # angle-bracket cid; Gmail/Outlook need it
+                filename=p.name,
+            )
+
     if not quiet:
         print(f"[email] sending to {to}: {subject}")
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(user, pwd)
         smtp.send_message(msg)
     if not quiet:
-        print(f"  ✓ sent (md {len(md_with_links)/1024:.1f}KB + html {len(html_body)/1024:.1f}KB)")
+        n_charts = sum(1 for p in (chart_paths or []) if p.exists())
+        print(f"  ✓ sent (md {len(md_with_links)/1024:.1f}KB + html {len(html_body)/1024:.1f}KB"
+              + (f" + {n_charts} inline charts" if n_charts else "")
+              + ")")

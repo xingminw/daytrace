@@ -181,7 +181,21 @@ def _md_insights(ai_overview: dict | None) -> str:
     return "\n\n".join(out)
 
 
-def archive_markdown_for_date(db_path: Path, date: str) -> str:
+def _insert_charts_block(md_lines: list[str], chart_names: list[str]) -> None:
+    """In-place: append a '## 图表' section linking to the named PNG files.
+    The MD is read by `lark-cli drive +import` which inlines local images;
+    in email, the same names are also embedded as cid:NAME inline attachments."""
+    if not chart_names:
+        return
+    md_lines.append("## 图表")
+    md_lines.append("")
+    for name in chart_names:
+        md_lines.append(f"![{name}](./{name})")
+        md_lines.append("")
+
+
+def archive_markdown_for_date(db_path: Path, date: str, *,
+                              chart_names: list[str] | None = None) -> str:
     """Render a Markdown summary for a single date. Header line + AI
     overview + insights. Safe to use as email body or chat message."""
     from daytrace.db import connect, init_db
@@ -227,12 +241,14 @@ def archive_markdown_for_date(db_path: Path, date: str) -> str:
         parts.append("_(AI overview 未生成 — DEEPSEEK_API_KEY 未配置或 backfill 未跑)_")
         parts.append("")
 
+    _insert_charts_block(parts, chart_names or [])
     parts.append("---")
     parts.append(f"_DayTrace 归档 · 生成于 {_now_iso()}_")
     return "\n".join(parts)
 
 
-def archive_markdown_for_week(db_path: Path, week: str) -> str:
+def archive_markdown_for_week(db_path: Path, week: str, *,
+                              chart_names: list[str] | None = None) -> str:
     """Render a Markdown summary for an ISO week (YYYY-Www).
 
     Top-level stats come from the weekly cache file (the dashboard
@@ -301,6 +317,7 @@ def archive_markdown_for_week(db_path: Path, week: str) -> str:
         parts.append("_(本周 AI 速读未生成 — 请先访问 /weekly?week=" + week + " 触发)_")
         parts.append("")
 
+    _insert_charts_block(parts, chart_names or [])
     parts.append("---")
     parts.append(f"_DayTrace 归档 · 生成于 {_now_iso()}_")
     return "\n".join(parts)
