@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v6"  # v6 = drop redaction; AI sees full event content
+AI_VERSION = "v7"  # v7 = structured shape: overview / trend / recommendations
 
 
 # ----- Shape validators ------------------------------------------------
@@ -72,15 +72,60 @@ def _require_list_of_str(d: dict, key: str, *, default_empty: bool = False) -> l
     return out
 
 
+_TREND_DIRECTIONS = {"rising", "steady", "dropping", "new", "paused", "blocked"}
+
+
 def validate_overview(payload):
+    """v7 schema (structured for stable layout):
+        {
+          "headline": str ≤30,
+          "overview": {"narrative": str, "key_moves": [str, ...]},
+          "trend":    {"direction": one_of, "comparison": str},
+          "highlights":      [str, ...],   # ✨ 高光
+          "concerns":        [str, ...],   # ⚠️ 风险
+          "recommendations": [str, ...]    # 💡 推荐
+        }
+    Older v6 payloads (narrative as top-level string, no trend/recommendations)
+    are normalized into the v7 shape so cached values keep rendering. The
+    renderer hides any empty/missing section."""
     from .ai_client import ShapeError
     if not isinstance(payload, dict):
         raise ShapeError(f"top-level must be an object, got {type(payload).__name__}")
+
+    headline = _require_str(payload, "headline")
+
+    # overview: accept v7 dict or fall back to v6 top-level narrative
+    raw_overview = payload.get("overview")
+    if isinstance(raw_overview, dict):
+        narrative = _require_str(raw_overview, "narrative")
+        key_moves = _require_list_of_str(raw_overview, "key_moves", default_empty=True)
+    else:
+        # v6 compat: pull `narrative` from top level
+        if isinstance(payload.get("narrative"), str):
+            narrative = payload["narrative"].strip()
+        else:
+            raise ShapeError("missing 'overview' (or legacy 'narrative')")
+        key_moves = []
+    overview_obj = {"narrative": narrative, "key_moves": key_moves}
+
+    # trend: optional in v6; required in v7 but tolerate missing for cache compat
+    raw_trend = payload.get("trend")
+    if isinstance(raw_trend, dict):
+        direction = (raw_trend.get("direction") or "steady").strip().lower()
+        if direction not in _TREND_DIRECTIONS:
+            direction = "steady"
+        comparison = (raw_trend.get("comparison") or "").strip()
+        trend_obj = {"direction": direction, "comparison": comparison}
+    else:
+        trend_obj = None
+
     return {
-        "headline":   _require_str(payload, "headline"),
-        "narrative":  _require_str(payload, "narrative"),
-        "highlights": _require_list_of_str(payload, "highlights", default_empty=True),
-        "concerns":   _require_list_of_str(payload, "concerns",   default_empty=True),
+        "headline":        headline,
+        "overview":        overview_obj,
+        "trend":           trend_obj,
+        "highlights":      _require_list_of_str(payload, "highlights",      default_empty=True),
+        "concerns":        _require_list_of_str(payload, "concerns",        default_empty=True),
+        "recommendations": _require_list_of_str(payload, "recommendations", default_empty=True),
     }
 
 
@@ -233,13 +278,20 @@ def _overview_user(date: str, stats_text: str, events_text: str) -> str:
         f"【日期】{date}\n\n"
         f"【骨架统计】\n{stats_text}\n\n"
         f"【事件清单, 按时间, 已脱敏】\n{events_text}\n\n"
-        "【输出 JSON, 字段】\n"
+        "【输出 JSON, 严格按此 shape, 每个字段都要有】\n"
         '{\n'
-        '  "headline": "≤30 字的标题, 抓住今天的主线",\n'
-        '  "narrative": "150-300 字, 2-3 段, 描述节奏 / 专注度 / 上下文切换, '
-        '不要逐字罗列事件",\n'
-        '  "highlights": ["3-6 条实质性进展, 每条 ≤40 字"],\n'
-        '  "concerns": ["0-4 条异常/未归因/待跟进, 每条 ≤50 字"]\n'
+        '  "headline": "≤30 字, 抓住今天的主线",\n'
+        '  "overview": {\n'
+        '    "narrative": "2-3 句 (60-120 字), 节奏 / 专注度 / 主题切换",\n'
+        '    "key_moves": ["3-5 条今日核心动作, 每条 ≤30 字"]\n'
+        '  },\n'
+        '  "trend": {\n'
+        '    "direction": "rising | steady | dropping | new | paused",\n'
+        '    "comparison": "1 句话对比昨天 / 近 3 日 (≤60 字)"\n'
+        '  },\n'
+        '  "highlights":      ["2-4 条今日值得记住的高光, 每条 ≤40 字"],\n'
+        '  "concerns":        ["0-3 条该注意的风险 / 漏点, 每条 ≤50 字"],\n'
+        '  "recommendations": ["1-3 条明天可执行的下一步, 每条 ≤50 字"]\n'
         '}'
     )
 
@@ -248,8 +300,9 @@ def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> Ch
     if not events:
         return ChannelResult(value={
             "headline": f"{ctx.date} 无事件",
-            "narrative": "今天没有记录到事件。",
-            "highlights": [], "concerns": [],
+            "overview": {"narrative": "今天没有记录到事件。", "key_moves": []},
+            "trend": None,
+            "highlights": [], "concerns": [], "recommendations": [],
         })
     if not ai_client.is_available():
         return ChannelResult(value=None)  # written as JSON null, error=None
