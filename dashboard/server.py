@@ -38,10 +38,14 @@ body.events-page form { height:100%; }
 .dim-bar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:0 -18px 12px; padding:8px 18px; flex-wrap:wrap; position:sticky; top:50px; z-index:4; background:rgba(247,245,239,.92); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
 /* Inline controls in the sticky header (used by /today + /weekly so the
    prev/next nav + date picker + dim pills all sit on one row). */
-.header-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-.header-controls .day-nav { display:inline-flex; gap:6px; margin:0; padding:0; }
-.header-controls .day-nav a { font-size:12px; padding:4px 8px; }
+.header-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
 .header-controls .dim-tabs { background:rgba(255,250,240,.94); }
+/* Arrow nav buttons (← / →) and the open-db link share the same pill look
+   as the date picker so the header row reads cleanly. */
+.hdr-nav-btn { display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:30px; padding:0 8px; border:1px solid var(--line); background:white; border-radius:8px; font-size:14px; font-weight:700; color:var(--ink); cursor:pointer; }
+.hdr-nav-btn:hover { background:#fdf6e3; }
+.hdr-open-db { display:inline-flex; align-items:center; height:30px; padding:0 10px; border:1px solid var(--line); background:white; border-radius:8px; font-size:12px; font-weight:650; color:var(--ink); }
+.hdr-open-db:hover { background:#fdf6e3; }
 .dim-bar .day-nav { margin-top:0; padding-top:0; }
 .dim-bar-right { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .dim-tabs, .unit-tabs { display:flex; gap:4px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
@@ -1515,15 +1519,15 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         idx = dates_desc.index(date)
         if idx + 1 < len(dates_desc):
             prev_day = dates_desc[idx + 1]
-            href = _mode_link("/today", {"date": prev_day, "mode": mode if mode != "source" else None})
-            prev_link = f'<a href="{esc(href)}">← 前一天 {esc(prev_day)}</a>'
+            href = _mode_link("/today", {"date": prev_day, "mode": mode if mode != "source" else None, "unit": unit if unit != "count" else None})
+            prev_link = f'<a class="hdr-nav-btn" title="前一天 {esc(prev_day)}" href="{esc(href)}">←</a>'
         if idx - 1 >= 0:
             next_day = dates_desc[idx - 1]
-            href = _mode_link("/today", {"date": next_day, "mode": mode if mode != "source" else None})
-            next_link = f'<a href="{esc(href)}">后一天 {esc(next_day)} →</a>'
-    day_nav_inner = (
-        f"{prev_link}{next_link}"
-        f'<a href="/events?start_from={esc(date)}&start_to={esc(date)}">打开当天数据库</a>'
+            href = _mode_link("/today", {"date": next_day, "mode": mode if mode != "source" else None, "unit": unit if unit != "count" else None})
+            next_link = f'<a class="hdr-nav-btn" title="后一天 {esc(next_day)}" href="{esc(href)}">→</a>'
+    open_db_link = (
+        f'<a class="hdr-open-db" title="在新标签页打开本日事件" target="_blank" rel="noopener" '
+        f'href="/events?start_from={esc(date)}&start_to={esc(date)}">打开数据库 ↗</a>'
         if date else ""
     )
 
@@ -1770,16 +1774,15 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
 {daily_swim_card}
 {daily_sync_js}
 """
-    # Combined header controls (single row): day-nav + date picker + dim pills.
-    # `header-controls` wraps them in a flex row that sits in layout()'s
-    # date_control slot.
-    cal_hidden = {"mode": mode} if mode != "source" else {}
-    date_picker_html = calendar_control('/today', date, all_dates, hidden=cal_hidden)
-    day_nav_html = f'<div class="day-nav header-day-nav">{day_nav_inner}</div>' if day_nav_inner else ""
+    # Header pattern: [←] [📅 picker] [→] [open db ↗] [dim pills]
+    # — identical layout as weekly. "Open db" opens in a new tab.
+    cal_hidden = {"mode": mode if mode != "source" else None, "unit": unit if unit != "count" else None}
+    cal_hidden = {k: v for k, v in cal_hidden.items() if v}
+    date_picker_html = calendar_control('/today', date, all_dates, hidden=cal_hidden, label_text="")
     header_controls = (
         '<div class="header-controls">'
-        + day_nav_html
-        + date_picker_html
+        + prev_link + date_picker_html + next_link
+        + open_db_link
         + dim_pills_html
         + '</div>'
     )
@@ -2936,17 +2939,51 @@ def _pill_bar(
 
 
 def _weekly_header_controls(
-    *, week: str, prev_week: str, next_week: str,
+    *, db_path: Path, week: str, prev_week: str, next_week: str,
     mode: str, unit: str, view: str, monday: str, sunday: str,
 ) -> str:
-    """Inline controls for layout()'s date_control slot — week-nav + dim
-    pills on a single header row. Unit pills live inside the Chart panel
-    (they only affect histogram + distribution)."""
-    week_nav_inner = (
-        f'<a href="{_weekly_url(week=prev_week, mode=mode, unit=unit, view=view)}">← 上一周 {esc(prev_week)}</a>'
-        f'<a href="{_weekly_url(week=next_week, mode=mode, unit=unit, view=view)}">下一周 {esc(next_week)} →</a>'
-        f'<a href="/events?start_from={esc(monday)}&start_to={esc(sunday)}">打开本周数据库</a>'
+    """Header layout matches daily exactly:
+       [← prev] [📅 calendar picker] [next →]  [open db ↗]  [dim pills]
+
+    Calendar picker uses the same calendar_control as daily; clicking any
+    day navigates to /weekly?date=YYYY-MM-DD which the route converts
+    server-side into the matching ISO-week."""
+    prev_html = (
+        f'<a class="hdr-nav-btn" title="上一周 {esc(prev_week)}" '
+        f'href="{_weekly_url(week=prev_week, mode=mode, unit=unit, view=view)}">←</a>'
     )
+    next_html = (
+        f'<a class="hdr-nav-btn" title="下一周 {esc(next_week)}" '
+        f'href="{_weekly_url(week=next_week, mode=mode, unit=unit, view=view)}">→</a>'
+    )
+    open_db_html = (
+        f'<a class="hdr-open-db" title="在新标签页打开本周事件" target="_blank" rel="noopener" '
+        f'href="/events?start_from={esc(monday)}&start_to={esc(sunday)}">打开数据库 ↗</a>'
+    )
+    # Week picker: feed daily-style calendar with Monday as the selected date.
+    # When user clicks any day, route /weekly?date= maps it to that day's week.
+    # available_dates list comes from the events DB so days-with-data are highlighted.
+    cal_hidden = {
+        "mode": mode if mode != "project" else None,
+        "unit": unit if unit != "hours" else None,
+        "view": view if view != "swim" else None,
+    }
+    cal_hidden = {k: v for k, v in cal_hidden.items() if v}
+    available = available_dates(connect(db_path))
+    # Override the label so it shows the WEEK (e.g. "2026-W20") instead of
+    # the picked day's date. We can't easily pass a custom label into
+    # calendar_control without changing its signature, so we post-process.
+    raw_picker = calendar_control(
+        '/weekly', monday, available, hidden=cal_hidden, label_text="",
+    )
+    import re as _re
+    week_label = f"{esc(week)} ({esc(monday[5:])}~{esc(sunday[5:])})"
+    picker_html = _re.sub(
+        r'(<summary>📅 )[^▾]+( ▾</summary>)',
+        lambda m: m.group(1) + week_label + m.group(2),
+        raw_picker, count=1,
+    )
+
     dim_bar_html = _pill_bar(
         css_class="dim-tab", options=_WEEKLY_DIM_OPTS, current=mode,
         href_for=lambda v: _weekly_url(week=week, mode=v, unit=unit, view=view),
@@ -2954,9 +2991,10 @@ def _weekly_header_controls(
     )
     return (
         '<div class="header-controls">'
-        f'<div class="day-nav header-day-nav">{week_nav_inner}</div>'
-        f'{dim_bar_html}'
-        '</div>'
+        + prev_html + picker_html + next_html
+        + open_db_html
+        + dim_bar_html
+        + '</div>'
     )
 
 
@@ -4052,7 +4090,7 @@ def weekly_page(
 
     # ── Build cards ────────────────────────────────────────────────────────
     header_controls = _weekly_header_controls(
-        week=week, prev_week=prev_week, next_week=next_week,
+        db_path=db_path, week=week, prev_week=prev_week, next_week=next_week,
         mode=mode, unit=unit, view=view, monday=monday, sunday=sunday,
     )
 
@@ -4415,8 +4453,16 @@ class Handler(BaseHTTPRequestHandler):
                 html_response(self, today_page(self.db_path, date, mode=mode, unit=unit, style=style))
             elif parsed.path == "/weekly":
                 week = qs.get("week", [None])[0] or None
+                # Accept ?date=YYYY-MM-DD too (calendar picker shares the
+                # same URL shape as /today). Convert to ?week=… server-side.
+                date_param = qs.get("date", [None])[0] or None
+                if date_param and not week:
+                    try:
+                        from daytrace.db import date_to_iso_week
+                        week = date_to_iso_week(date_param)
+                    except Exception:
+                        week = None
                 w_unit = qs.get("unit", [None])[0] or None
-                # Accept both `mode` (new, matches /today) and `stack_by` (legacy)
                 w_mode = qs.get("mode", [None])[0] or qs.get("stack_by", [None])[0] or None
                 w_view = qs.get("view", [None])[0] or None
                 w_swim = qs.get("swim_filter", [None])[0] or None
