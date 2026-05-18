@@ -2877,21 +2877,39 @@ def _weekly_swimlane_card(
     # Filter pills — All + each top-N dim value (so 项目模式时是每个项目).
     # CSS-driven hide via JS toggling display on .tl-swim-tick; per-row counts
     # update with visible-only totals. URL syncs via history.replaceState.
-    filter_pills = ['<button type="button" class="dim-tab' + (' active' if swim_filter == 'all' else '') + '" data-filter="all">全部</button>']
+    filter_pills = [
+        '<button type="button" class="dim-tab'
+        + (' active' if swim_filter == 'all' else '')
+        + '" data-filter="all">全部</button>'
+    ]
     for n in top_names:
         if overall_counts.get(n, 0) <= 0:
             continue
         color = palette.get(n, _WEEKLY_OTHER_COLOR)
         cls = "dim-tab active" if swim_filter == n else "dim-tab"
+        # Swatch is a small color dot inside the pill (left of label). Plays
+        # nicely with the rounded pill shape; matches the palette so you can
+        # find a project by color instead of reading its name.
+        swatch = (
+            f'<span style="display:inline-block; width:8px; height:8px; '
+            f'border-radius:50%; background:{color}; margin-right:6px; '
+            f'vertical-align:middle;"></span>'
+        )
         filter_pills.append(
-            f'<button type="button" class="{cls}" data-filter="{esc(n)}" '
-            f'style="border-left:3px solid {color}; padding-left:8px;">'
-            f'{esc(n)}<span class="muted" style="margin-left:6px; font-weight:500; font-size:11px;">×{overall_counts[n]}</span>'
+            f'<button type="button" class="{cls}" data-filter="{esc(n)}">'
+            f'{swatch}{esc(n)}'
+            f'<span class="muted" style="margin-left:6px; font-weight:500; font-size:11px;">×{overall_counts[n]}</span>'
             f'</button>'
         )
+    # Plain wrapping flex container — we want 11+ pills to break across lines
+    # cleanly. .dim-tabs's own 999px oval background would warp into a giant
+    # blob on a multi-line set, so we don't use that class here. Each button
+    # still gets its own .dim-tab pill shape.
     filter_bar = (
-        '<div class="dim-tabs" data-role="swim-filter" '
-        'style="margin-bottom:10px; max-width:100%; overflow-x:auto; flex-wrap:wrap;">'
+        '<div data-role="swim-filter" '
+        'style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; '
+        'margin-bottom:12px;">'
+        '<span class="muted small" style="margin-right:4px; font-weight:600;">筛选</span>'
         + "".join(filter_pills) +
         '</div>'
     )
