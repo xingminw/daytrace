@@ -3593,9 +3593,10 @@ def weekly_page(
         (monday, sunday),
     ).fetchone()[0] or 0
 
+    # by_project is still needed to feed the AI summary's top-projects context.
+    # We dropped the per-source breakdown table and the vs-last-week diff
+    # table — the top-chart "分布" view + the AI's narrative cover those.
     by_project = _weekly_breakdown(events, "project", top=12)
-    by_source = _weekly_breakdown(events, "source", top=8)
-    diffs = _diff_breakdowns(by_project, _weekly_breakdown(last_events, "project", top=50))
 
     # Per-(day, dim) stacks for the histogram view (and to give the swim-lane
     # the right palette).
@@ -3780,11 +3781,6 @@ def weekly_page(
         # Bottom switcher card (swim/heat, CSS-toggled)
         + bottom_card
         + view_sync_js
-        + '<div class="section-grid">'
-        + _breakdown_card("项目分布（本周）", by_project, total_events)
-        + _breakdown_card("数据源分布（本周）", by_source, total_events)
-        + '</div>'
-        + _vs_last_week_card(diffs)
         + day_links_html
     )
 
