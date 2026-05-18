@@ -206,7 +206,7 @@ def _load_secrets() -> dict:
     if not SECRETS_PATH.exists():
         raise RuntimeError(
             f"missing {SECRETS_PATH} — copy the template from "
-            "docs/cron-setup.md and fill in your Gmail app password"
+            "docs/delivery-setup.md and fill in your Gmail app password"
         )
     out: dict[str, str] = {}
     for line in SECRETS_PATH.read_text(encoding="utf-8").splitlines():
