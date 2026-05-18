@@ -7,7 +7,8 @@
 #     --base-token <app_token> --table-id <table_id> --limit 50
 # (first column of the markdown table.)
 
-aliases: {}
-  # "Daily Briefing": recvjP3BNUM48e
-  # "daily-briefing": recvjP3BNUM48e
-  # "Personal Recording": recvjKEnBD0MlQ
+aliases:
+  # Resolves event.project_guess differences in casing / wording that
+  # the URL-based matcher can't bridge.
+  "DayTrace Joint": recvjKgrBShiWP   # → DayTrace 应用开发
+  "Daily Briefing": recvjP3BNUM48e   # → Daily briefing 开发项目

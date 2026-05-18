@@ -63,6 +63,17 @@ body.events-page form { height:100%; }
    when narrow or when the toggle picks a single table. */
 .tasks-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:start; }
 @media (max-width:1100px) { .tasks-grid { grid-template-columns: 1fr; } }
+/* Tasks tables use a fixed layout so the title column gets all leftover
+   space; force ellipsis on every other column to avoid the chip/number
+   columns ballooning. Title cell keeps `word-break` so long manuscript
+   names wrap normally inside its allotted width. */
+.tasks-card table.mini-table th,
+.tasks-card table.mini-table td { vertical-align: top; padding:6px 6px; }
+.tasks-card table.mini-table td:not(.tasks-title-cell),
+.tasks-card table.mini-table th:not([data-sort="title"]) {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tasks-card .tasks-title-cell { word-break: break-word; white-space: normal; }
 /* Weekly view-switcher card: only the active view's pane is visible.
    Toggling .weekly-viz[data-view] flips visibility with no reload (no scroll jump). */
 .weekly-viz .wv-pane { display:none; }
@@ -1792,6 +1803,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     # Project cards section dropped — the chart/distribution panels above
     # already convey project-level breakdowns at the page level.
     tasks_panel_html = _tasks_panel(con, [date or ""], boundary_h) if date else ""
+    audit_html = _alignment_audit_card(con, [date or ""]) if date else ""
 
     content = f"""
 <section class="report-grid">
@@ -1800,6 +1812,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
 </section>
 {daily_swim_card}
 {tasks_panel_html}
+{audit_html}
 {daily_sync_js}
 """
     # Header pattern: [←] [📅 picker] [→] [open db ↗] [dim pills]
@@ -4288,7 +4301,7 @@ def _tasks_panel_one(
             f'<td>{_chip(table_labels.get(table_key, table_key), _TABLE_KEY_COLOR.get(table_key))}</td>'
             f'<td>{_chip(priority, _PRIORITY_COLOR.get(priority)) or chr(0x2014)}</td>'
             f'<td>{_chip(status, _STATUS_COLOR.get(status))}</td>'
-            f'<td>{title_html}</td>'
+            f'<td class="tasks-title-cell">{title_html}</td>'
             f'<td style="text-align:right;">{time_html}</td>'
             f'<td style="text-align:right;">{ev_html}</td>'
             f'<td style="font-size:11px; color:var(--muted);">{esc(_format_time_ago(last_iso))}</td>'
@@ -4322,8 +4335,20 @@ def _tasks_panel_one(
             f'{esc(lab)} <span class="sort-arrow" style="color:var(--muted); font-size:10px;">↕</span>'
             '</th>'
         )
-    # Header set depends on table_key: 任务 has priority, 审稿 doesn't
+    # Header + colgroup. Fixed widths for chip / number columns; title
+    # column gets the rest (auto) so it wraps cleanly inside the card.
     if table_key == "tasks":
+        colgroup = (
+            '<colgroup>'
+            '<col style="width:36px">'   # P
+            '<col style="width:64px">'   # 状态
+            '<col>'                       # 任务 (auto)
+            '<col style="width:54px">'   # 时长
+            '<col style="width:42px">'   # 事件
+            '<col style="width:88px">'   # 最近活动
+            '<col style="width:104px">'  # 截止
+            '</colgroup>'
+        )
         thead_html = (
             '<tr>'
             + thead_cell("P",  "priority")
@@ -4336,6 +4361,16 @@ def _tasks_panel_one(
             + '</tr>'
         )
     else:
+        colgroup = (
+            '<colgroup>'
+            '<col style="width:64px">'   # 状态
+            '<col>'                       # 题目 (auto)
+            '<col style="width:54px">'   # 时长
+            '<col style="width:42px">'   # 事件
+            '<col style="width:88px">'   # 最近活动
+            '<col style="width:104px">'  # 截止
+            '</colgroup>'
+        )
         thead_html = (
             '<tr>'
             + thead_cell("状态","status")
@@ -4419,11 +4454,122 @@ def _tasks_panel_one(
         f'<span class="muted small">{summary_line}</span>'
         f'<span style="margin-left:auto;">{toggle_html}</span>'
         '</div>'
-        '<table class="mini-table" style="width:100%;">'
+        '<table class="mini-table" style="width:100%; table-layout:fixed;">'
+        f'{colgroup}'
         f'<thead>{thead_html}</thead>'
         f'<tbody>{"".join(rows_html_scoped)}</tbody>'
         '</table>'
         + sort_filter_js +
+        '</section>'
+    )
+
+
+def _alignment_audit_card(con, days: list[str]) -> str:
+    """Show top project_guess values that DIDN'T get linked to a work_item
+    in the current window, plus a fuzzy-match suggestion per row.
+
+    Lets the user spot "I should add this to aliases.yaml" candidates at
+    a glance. Hidden when nothing to report."""
+    if not days:
+        return ""
+    rows = con.execute(
+        """
+        SELECT e.project_guess AS pg, COUNT(*) AS n
+          FROM events e
+          LEFT JOIN event_work_item_links l ON l.event_id = e.id
+         WHERE e.date BETWEEN ? AND ?
+           AND l.event_id IS NULL
+           AND e.project_guess IS NOT NULL
+           AND e.project_guess != ''
+         GROUP BY e.project_guess
+        HAVING n >= 3
+         ORDER BY n DESC
+         LIMIT 12
+        """, (min(days), max(days)),
+    ).fetchall()
+    if not rows:
+        return ""
+
+    # Fuzzy match suggestions: any work_item whose title shares a non-trivial
+    # substring with the project_guess (case-insensitive). Crude but useful.
+    wi_rows = con.execute(
+        "SELECT record_id, title, table_key FROM work_items"
+    ).fetchall()
+
+    def _suggest(pg: str) -> tuple[str, str, str] | None:
+        pg_l = pg.lower()
+        # Try direct substring (either direction)
+        for w in wi_rows:
+            t = (w["title"] or "").lower()
+            if not t:
+                continue
+            if pg_l in t or t in pg_l:
+                return w["record_id"], w["title"], w["table_key"] or ""
+        # Try word-overlap (split on non-letters)
+        import re as _re
+        pg_words = {w for w in _re.findall(r"[\w]+", pg_l) if len(w) > 2}
+        if not pg_words:
+            return None
+        best: tuple[float, dict] | None = None
+        for w in wi_rows:
+            t = (w["title"] or "").lower()
+            t_words = {x for x in _re.findall(r"[\w]+", t) if len(x) > 2}
+            if not t_words:
+                continue
+            overlap = len(pg_words & t_words) / max(len(pg_words), 1)
+            if overlap >= 0.5:
+                if best is None or overlap > best[0]:
+                    best = (overlap, w)
+        if best:
+            return best[1]["record_id"], best[1]["title"], best[1]["table_key"] or ""
+        return None
+
+    rows_html: list[str] = []
+    total_unmatched = 0
+    for r in rows:
+        pg = r["pg"]
+        n = r["n"]
+        total_unmatched += n
+        sug = _suggest(pg)
+        if sug:
+            rid, ttl, _tk = sug
+            sug_html = (
+                '<span style="font-size:11px;">'
+                f'<code style="font-size:11px; background:#f4eed8; padding:1px 5px; border-radius:4px;">"{esc(pg)}": {esc(rid)}</code>'
+                f' <span class="muted">→ {esc(ttl[:40])}</span>'
+                '</span>'
+            )
+        else:
+            sug_html = '<span class="muted small">无明显对应任务</span>'
+        rows_html.append(
+            '<tr>'
+            f'<td style="font-family: ui-monospace, monospace;">{esc(pg)}</td>'
+            f'<td style="text-align:right; font-variant-numeric:tabular-nums; font-weight:700;">{n}</td>'
+            f'<td>{sug_html}</td>'
+            '</tr>'
+        )
+
+    return (
+        '<section class="card" id="alignment-audit" style="margin-top:12px;">'
+        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">'
+        '<h3 style="margin:0;">未匹配项目审计</h3>'
+        '<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">Audit</span>'
+        f'<span class="muted small">{len(rows)} 个项目 / 共 {total_unmatched} 条事件未对应任务</span>'
+        '<span style="margin-left:auto;" class="muted small">把建议复制到 <code>config/work_item_aliases.yaml</code></span>'
+        '</div>'
+        '<table class="mini-table" style="width:100%; table-layout:fixed;">'
+        '<colgroup>'
+        '<col style="width:30%">'
+        '<col style="width:8%">'
+        '<col>'
+        '</colgroup>'
+        '<thead><tr>'
+        '<th style="text-align:left;">project_guess</th>'
+        '<th style="text-align:right;">events</th>'
+        '<th style="text-align:left;">建议</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows_html)}</tbody>'
+        '</table>'
         '</section>'
     )
 
@@ -4928,6 +5074,7 @@ def weekly_page(
     right_column_body = top_histogram_card + (highlights_card or "")
 
     tasks_panel_html = _tasks_panel(con, days, bh)
+    audit_html = _alignment_audit_card(con, days)
     body = (
         # Top row: Report | (Chart + Highlights stacked)
         '<section class="report-grid">'
@@ -4938,6 +5085,7 @@ def weekly_page(
         + bottom_card
         + view_sync_js
         + tasks_panel_html
+        + audit_html
         + day_links_html
     )
 
