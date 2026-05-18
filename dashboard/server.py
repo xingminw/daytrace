@@ -1563,13 +1563,20 @@ def _render_recommendations_section(overview_payload: dict | None) -> str:
     )
 
 
-# Tooltips on each Insights column — paraphrase the AI guidance so you
-# can hover the title and see what prompt the model received for that
-# column. Plain `title=` attribute (browser-native tooltip; zero JS).
+# Plain-language hints shown on hover over each Insights column title.
+# Speak to the reader ('你') about what the column contains — not about
+# how the AI is prompted to produce it. Native browser `title=` tooltip
+# (zero JS); we let the prompt's internal jargon stay private.
 _INSIGHTS_TOOLTIPS = {
-    "highlights":   "AI 引导:今天/本周真正推进的飞书任务+具体动作(用任务全名);只看 [task:X] 标签事件;不要数字复述,不要列没关联任务的游离工作",
-    "work_pattern": "AI 引导:基于【今日时间数据 vs 近 7 天均值】的对比观察(例:'23:31 收工,比平时晚 1h')。必须 grounded 在数字;❌不允许'合理作息''减少切换'之类空话",
-    "suggestions":  "AI 引导:只看任务清单做前瞻提醒(未推进/deadline 临近/未提交);用任务全名;❌不要回顾今天该做啥(归 highlights),不要给系统/工具建议",
+    "highlights":
+        "今天/本周在飞书任务上有哪些具体推进 —— 完成的、改的、提的代码。"
+        "只看带任务标签的事件,零散杂活不放这里。",
+    "work_pattern":
+        "你今天的作息和最近 7 天平均比起来怎么样 —— 几点开工、几点收工、"
+        "有没有大块专注、是不是切换太频繁。基于具体数字,不会写空话。",
+    "suggestions":
+        "明天/下周该盯哪些任务 —— deadline 临近的、好几天没动的、"
+        "还有未提交改动的。只看任务清单,不回顾今天该做啥。",
 }
 
 
@@ -1592,7 +1599,7 @@ def _render_trend_closer(overview_payload: dict | None, continuity: dict | None)
         return ""
     return (
         '<div class="dr-trend-closer" '
-        'title="AI 引导:对比昨天/上周,描述工作重心、节奏、产出的整体变化(只 1 句)">'
+        'title="和昨天/上周比,你的工作重心和节奏整体往哪儿走。">'
         '<span class="trend-label">变化趋势</span>'
         + (_momentum_chip(direction) if direction else "")
         + (f'<span class="dr-trend-text">{esc(comparison)}</span>' if comparison else "")
@@ -1641,7 +1648,7 @@ def _render_insights_card(overview_payload: dict | None, *, continuity: dict | N
         '<section class="card insights-card">'
         '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:10px;">'
         '<h3 style="margin:0;">Insights</h3>'
-        '<span class="muted small">悬停每列标题查看 AI 引导词</span>'
+        '<span class="muted small">悬停标题看每列在说什么</span>'
         '</div>'
         '<div class="insights-grid">'
         + _col("🚀", "关键任务进展", "highlights",   highlights)
