@@ -2828,18 +2828,34 @@ def _stack_value_of(ev: dict, stack_by: str) -> str:
 
 
 def _enrich_events_with_tasks(con, events: list[dict]) -> list[dict]:
-    """Stamp `ev["task"]` with the linked work_item.title (or leave None).
-    Cheap JOIN over event_work_item_links + work_items; chunked to stay
-    under SQLite's 999-param limit. No-op if the work_items table is
-    empty (feature disabled / never synced)."""
+    """Stamp `ev["task"]` with the linked work_item title — OR a collapsed
+    label when the work_item's table is flagged `collapse_in_dim` in
+    config/work_items.yaml.
+
+    Why collapse: the 审稿 table has 33+ individual manuscript rows; in
+    the Chart panel's 任务 dim those would each show up as separate
+    buckets and crowd out the real tasks. Collapsing folds them all to
+    "审稿" so the dim view stays readable. The Tasks panel still lists
+    each review row individually."""
     if not events:
         return events
-    # Skip entirely if work_items table is empty — cheap probe.
     has_wi = con.execute("SELECT 1 FROM work_items LIMIT 1").fetchone()
     if not has_wi:
         for ev in events:
             ev.setdefault("task", None)
         return events
+
+    # Build collapse map: table_key → collapsed_label
+    collapse_map: dict[str, str] = {}
+    try:
+        from daytrace.work_items import load_config
+        cfg = load_config()
+        for t in (cfg or {}).get("tables", []):
+            if t.get("collapse_in_dim"):
+                collapse_map[t["key"]] = t.get("collapsed_label") or t.get("name") or t["key"]
+    except Exception:
+        pass
+
     event_ids = [e["id"] for e in events if e.get("id")]
     if not event_ids:
         return events
@@ -2850,13 +2866,17 @@ def _enrich_events_with_tasks(con, events: list[dict]) -> list[dict]:
         ph = ",".join("?" * len(sub))
         for r in con.execute(
             f"""
-            SELECT l.event_id, w.title
+            SELECT l.event_id, w.title, w.table_key
               FROM event_work_item_links l
               JOIN work_items w ON w.record_id = l.record_id
              WHERE l.event_id IN ({ph})
             """, sub
         ).fetchall():
-            title_map[r["event_id"]] = r["title"]
+            tk = r["table_key"] or "tasks"
+            if tk in collapse_map:
+                title_map[r["event_id"]] = collapse_map[tk]
+            else:
+                title_map[r["event_id"]] = r["title"]
     for ev in events:
         ev["task"] = title_map.get(ev.get("id"))
     return events
@@ -4178,29 +4198,17 @@ _TABLE_KEY_COLOR = {
 }
 
 
-def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
-    """┃ Tasks panel ┃ — multi-table list of work_items with per-window
-    activity stats, sortable columns, and a "hide completed" toggle.
-
-    Returns "" if work_items table is empty (sync disabled / never run).
-
-    Each row carries `data-*` attributes used by client-side JS to:
-    - Sort by any header column (numeric vs text resolved per-column).
-    - Filter out rows whose status === "完成" when the toggle is off.
-    """
+def _tasks_panel_one(
+    con, days: list[str], boundary_hour: int, *, table_key: str, label: str, stats: dict,
+) -> str:
+    """Render ONE table's Tasks card (one entry per work_item row).
+    Returns "" if no rows for this table."""
     from daytrace.work_items import list_work_items
-    items = list_work_items(con)
+    items = list_work_items(con, table_key=table_key)
     if not items:
         return ""
-    stats = _compute_task_stats(con, days, boundary_hour)
 
-    # Group label helper — fetch each table's display name
-    table_labels = {}
-    for r in con.execute(
-        "SELECT DISTINCT table_key FROM work_items"
-    ).fetchall():
-        tk = r["table_key"]
-        table_labels[tk] = {"tasks": "任务", "reviews": "审稿"}.get(tk, tk)
+    table_labels = {"tasks": "任务", "reviews": "审稿"}
 
     rows_html = []
     for wi in items:
@@ -4284,10 +4292,6 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
             '</tr>'
         )
 
-    # Counters per table + stale warning
-    counts: dict[str, int] = {}
-    for wi in items:
-        counts[wi.get("table_key") or "tasks"] = counts.get(wi.get("table_key") or "tasks", 0) + 1
     active_p01_stale = sum(
         1 for wi in items
         if wi.get("status") in ("进行中", "待办")
@@ -4295,51 +4299,57 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         and stats.get(wi["record_id"], {}).get("event_count", 0) == 0
     )
     completed_count = sum(1 for wi in items if wi.get("status") == "完成")
-
-    summary_bits = []
-    for tk, n in counts.items():
-        summary_bits.append(f"{table_labels.get(tk, tk)} {n}")
+    summary_bits = [f"{len(items)} 行"]
     if active_p01_stale:
         summary_bits.append(f'<span style="color:#b32a2a;">{active_p01_stale} 个 P0/P1 本期零活动</span>')
     summary_line = " · ".join(summary_bits)
 
-    # Toggle pill: hide / show completed
     toggle_html = (
-        '<label class="tasks-show-completed" style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); cursor:pointer; user-select:none;">'
-        '<input type="checkbox" data-role="tasks-show-completed" '
-        f'{"checked" if completed_count == 0 else ""}'
-        ' style="cursor:pointer;">'
+        '<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); cursor:pointer; user-select:none;">'
+        '<input type="checkbox" data-role="tasks-show-completed" style="cursor:pointer;">'
         f'显示已完成 ({completed_count})'
         '</label>'
     )
 
-    # Header cells with sort affordance
-    def thead_cell(label: str, sort_key: str, *, align: str = "left", default_dir: str = "asc") -> str:
+    def thead_cell(lab: str, sort_key: str, *, align: str = "left", default_dir: str = "asc") -> str:
         return (
             f'<th data-sort="{sort_key}" data-default-dir="{default_dir}" '
             f'style="text-align:{align}; cursor:pointer; user-select:none;">'
-            f'{esc(label)} <span class="sort-arrow" style="color:var(--muted); font-size:10px;">↕</span>'
+            f'{esc(lab)} <span class="sort-arrow" style="color:var(--muted); font-size:10px;">↕</span>'
             '</th>'
         )
-    thead_html = (
-        '<tr>'
-        + thead_cell("源", "table", default_dir="asc")
-        + thead_cell("P",  "priority", default_dir="asc")
-        + thead_cell("状态","status",   default_dir="asc")
-        + thead_cell("任务","title",    default_dir="asc")
-        + thead_cell("时长","hours",    align="right", default_dir="desc")
-        + thead_cell("事件","events",   align="right", default_dir="desc")
-        + thead_cell("最近活动","last",  default_dir="desc")
-        + thead_cell("截止","due",      default_dir="asc")
-        + '</tr>'
-    )
+    # Header set depends on table_key: 任务 has priority, 审稿 doesn't
+    if table_key == "tasks":
+        thead_html = (
+            '<tr>'
+            + thead_cell("P",  "priority")
+            + thead_cell("状态","status")
+            + thead_cell("任务","title")
+            + thead_cell("时长","hours", align="right", default_dir="desc")
+            + thead_cell("事件","events", align="right", default_dir="desc")
+            + thead_cell("最近活动","last", default_dir="desc")
+            + thead_cell("截止","due")
+            + '</tr>'
+        )
+    else:
+        thead_html = (
+            '<tr>'
+            + thead_cell("状态","status")
+            + thead_cell("题目","title")
+            + thead_cell("时长","hours", align="right", default_dir="desc")
+            + thead_cell("事件","events", align="right", default_dir="desc")
+            + thead_cell("最近活动","last", default_dir="desc")
+            + thead_cell("截止","due")
+            + '</tr>'
+        )
 
+    # Per-card scoped JS (closes over its own panel root)
+    panel_id = f"tasks-{table_key}"
     sort_filter_js = (
         '<script>(function(){'
-        'var panel=document.getElementById("tasks");'
+        f'var panel=document.getElementById("{panel_id}");'
         'if(!panel)return;'
         'var tbody=panel.querySelector("tbody");if(!tbody)return;'
-        # ── Hide-completed toggle ──
         'var cb=panel.querySelector(\'[data-role="tasks-show-completed"]\');'
         'function applyVis(){'
         'var show=cb&&cb.checked;'
@@ -4347,7 +4357,6 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         'r.style.display=(!show&&r.dataset.status==="完成")?"none":"";});'
         '}'
         'if(cb)cb.addEventListener("change",applyVis);'
-        # ── Click-to-sort headers ──
         'var sortState={key:null,dir:1};'
         'function getKey(row,key){'
         'switch(key){'
@@ -4357,7 +4366,6 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         'case"status":return parseInt(row.dataset.statusSort||"9",10);'
         'case"due":return row.dataset.dueSort||"9999";'
         'case"last":return row.dataset.lastSort||"0";'
-        'case"table":return row.dataset.table||"";'
         'case"title":return (row.dataset.title||"").toLowerCase();'
         '}return"";}'
         'function applySort(key,dir){'
@@ -4377,25 +4385,110 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         'var arrow=th.querySelector(".sort-arrow");if(arrow)arrow.textContent=sortState.dir>0?"↑":"↓";'
         'applySort(sortState.key,sortState.dir);'
         '});});'
-        # Initial visibility (default: hide completed)
         'applyVis();'
         '})();</script>'
     )
 
+    chip_palette = _TABLE_KEY_COLOR.get(table_key)
+    chip_html = _chip(label, chip_palette)
+    # Re-render rows but drop the now-redundant "源" cell since the card itself is scoped
+    table_label = table_labels.get(table_key, table_key)
+    # Strip the leading source-chip cell from each row (each row currently
+    # opens with that <td>; remove the first <td>…</td> chunk)
+    import re as _re
+    if table_key == "tasks":
+        rows_html_scoped = [_re.sub(r"^(<tr[^>]*>)<td>[^<]*<span[^>]*>[^<]*</span>[^<]*</td>", r"\1", r, count=1) for r in rows_html]
+    else:
+        # For reviews: drop source-chip cell AND priority cell (审稿 has no P)
+        rows_html_scoped = []
+        for r in rows_html:
+            r = _re.sub(r"^(<tr[^>]*>)<td>[^<]*<span[^>]*>[^<]*</span>[^<]*</td>", r"\1", r, count=1)
+            # Now drop next <td>...</td> (priority)
+            r = _re.sub(r"^(<tr[^>]*>)<td>[^<]*(?:<span[^>]*>[^<]*</span>|—)?[^<]*</td>", r"\1", r, count=1)
+            rows_html_scoped.append(r)
+
     return (
-        '<section class="card" id="tasks">'
+        f'<section class="card tasks-card" id="{panel_id}" data-table-key="{esc(table_key)}">'
         '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">'
-        '<h3 style="margin:0;">工作项</h3>'
-        '<span class="tag source" style="background:rgba(22,163,74,0.14); color:#16a34a;">Tasks</span>'
+        f'<h3 style="margin:0;">工作项 · {esc(table_label)}</h3>'
+        f'{chip_html}'
         f'<span class="muted small">{summary_line}</span>'
         f'<span style="margin-left:auto;">{toggle_html}</span>'
         '</div>'
         '<table class="mini-table" style="width:100%;">'
         f'<thead>{thead_html}</thead>'
-        f'<tbody>{"".join(rows_html)}</tbody>'
+        f'<tbody>{"".join(rows_html_scoped)}</tbody>'
         '</table>'
         + sort_filter_js +
         '</section>'
+    )
+
+
+def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
+    """┃ Tasks panel ┃ container — one card per configured table + a top
+    selector pill bar to show only 任务 / 审稿 / 全部."""
+    has_wi = con.execute("SELECT 1 FROM work_items LIMIT 1").fetchone()
+    if not has_wi:
+        return ""
+    stats = _compute_task_stats(con, days, boundary_hour)
+
+    # Discover present tables in priority order
+    table_order = []
+    for r in con.execute(
+        "SELECT DISTINCT table_key FROM work_items ORDER BY "
+        "CASE table_key WHEN 'tasks' THEN 0 WHEN 'reviews' THEN 1 ELSE 2 END"
+    ).fetchall():
+        table_order.append(r["table_key"])
+    if not table_order:
+        return ""
+
+    table_labels = {"tasks": "任务", "reviews": "审稿"}
+
+    cards_html: list[str] = []
+    for tk in table_order:
+        card = _tasks_panel_one(
+            con, days, boundary_hour,
+            table_key=tk, label=table_labels.get(tk, tk),
+            stats=stats,
+        )
+        if card:
+            cards_html.append(card)
+    if not cards_html:
+        return ""
+
+    # Top selector pill bar — JS toggles visibility of each card
+    pills = ['<button type="button" class="dim-tab active" data-table-pick="all">全部</button>']
+    for tk in table_order:
+        pills.append(
+            f'<button type="button" class="dim-tab" data-table-pick="{esc(tk)}">'
+            f'{esc(table_labels.get(tk, tk))}</button>'
+        )
+    pill_bar = (
+        '<div class="dim-tabs" data-role="tasks-table-pick" '
+        'style="margin-bottom:10px; display:inline-flex;">'
+        + "".join(pills) +
+        '</div>'
+    )
+    toggle_js = (
+        '<script>(function(){'
+        'var bar=document.querySelector(\'[data-role="tasks-table-pick"]\');'
+        'if(!bar)return;'
+        'bar.querySelectorAll(".dim-tab").forEach(function(btn){'
+        'btn.addEventListener("click",function(){'
+        'var pick=btn.dataset.tablePick;'
+        'bar.querySelectorAll(".dim-tab").forEach(function(b){b.classList.toggle("active",b===btn);});'
+        'document.querySelectorAll(".tasks-card").forEach(function(c){'
+        'c.style.display=(pick==="all"||c.dataset.tableKey===pick)?"":"none";});'
+        '});});'
+        '})();</script>'
+    )
+
+    return (
+        '<section style="margin-top:12px;" id="tasks-region">'
+        f'{pill_bar}'
+        + "".join(cards_html)
+        + toggle_js
+        + '</section>'
     )
 
 

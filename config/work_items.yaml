@@ -33,6 +33,13 @@ tables:
     app_token: FJTLbsd6RaP1omsbvYDcuN5ZnTe
     table_id:  tblQW1NW564DUa1D
     as: user
+    # When true, every event linked to ANY record in this table is bucketed
+    # under one shared dim value (`collapsed_label`) in the 任务 dim.
+    # This keeps the Chart panel's distribution clean — 33 individual paper
+    # reviews would otherwise drown out the real "tasks" view. The Tasks
+    # panel still lists each review row individually.
+    collapse_in_dim: true
+    collapsed_label: 审稿
     field_map:
       title:    题目
       status:   状态
