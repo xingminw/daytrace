@@ -3800,7 +3800,11 @@ def weekly_page(
         'var KEY="daytrace.weekly.scrollY";'
         'var saved=sessionStorage.getItem(KEY);'
         'if(saved!==null){window.scrollTo(0,parseInt(saved,10)||0);sessionStorage.removeItem(KEY);}'
-        'document.querySelectorAll(".dim-bar a[data-param]").forEach(function(a){'
+        # Selector is page-wide: dim pills live in .dim-bar but unit pills
+        # now live inside .top-chart-card. Both need live-URL navigation
+        # so the other card's local state (view, top_view, swim_filter,
+        # set via replaceState) survives the reload.
+        'document.querySelectorAll("a[data-param]").forEach(function(a){'
         'a.addEventListener("click",function(e){'
         'if(a.classList.contains("active")){e.preventDefault();return;}'
         'e.preventDefault();'
