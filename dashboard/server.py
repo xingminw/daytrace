@@ -3763,10 +3763,23 @@ def _alignment_audit_card(con, days: list[str]) -> str:
     if not rows:
         return ""
 
-    wi_rows = con.execute(
-        "SELECT record_id, title, table_key FROM work_items "
+    # Skip completed tasks/reviews whose deadline passed more than 7 days
+    # ago — those are historical and shouldn't clutter the audit dropdown.
+    # Tasks still 进行中/待办 always stay; recently-completed (≤7d) stay too
+    # so you can retro-link an event to something you just finished.
+    from datetime import date as _date_mod, timedelta as _td_mod
+    _cutoff = (_date_mod.today() - _td_mod(days=7)).isoformat()
+    wi_rows_all = con.execute(
+        "SELECT record_id, title, table_key, status, due_date FROM work_items "
         "ORDER BY CASE table_key WHEN 'tasks' THEN 0 ELSE 1 END, title"
     ).fetchall()
+    wi_rows = []
+    for w in wi_rows_all:
+        if (w["status"] or "") == "完成":
+            due = w["due_date"] or ""
+            if not due or due < _cutoff:
+                continue
+        wi_rows.append(w)
     if not wi_rows:
         return ""
 
