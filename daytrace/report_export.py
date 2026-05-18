@@ -232,6 +232,48 @@ def archive_markdown_for_date(db_path: Path, date: str, *,
     return "\n".join(parts)
 
 
+def _md_daily_timeline(con, days: list[str]) -> str:
+    """Build the '每日时间轴' section for the weekly MD by replaying each
+    day's cached ai_overview headline + narrative. Skips days with no
+    overview row (catchup didn't reach that date, or AI was unavailable)."""
+    weekday_labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    blocks: list[str] = []
+    for idx, d in enumerate(days):
+        wd = weekday_labels[idx] if idx < 7 else "?"
+        row = con.execute(
+            "SELECT value_json FROM day_channel "
+            "WHERE date=? AND channel='ai_overview'",
+            (d,),
+        ).fetchone()
+        if not row or not row[0]:
+            blocks.append(f"### {wd} · {d}\n\n_(无数据)_\n")
+            continue
+        try:
+            val = json.loads(row[0])
+        except Exception:
+            blocks.append(f"### {wd} · {d}\n\n_(数据损坏)_\n")
+            continue
+        headline = (val.get("headline") or "").strip()
+        ov = val.get("overview")
+        if isinstance(ov, dict):
+            narrative = (ov.get("narrative") or "").strip()
+        else:
+            # v6 cache compat — narrative was a top-level string
+            narrative = (val.get("narrative") or "").strip()
+        block_lines = [f"### {wd} · {d}"]
+        if headline:
+            block_lines.append("")
+            block_lines.append(f"**✨ {headline}**")
+        if narrative:
+            block_lines.append("")
+            for line in narrative.strip().split("\n"):
+                block_lines.append(f"> {line}" if line.strip() else ">")
+        blocks.append("\n".join(block_lines))
+    if not blocks:
+        return ""
+    return "\n\n".join(blocks)
+
+
 def archive_markdown_for_week(db_path: Path, week: str, *,
                               chart_names: list[str] | None = None) -> str:
     """Render a Markdown summary for an ISO week (YYYY-Www).
@@ -243,7 +285,7 @@ def archive_markdown_for_week(db_path: Path, week: str, *,
     con = connect(db_path)
     init_db(con)
 
-    monday, sunday, _ = iso_week_to_date_range(week)
+    monday, sunday, days = iso_week_to_date_range(week)
     total_events = con.execute(
         "SELECT COUNT(*) FROM events WHERE date BETWEEN ? AND ?", (monday, sunday)
     ).fetchone()[0]
@@ -317,6 +359,17 @@ def archive_markdown_for_week(db_path: Path, week: str, *,
         parts.append("")
         if chart_names:
             _insert_charts_block(parts, chart_names)
+
+    # Per-day timeline at the end: reuses each day's cached ai_overview
+    # (headline + narrative). Reads as a vertical 周一→周日 recap.
+    timeline_md = _md_daily_timeline(con, days)
+    if timeline_md:
+        parts.append("---")
+        parts.append("")
+        parts.append("## 📅 每日时间轴")
+        parts.append("")
+        parts.append(timeline_md)
+        parts.append("")
 
     parts.append("---")
     parts.append(f"🌸 _DayTrace 归档 · 生成于 {_now_iso()}_")

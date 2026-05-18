@@ -162,11 +162,11 @@ body.events-page form { height:100%; }
 .insights-col { padding:0 18px; border-left:1px dashed #eadfcd; min-width:0; }
 .insights-col:first-child { padding-left:0; border-left:none; }
 .insights-col:last-child  { padding-right:0; }
-.insights-col h4 { margin:0 0 8px; font-size:13px; font-weight:700; color:#4d4438; letter-spacing:.02em; cursor:help; }
-.insights-col ul { margin:0; padding-left:18px; }
-.insights-col ul li { font-size:13px; line-height:1.55; color:#362f27; margin-bottom:4px; }
+.insights-col h4 { margin:0 0 10px; font-size:14px; font-weight:700; color:#4d4438; letter-spacing:.02em; cursor:help; }
+.insights-col ul { margin:0; padding-left:20px; }
+.insights-col ul li { font-size:14.5px; line-height:1.65; color:#362f27; margin-bottom:8px; }
 .insights-col ul li:last-child { margin-bottom:0; }
-.insights-col .muted { font-size:12.5px; }
+.insights-col .muted { font-size:13.5px; }
 @media (max-width:900px) {
   .insights-grid { grid-template-columns:1fr; gap:14px; }
   .insights-col { padding:0; border-left:none; border-top:1px dashed #eadfcd; padding-top:12px; }
@@ -1631,10 +1631,17 @@ def _render_insights_card(overview_payload: dict | None, *, continuity: dict | N
     if not (highlights or work_pattern or suggestions):
         return ""
 
+    # AI sometimes prepends the section emoji (🚀/⏰/🔔/...) to each bullet —
+    # redundant with the column header. Strip at render time so we don't
+    # have to invalidate cached AI overviews.
+    import re as _re_local
+    _strip_re = _re_local.compile(r"^[🚀⏰🔔📌✨📰💡📊🎯]\s*")
+
     def _col(emoji: str, label: str, key: str, items: list[str]) -> str:
         tip = _INSIGHTS_TOOLTIPS.get(key, "")
+        cleaned = [_strip_re.sub("", x.lstrip()).strip() for x in items]
         body_html = (
-            f'<ul>{"".join(f"<li>{esc(x)}</li>" for x in items)}</ul>' if items
+            f'<ul>{"".join(f"<li>{esc(x)}</li>" for x in cleaned)}</ul>' if cleaned
             else '<div class="muted">(无)</div>'
         )
         return (
