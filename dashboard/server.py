@@ -146,8 +146,10 @@ body.events-page form { height:100%; }
 .dr-trend { display:flex; align-items:center; gap:10px; font-size:13px; line-height:1.55; padding:6px 12px; background:#fff7e8; border:1px solid #f0d68b; border-radius:10px; margin-bottom:8px; }
 .dr-trend-text { color:#362f27; }
 /* Slim trend closer sitting under the narrative in the Report card —
-   chip + 1 sentence, no box, just a thin top border for visual hand-off. */
-.dr-trend-closer { display:flex; align-items:center; gap:10px; font-size:13px; line-height:1.55; padding-top:10px; margin-top:6px; border-top:1px dashed #eadfcd; cursor:help; }
+   inline label + chip + 1 sentence, single row, no box; thin top border
+   hands off visually from the narrative paragraph above. */
+.dr-trend-closer { display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:13px; line-height:1.55; padding-top:10px; margin-top:6px; border-top:1px dashed #eadfcd; cursor:help; }
+.dr-trend-closer .trend-label { font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.06em; padding:2px 8px; border-radius:999px; background:#f3ecd9; }
 .dr-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin:0 0 12px; }
 @media (max-width:900px) { .dr-grid { grid-template-columns:1fr; } }
 .dr-section h4 { margin:0 0 6px; font-size:12.5px; font-weight:700; color:#4d4438; letter-spacing:.04em; }
@@ -1590,7 +1592,8 @@ def _render_trend_closer(overview_payload: dict | None, continuity: dict | None)
         return ""
     return (
         '<div class="dr-trend-closer" '
-        'title="AI 引导:对比昨天,描述工作重心、节奏、产出的整体变化(只 1 句)">'
+        'title="AI 引导:对比昨天/上周,描述工作重心、节奏、产出的整体变化(只 1 句)">'
+        '<span class="trend-label">变化趋势</span>'
         + (_momentum_chip(direction) if direction else "")
         + (f'<span class="dr-trend-text">{esc(comparison)}</span>' if comparison else "")
         + '</div>'
@@ -3304,15 +3307,18 @@ def _weekly_stats_strip(
 
 
 def _ai_summary_body(summary: dict | None) -> str:
-    """Weekly Report-card body. Just Overview (headline + narrative + key
-    moves). 趋势/关键进展/建议 live in the full-width Insights card below."""
+    """Weekly Report-card body: Overview narrative + trend closer, mirroring
+    daily. The 3-column Insights row sits separately below."""
     if summary is None:
         return '<div class="dr-narrative muted">(本周 AI 速读还没生成)</div>'
     if summary.get("_unavailable"):
         return '<div class="dr-narrative muted">(DEEPSEEK_API_KEY 未设置, 跳过 AI 速读)</div>'
     if summary.get("_error"):
         return f'<div class="dr-narrative muted">AI 调用失败: {esc(summary["_error"])}</div>'
-    return _render_overview_section(summary)
+    return (
+        _render_overview_section(summary)
+        + _render_trend_closer(summary, None)
+    )
 
 
 def _ai_insights_card_weekly(summary: dict | None) -> str:
