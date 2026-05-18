@@ -124,6 +124,114 @@ def registered_channel_names() -> dict[str, list[str]]:
     }
 
 
+def pending_dates(
+    con: sqlite3.Connection,
+    *,
+    target_date: str | None = None,
+    lookback_days: int = 7,
+    always_redo_recent: int = 2,
+) -> dict[str, list[str]]:
+    """Figure out which dates need a (re-)run.
+
+    The goal: a scheduler (Hermes / cron) calls this every night, then
+    runs each returned date through regenerate_day_from_db. Re-running
+    a date that's already settled costs ~0 (cache hit on events_hash);
+    skipping a date means missing data forever.
+
+    Returns:
+        {
+          "fresh":   [dates whose day_report exists and is up-to-date],
+          "stale":   [dates with a day_report row but events added since],
+          "missing": [dates that have events but no day_report at all],
+          "to_run":  [union of stale + missing + always_redo_recent days],
+        }
+
+    Strategy:
+      - Walk every date that has at least 1 event in [target - lookback_days, target].
+      - For each, compare the day's max(events.inserted_at) against the
+        day_report.updated_at. If newer → stale.
+      - Always include the most-recent `always_redo_recent` days in to_run
+        (in case events trickle in after the day "ended" — e.g. a session
+        wrapping up at 05:00 still belongs to yesterday's report).
+    """
+    from datetime import date as _date, timedelta
+    from . import stats
+
+    if target_date is None:
+        # "Yesterday" if we're before today's boundary, else "today".
+        from datetime import datetime
+        now = datetime.now()
+        if now.hour < stats.DAY_BOUNDARY_HOUR:
+            target_date = (now.date() - timedelta(days=1)).isoformat()
+        else:
+            target_date = now.date().isoformat()
+
+    target = _date.fromisoformat(target_date)
+    start = (target - timedelta(days=lookback_days)).isoformat()
+    end = target.isoformat()
+
+    # We need to ask "which dates have events in the shifted window?" — but
+    # for catchup-detection purposes the calendar-day query is good enough
+    # (events with date in [start..end] cover both shifted windows).
+    candidate_rows = con.execute(
+        """
+        SELECT date,
+               MAX(inserted_at) AS latest_inserted
+          FROM events
+         WHERE date BETWEEN ? AND ?
+         GROUP BY date
+         ORDER BY date
+        """,
+        (start, end),
+    ).fetchall()
+    candidates = {r["date"]: r["latest_inserted"] for r in candidate_rows}
+
+    # Existing day_report rows in the same window
+    report_rows = con.execute(
+        """
+        SELECT date, updated_at
+          FROM day_report
+         WHERE date BETWEEN ? AND ?
+        """,
+        (start, end),
+    ).fetchall()
+    reports = {r["date"]: r["updated_at"] for r in report_rows}
+
+    fresh: list[str] = []
+    stale: list[str] = []
+    missing: list[str] = []
+
+    all_dates = sorted(set(candidates) | set(reports))
+    for d in all_dates:
+        if d not in reports:
+            missing.append(d)
+            continue
+        ev_latest = candidates.get(d)
+        rep_updated = reports[d]
+        if ev_latest and rep_updated and ev_latest > rep_updated:
+            stale.append(d)
+        else:
+            fresh.append(d)
+
+    # Always re-do the N most-recent dates in our window (idempotent + cheap
+    # via the channel cache; protects against late-arriving events).
+    recent_window = [
+        (target - timedelta(days=i)).isoformat()
+        for i in range(always_redo_recent)
+    ]
+    to_run = sorted(set(stale) | set(missing) | set(recent_window))
+
+    return {
+        "target_date": target_date,
+        "lookback_days": lookback_days,
+        "window": {"start": start, "end": end},
+        "fresh": fresh,
+        "stale": stale,
+        "missing": missing,
+        "to_run": to_run,
+    }
+
+
 def _maybe_json(text: str | None):
     if text is None or text == "":
         return None

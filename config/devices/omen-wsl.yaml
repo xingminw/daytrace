@@ -18,3 +18,7 @@ sources:
     repos:
       - /mnt/d/research-programs/daytrace
     limit: 300
+  claude_code:
+    enabled: true
+    home: ~/.claude/projects
+    limit: 800

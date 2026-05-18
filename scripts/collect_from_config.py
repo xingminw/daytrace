@@ -23,6 +23,7 @@ from daytrace.schema import TraceEvent  # noqa: E402
 from scripts.collect_codex import collect_codex_events  # noqa: E402
 from scripts.collect_git import collect_git_events  # noqa: E402
 from scripts.collect_hermes_sessions import collect_hermes_events  # noqa: E402
+from scripts.collect_claude_code import collect_claude_code_events  # noqa: E402
 
 LOCAL_TZ = ZoneInfo("America/Detroit")
 
@@ -65,6 +66,13 @@ def collect_source_for_day(
         if not roots and not repos:
             raise CollectorConfigError("git source requires explicit roots or repos")
         return collect_git_events(day, [*roots, *repos], source_limit(source_config, 200))
+    if source_name == "claude_code":
+        claude_home = source_config.get("home") or source_config.get("projects_dir")
+        return collect_claude_code_events(
+            day,
+            expand_path(claude_home) if claude_home else None,
+            source_limit(source_config, 800),
+        )
     raise ValueError(f"unsupported source: {source_name}")
 
 
@@ -77,7 +85,7 @@ def collect_configured(
     config = load_collector_config(config_path)
     device_id = ensure_safe_id(config["device"]["id"], "device.id")
     batch_id = f"{device_id}-{end_day}-lookback-{lookback_days}d"
-    source_names = ["codex", "hermes", "git"]
+    source_names = ["codex", "hermes", "git", "claude_code"]
     manifest = {
         "schema_version": "daytrace.collector_manifest.v1",
         "batch_id": batch_id,

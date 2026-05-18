@@ -643,7 +643,17 @@ def calendar_control(action: str, selected: str | None, dates: list[str], hidden
     if allow_all:
         params = {k: v for k, v in hidden.items() if v and k != "date"}
         all_link = f'<a class="cal-all" href="{esc(action)}{("?" + esc(urlencode(params))) if params else ""}">All dates</a>'
-    label = selected or "All"
+    # Show "2026-05-15 周五" so the user knows what day of week without
+    # squinting at the calendar. Chinese single-char abbreviations.
+    _WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"]
+    if selected:
+        try:
+            _wd = _WEEKDAYS[dt_date.fromisoformat(selected).weekday()]
+            label = f"{selected} 周{_wd}"
+        except ValueError:
+            label = selected
+    else:
+        label = "All"
     label_html = f'<span>{esc(label_text)}</span>' if label_text else ""
     return f"""<div class="header-filter">{label_html}<details class="date-picker"><summary>📅 {esc(label)} ▾</summary><div class="calendar-pop"><div class="cal-head"><span>{base.year}-{base.month:02d}</span></div><div class="cal-grid">{''.join(f'<div class="cal-dow">{d}</div>' for d in ['M','T','W','T','F','S','S'])}{''.join(days)}</div>{all_link}</div></details>{hidden_html}</div>"""
 
