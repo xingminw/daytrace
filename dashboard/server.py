@@ -167,6 +167,26 @@ body.events-page form { height:100%; }
 .insights-col ul li { font-size:14.5px; line-height:1.65; color:#362f27; margin-bottom:8px; }
 .insights-col ul li:last-child { margin-bottom:0; }
 .insights-col .muted { font-size:13.5px; }
+/* Daily timeline card — 7 columns side by side, one per weekday.
+   Full-width below the swim/heat panel; collapses to 1 col on narrow. */
+.daily-timeline-card { margin-top:12px; }
+.dt-grid { display:grid; grid-template-columns:repeat(7, 1fr); gap:10px; align-items:stretch; }
+.dt-col { background:white; border:1px solid var(--line); border-radius:10px; padding:10px 12px 12px; display:flex; flex-direction:column; min-width:0; box-shadow:0 1px 2px rgba(45,30,10,0.03); }
+.dt-col.dt-empty { background:#fafaf7; }
+.dt-col-head { display:flex; align-items:baseline; gap:6px; padding:0 0 8px; margin:0 0 8px; border-bottom:2px solid #f0d68b; text-decoration:none; color:inherit; }
+.dt-col-head:hover { border-bottom-color:#2f6fed; }
+.dt-col-head:hover .dt-day-name { color:#2f6fed; }
+.dt-day-name { font-weight:700; font-size:14px; color:#1a1814; }
+.dt-date { font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.dt-headline { font-size:13px; font-weight:700; color:#1a1814; line-height:1.4; margin-bottom:8px; }
+.dt-headline.muted { color:var(--muted); font-weight:500; font-style:italic; }
+.dt-narrative { font-size:12px; line-height:1.55; color:#4d4438; flex:1; word-break:break-word; }
+.dt-col:nth-child(3n+1) .dt-col-head { border-bottom-color:#f59e0b; }
+.dt-col:nth-child(3n+2) .dt-col-head { border-bottom-color:#2f6fed; }
+.dt-col:nth-child(3n)   .dt-col-head { border-bottom-color:#16a34a; }
+@media (max-width:1100px) { .dt-grid { grid-template-columns:repeat(4, 1fr); } }
+@media (max-width:720px)  { .dt-grid { grid-template-columns:repeat(2, 1fr); } }
+@media (max-width:480px)  { .dt-grid { grid-template-columns:1fr; } }
 @media (max-width:900px) {
   .insights-grid { grid-template-columns:1fr; gap:14px; }
   .insights-col { padding:0; border-left:none; border-top:1px dashed #eadfcd; padding-top:12px; }
@@ -1604,6 +1624,78 @@ def _render_trend_closer(overview_payload: dict | None, continuity: dict | None)
         + (_momentum_chip(direction) if direction else "")
         + (f'<span class="dr-trend-text">{esc(comparison)}</span>' if comparison else "")
         + '</div>'
+    )
+
+
+def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
+    """Full-width 7-column horizontal timeline card for the weekly page.
+    One column per weekday (周一→周日), each showing the day's headline
+    and narrative. Clicking the weekday header jumps to /today?date=…
+    for the full dashboard.
+
+    Reads cached ai_overview per day; tolerates v6 (top-level narrative)
+    and v10+ (overview.narrative) shapes."""
+    if not days:
+        return ""
+    weekday_labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+    cols: list[str] = []
+    any_data = False
+    for idx, d in enumerate(days):
+        wd = weekday_labels[idx] if idx < 7 else "?"
+        row = con.execute(
+            "SELECT value_json FROM day_channel WHERE date=? AND channel='ai_overview'",
+            (d,),
+        ).fetchone()
+        val = None
+        if row and row[0]:
+            try:
+                val = json.loads(row[0])
+            except Exception:
+                val = None
+        if not val:
+            cols.append(
+                '<div class="dt-col dt-empty">'
+                '<div class="dt-col-head">'
+                f'<span class="dt-day-name">{esc(wd)}</span>'
+                f'<span class="dt-date">{esc(d[5:])}</span>'
+                '</div>'
+                '<div class="dt-headline muted">(无数据)</div>'
+                '</div>'
+            )
+            continue
+        any_data = True
+        headline = (val.get("headline") or "").strip()
+        ov = val.get("overview")
+        if isinstance(ov, dict):
+            narrative = (ov.get("narrative") or "").strip()
+        else:
+            narrative = (val.get("narrative") or "").strip()
+        cols.append(
+            '<div class="dt-col">'
+            '<a class="dt-col-head" '
+            f'href="/today?date={esc(d)}" title="跳到该日完整 dashboard">'
+            f'<span class="dt-day-name">{esc(wd)}</span>'
+            f'<span class="dt-date">{esc(d[5:])}</span>'
+            '</a>'
+            + (f'<div class="dt-headline">{esc(headline)}</div>' if headline else "")
+            + (f'<div class="dt-narrative">{esc(narrative)}</div>' if narrative else "")
+            + '</div>'
+        )
+
+    if not any_data:
+        return ""
+    return (
+        '<section class="card daily-timeline-card">'
+        '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:12px;">'
+        '<h3 style="margin:0;">每日时间轴</h3>'
+        '<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">Daily</span>'
+        '<span class="muted small" style="margin-left:6px;">点击每天的星期头跳到当日完整 dashboard</span>'
+        '</div>'
+        '<div class="dt-grid">'
+        + "".join(cols)
+        + '</div>'
+        '</section>'
     )
 
 
@@ -3272,7 +3364,7 @@ def _ai_weekly_summary(
         "{\n"
         '  "headline": "≤30 字, 一句话抓住本周主线 (例: \'评分模型从设计到上线, daytrace UI 收尾\')",\n'
         '  "overview": {\n'
-        '    "narrative": "**5-7 句, 200-320 字** 的叙事段落。像跟熟人讲本周发生了啥: 周一/周二怎么起步, 中间哪儿转弯或卡住, 哪天有个意外发现, 周五/周日怎么收尾。引用具体任务全名、某天的具体动作、用到的工具。**禁止**: bullet, 通报体 (\'本周主要做了…\'), 重复 highlights 内容"\n'
+        '    "narrative": "**3-5 句, 150-250 字** 的**主题式**总结(不是日记式流水账)。识别本周的 2-4 条主线 (任务/方向), 每条说清楚: 推进到什么程度、卡点在哪、有什么阶段性产出。整体格调:像跟熟人讲\'我这周搞了几件事\'。\\n\\n**禁止**: ‘周一... 周二... 周三...’ 这种逐日叙述 (每日叙事另有专栏); ‘本周主要做了X, Y, Z’这种通报体; bullet; 重复 highlights 的具体动作。\\n\\n**鼓励**: 主线对比 (‘A 已收尾, B 还在调试, C 刚起步’)、强调进展程度 (‘从设计走到上线’) 而不是堆事项。"\n'
         '  },\n'
         '  "trend": {\n'
         '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
@@ -3289,14 +3381,20 @@ def _ai_weekly_summary(
         "**完整任务标题** (例: ‘DayTrace 应用开发’, 不是 ‘daytrace’)。"
         "上下文里的【每日 AI 速读】是真任务名的来源, **不要**从【项目分布】"
         "里拿 daily-manager / misc / daytrace 这种 project_guess 当主体。\n\n"
+        "**narrative 是『主题式总结』, 不是『日记』**:\n"
+        "  • 把本周内容**按主线归类** (2-4 条), 然后讲每条主线的**推进程度**, "
+        "而不是按日期顺序背流水账。\n"
+        "  • 用户看 narrative 想知道 ‘这周 4 条主线各推到哪了, 哪些收尾了, "
+        "哪些还在挣扎, 哪些刚起头’ — 用对比和节奏感, 不要 ‘周一... 周二... 周三...’。\n"
+        "  • 注意: 逐日叙事会在专门的『每日时间轴』里展示, 不要在 narrative 里"
+        "重复, 你这里只做**主题/层次/对比**的总览。\n\n"
         "**写作风格**:\n"
-        "  • narrative 要像跟熟人讲本周发生了啥, 不是写周报。带温度、有画面、"
-        "有节奏 (周一…周三…周五…), 引用某天的具体事 (合 PR, 卡 bug, 和谁讨论)。"
-        "**禁止通报体** (‘本周完成了 X, Y, Z’)。\n"
         "  • bullet 写法多样化, 不要每条都是 ‘任务名: 动作’ 死板模板。\n\n"
         "**禁止**:\n"
         "  ❌ 用项目名代替任务名\n"
         "  ❌ 编造任务名 (只能用每日速读里出现过的真任务)\n"
+        "  ❌ narrative 写成 ‘周一... 周二... 周三...’ 的日记体\n"
+        "  ❌ narrative 写成 ‘本周完成了 X, Y, Z’ 的通报体\n"
         "  ❌ 对数据/系统/工具提建议\n"
         "  ❌ 泛化效率说教、数字复述\n\n"
         "严格只输出 JSON, 不要 Markdown。"
@@ -4667,6 +4765,7 @@ def weekly_page(
 
     tasks_panel_html = _tasks_panel(con, days, bh)
     audit_html = _alignment_audit_card(con, days)
+    daily_timeline_card = _render_weekly_daily_timeline_card(con, days)
     body = (
         # Top row: Report | Chart
         '<section class="report-grid">'
@@ -4675,9 +4774,11 @@ def weekly_page(
         + '</section>'
         # Full-width Insights row (变化趋势 / 关键进展 / 建议)
         + insights_card_html
-        # Timeline panel
+        # Timeline panel (swim/heat)
         + bottom_card
         + view_sync_js
+        # Per-day timeline card — 7 cols horizontal, headline + narrative each
+        + daily_timeline_card
         + tasks_panel_html
         + audit_html
         + day_links_html
