@@ -36,6 +36,12 @@ body.events-page form { height:100%; }
    so they're always reachable while scrolling through the daily report
    and project cards. */
 .dim-bar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:0 -18px 12px; padding:8px 18px; flex-wrap:wrap; position:sticky; top:50px; z-index:4; background:rgba(247,245,239,.92); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+/* Inline controls in the sticky header (used by /today + /weekly so the
+   prev/next nav + date picker + dim pills all sit on one row). */
+.header-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.header-controls .day-nav { display:inline-flex; gap:6px; margin:0; padding:0; }
+.header-controls .day-nav a { font-size:12px; padding:4px 8px; }
+.header-controls .dim-tabs { background:rgba(255,250,240,.94); }
 .dim-bar .day-nav { margin-top:0; padding-top:0; }
 .dim-bar-right { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .dim-tabs, .unit-tabs { display:flex; gap:4px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
@@ -1521,11 +1527,11 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         if date else ""
     )
 
-    # Global dim-bar — day-nav + dim pills. Unit pills moved into the top
-    # chart card (they only affect the histogram + distribution, not the
-    # swim-lane). Mirrors the weekly layout exactly.
+    # Global controls are now ALL inlined into the sticky page header (via
+    # the layout()'s date_control slot) — single row holding: day-nav +
+    # date picker + dim pills. Unit pills sit inside the Chart panel.
     valid_top_views = {"chart", "dist"}
-    top_view = (style if style in valid_top_views else "chart")  # repurpose `style` arg
+    top_view = (style if style in valid_top_views else "chart")
 
     dim_pill_links = "".join(
         f'<a class="dim-tab{" active" if dim_id == mode else ""}" '
@@ -1534,13 +1540,8 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         f'{label}</a>'
         for dim_id, label in DIMENSIONS
     )
-    dim_bar = (
-        f'<section class="dim-bar">'
-        f'<div class="day-nav">{day_nav_inner}</div>'
-        f'<div class="dim-bar-right">'
-        f'<div class="dim-tabs" title="按哪个维度堆叠/上色（影响所有视图）">{dim_pill_links}</div>'
-        f'</div>'
-        f"</section>"
+    dim_pills_html = (
+        f'<div class="dim-tabs" title="按哪个维度堆叠/上色">{dim_pill_links}</div>'
     )
 
     # Build daily top-chart-card (直方图 + 分布) — mirrors weekly's structure
@@ -1762,7 +1763,6 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     # Project cards section dropped — the chart/distribution panels above
     # already convey project-level breakdowns at the page level.
     content = f"""
-{dim_bar}
 <section class="report-grid">
   <div class="card daily-report"><div class="bucket-head"><h2>每日 Report · {esc(date or '无日期')}</h2><span class="tag source">Report</span></div>{rich_daily_body}</div>
   <div class="right-column">{right_column_body}</div>
@@ -1770,10 +1770,20 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
 {daily_swim_card}
 {daily_sync_js}
 """
-    # Calendar control: thread `mode` so picking a date on the header keeps it.
+    # Combined header controls (single row): day-nav + date picker + dim pills.
+    # `header-controls` wraps them in a flex row that sits in layout()'s
+    # date_control slot.
     cal_hidden = {"mode": mode} if mode != "source" else {}
-    date_control = calendar_control('/today', date, all_dates, hidden=cal_hidden)
-    return layout("DayTrace · 报告", f"{total} events · daily report", "today", content, date_control=date_control)
+    date_picker_html = calendar_control('/today', date, all_dates, hidden=cal_hidden)
+    day_nav_html = f'<div class="day-nav header-day-nav">{day_nav_inner}</div>' if day_nav_inner else ""
+    header_controls = (
+        '<div class="header-controls">'
+        + day_nav_html
+        + date_picker_html
+        + dim_pills_html
+        + '</div>'
+    )
+    return layout("DayTrace · 报告", f"{total} events · daily report", "today", content, date_control=header_controls)
 
 
 def sources_page(db_path: Path, date: str | None):
@@ -2925,34 +2935,28 @@ def _pill_bar(
     return f'<div class="{container}">{"".join(chips)}</div>'
 
 
-def _weekly_dim_bar(
+def _weekly_header_controls(
     *, week: str, prev_week: str, next_week: str,
     mode: str, unit: str, view: str, monday: str, sunday: str,
 ) -> str:
-    """Sticky global controls bar — holds:
-      - week-nav (prev / next / open this week's events)
-      - dim pills (项目/数据源/活动/设备) — applies to every visualization
-
-    Unit selector (小时/事件数/字数) was moved inside the top-chart card
-    because it only affects the histogram/distribution views; swim and
-    heatmap are inherently per-event count and ignore unit."""
+    """Inline controls for layout()'s date_control slot — week-nav + dim
+    pills on a single header row. Unit pills live inside the Chart panel
+    (they only affect histogram + distribution)."""
     week_nav_inner = (
         f'<a href="{_weekly_url(week=prev_week, mode=mode, unit=unit, view=view)}">← 上一周 {esc(prev_week)}</a>'
         f'<a href="{_weekly_url(week=next_week, mode=mode, unit=unit, view=view)}">下一周 {esc(next_week)} →</a>'
         f'<a href="/events?start_from={esc(monday)}&start_to={esc(sunday)}">打开本周数据库</a>'
     )
-    dim_bar = _pill_bar(
+    dim_bar_html = _pill_bar(
         css_class="dim-tab", options=_WEEKLY_DIM_OPTS, current=mode,
         href_for=lambda v: _weekly_url(week=week, mode=v, unit=unit, view=view),
         param_name="mode",
     )
     return (
-        '<section class="dim-bar">'
-        f'<div class="day-nav">{week_nav_inner}</div>'
-        '<div class="dim-bar-right">'
-        f'<div title="按哪个维度堆叠/上色（影响所有视图）">{dim_bar}</div>'
+        '<div class="header-controls">'
+        f'<div class="day-nav header-day-nav">{week_nav_inner}</div>'
+        f'{dim_bar_html}'
         '</div>'
-        '</section>'
     )
 
 
@@ -4047,7 +4051,7 @@ def weekly_page(
     )
 
     # ── Build cards ────────────────────────────────────────────────────────
-    dim_bar = _weekly_dim_bar(
+    header_controls = _weekly_header_controls(
         week=week, prev_week=prev_week, next_week=next_week,
         mode=mode, unit=unit, view=view, monday=monday, sunday=sunday,
     )
@@ -4357,13 +4361,12 @@ def weekly_page(
     right_column_body = top_histogram_card + (highlights_card or "")
 
     body = (
-        dim_bar
-        # Top row: AI summary | (直方图 + highlights stacked)
-        + '<section class="report-grid">'
+        # Top row: Report | (Chart + Highlights stacked)
+        '<section class="report-grid">'
         + weekly_report_card
         + '<div class="right-column">' + right_column_body + '</div>'
         + '</section>'
-        # Bottom switcher card (swim/heat, CSS-toggled)
+        # Timeline panel
         + bottom_card
         + view_sync_js
         + day_links_html
@@ -4371,7 +4374,6 @@ def weekly_page(
 
     if total_events == 0:
         body = (
-            dim_bar +
             '<section class="card"><div class="muted">'
             f'本周（{monday} ~ {sunday}）暂无事件数据。'
             '可能是 catchup 还没跑到，或者这周确实没记录。'
@@ -4382,7 +4384,7 @@ def weekly_page(
         f"{monday} ~ {sunday} · {total_events} events · "
         f"{total_minutes/60:.1f}h active · {active_days}/7 days"
     )
-    return layout(f"DayTrace · {week}", subtitle, "weekly", body)
+    return layout(f"DayTrace · {week}", subtitle, "weekly", body, date_control=header_controls)
 
 
 class Handler(BaseHTTPRequestHandler):
