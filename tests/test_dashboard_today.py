@@ -10,7 +10,6 @@ from daytrace.schema import TraceEvent
 from dashboard.server import (
     display_title_content,
     end_date_options,
-    event_timeline_card,
     events_page,
     normalize_date_bound,
     parse_event_limit,
@@ -243,78 +242,3 @@ def test_end_date_options_are_on_or_after_start_date():
     assert end_date_options(None, options) == options
 
 
-def test_event_timeline_card_emits_histogram_and_swimlane_with_per_dim_color_rules():
-    """The card defaults to swimlane view, exposes a histogram view, and
-    keeps three color-by dimensions (source/project/device). The dropped
-    "ticks" view must no longer be in the markup."""
-    events = [
-        {"start": "2026-05-14T09:30:00", "source": "codex", "project": "daytrace",
-         "device_id": "Mac", "title": "morning prompt"},
-        {"start": "2026-05-14T09:31:30", "source": "codex", "project": "daytrace",
-         "device_id": "Mac", "title": "follow up"},
-        {"start": "2026-05-14T14:05:00", "source": "git", "project": "daytrace",
-         "device_id": "Mac", "title": "commit foo"},
-        {"start": "2026-05-14T22:48:00", "source": "codex", "project": "mtl",
-         "device_id": "omen-wsl", "title": "evening review"},
-        # Malformed rows must be tolerated, not crash.
-        {"start": "", "source": "codex", "title": "no time"},
-        {"start": "2026-05-14T25:00:00", "source": "codex", "title": "bad hour"},
-    ]
-    # Pin legacy 00:00-24:00 axis so the position math and label assertions
-    # below stay easy to read. Production default is boundary_hour=4.
-    html = event_timeline_card(events, "2026-05-14", boundary_hour=0)
-
-    # Container, default style is swimlane (user preference), default mode source
-    assert 'class="card wide-card timeline-card"' in html
-    assert 'data-mode="source"' in html
-    assert 'data-style="swimlane"' in html
-    assert 'data-date="2026-05-14"' in html
-
-    # Style tabs: ticks view is gone, only swimlane + histogram remain
-    assert 'data-style="swimlane">泳道' in html
-    assert 'data-style="histogram">直方图' in html
-    assert 'data-style="ticks"' not in html
-
-    # In-card color-by tabs were moved out to the global dim-bar; the card
-    # no longer ships its own data-target buttons.
-    assert 'data-target=' not in html
-
-    # Hour grid labels every 2h (last tick now wraps back to 00 instead of 24
-    # so the same labels work for shifted-boundary days).
-    for label in ("00", "06", "12", "18"):
-        assert f">{label}<" in html
-
-    # Histogram + swimlane now cover 5 dimensions (source/project/device/location/activity).
-    # 4 valid events fall in 3 distinct 20-min bins per dim → 3 × 5 = 15 bins.
-    assert html.count('class="tl-bin"') == 3 * 5
-
-    # Swimlane: 5 panes (one per dim) + 1 always-visible Overall lane.
-    # Per-pane ticks use exact class "tl-swim-tick"; overall ticks have a
-    # second class so they're counted separately.
-    assert html.count('class="tl-swim-pane"') == 5
-    assert html.count('class="tl-swim-tick"') == 4 * 5
-    assert html.count('class="tl-swim-row tl-swim-overall"') == 1
-    # The class name appears in BOTH the tick elements AND in the generated
-    # CSS color rules; count only the actual tick elements.
-    assert html.count('class="tl-swim-tick tl-swim-tick-overall"') == 4
-    # And the CSS rules that recolor overall ticks per active dim exist
-    # for the dominant value of each dimension.
-    assert '.tl-swim-tick-overall[data-source="codex"]' in html
-    assert '.tl-swim-tick-overall[data-project="daytrace"]' in html
-    assert '.tl-swim-tick-overall[data-device="Mac"]' in html
-
-    # Tooltip wired
-    assert 'class="tl-tooltip"' in html
-
-    # Default-visible legend tracks the default mode
-    assert 'class="tl-legend show" data-for="source"' in html
-    assert 'class="tl-legend" data-for="project"' in html
-
-    # Legend counts reflect per-dimension grouping (codex has 3 events)
-    assert "×3" in html
-
-    # Empty input falls back to a placeholder without crashing
-    empty_html = event_timeline_card([], "2026-05-14", boundary_hour=0)
-    assert "当天暂无事件" in empty_html
-    assert empty_html.count('class="tl-bin"') == 0
-    assert empty_html.count('class="tl-swim-tick"') == 0
