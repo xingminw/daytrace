@@ -1313,6 +1313,7 @@ def date_filter(action: str, date: str | None, extra: str = "") -> str:
 DIMENSIONS = [
     ("source", "来源"),
     ("project", "项目"),
+    ("task", "任务"),
     ("device", "设备"),
     ("activity", "活动"),
 ]
@@ -1342,6 +1343,7 @@ def _breakdown_fallback_name(field: str) -> str:
         "device_id": "unknown",
         "location_id": "unknown",
         "activity": "未分类",
+        "task": "未对应任务",
     }.get(field, "other")
 
 
@@ -1466,6 +1468,9 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     # cards + composition shares. Cached day_report rows use the same window.
     from daytrace.db import events_for_shifted_day
     day_events = events_for_shifted_day(con, date, limit=2000) if date else []
+    # Stamp ev["task"] = linked work_item.title (or None) — drives the
+    # 任务 dim option across histogram / distribution / swim.
+    _enrich_events_with_tasks(con, day_events)
     total = len(day_events)  # subtitle uses shifted-day total, not calendar-day
     # Enrich events with activity labels from the side table (filled by AI).
     if date:
@@ -2808,6 +2813,8 @@ def _event_weight_for_unit(ev: dict, unit: str) -> int:
 def _stack_value_of(ev: dict, stack_by: str) -> str:
     if stack_by == "project":
         return _project_of(ev)
+    if stack_by == "task":
+        return str(ev.get("task") or "未对应任务")
     if stack_by == "activity":
         return str(ev.get("activity") or "未分类")
     if stack_by == "device":
@@ -2815,6 +2822,41 @@ def _stack_value_of(ev: dict, stack_by: str) -> str:
     if stack_by == "location":
         return str(ev.get("location_id") or "unknown")
     return str(ev.get(stack_by) or "unknown")  # source / device_id / etc
+
+
+def _enrich_events_with_tasks(con, events: list[dict]) -> list[dict]:
+    """Stamp `ev["task"]` with the linked work_item.title (or leave None).
+    Cheap JOIN over event_work_item_links + work_items; chunked to stay
+    under SQLite's 999-param limit. No-op if the work_items table is
+    empty (feature disabled / never synced)."""
+    if not events:
+        return events
+    # Skip entirely if work_items table is empty — cheap probe.
+    has_wi = con.execute("SELECT 1 FROM work_items LIMIT 1").fetchone()
+    if not has_wi:
+        for ev in events:
+            ev.setdefault("task", None)
+        return events
+    event_ids = [e["id"] for e in events if e.get("id")]
+    if not event_ids:
+        return events
+    title_map: dict[str, str] = {}
+    chunk = 900
+    for i in range(0, len(event_ids), chunk):
+        sub = event_ids[i:i+chunk]
+        ph = ",".join("?" * len(sub))
+        for r in con.execute(
+            f"""
+            SELECT l.event_id, w.title
+              FROM event_work_item_links l
+              JOIN work_items w ON w.record_id = l.record_id
+             WHERE l.event_id IN ({ph})
+            """, sub
+        ).fetchall():
+            title_map[r["event_id"]] = r["title"]
+    for ev in events:
+        ev["task"] = title_map.get(ev.get("id"))
+    return events
 
 
 def _per_day_stack(
@@ -2909,6 +2951,7 @@ _WEEKLY_UNIT_OPTS = [
 _WEEKLY_DIM_OPTS = [
     ("source",   "来源"),
     ("project",  "项目"),
+    ("task",     "任务"),
     ("device",   "设备"),
     ("activity", "活动"),
 ]
@@ -4057,6 +4100,9 @@ def weekly_page(
 
     events = events_for_shifted_week(con, week)
     last_events = events_for_shifted_week(con, prev_week)
+    # Stamp ev["task"] = linked work_item title (or None) so 任务 dim works.
+    _enrich_events_with_tasks(con, events)
+    _enrich_events_with_tasks(con, last_events)
 
     # Activity labels for stack_by=activity
     if events and mode == "activity":
