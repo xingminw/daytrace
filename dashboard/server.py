@@ -3172,9 +3172,45 @@ def _events_hash(events: list[dict]) -> str:
     return h.hexdigest()[:16]
 
 
+def _load_week_daily_overviews(con, days: list[str]) -> str:
+    """Pull each day's ai_overview from day_channel for the given days and
+    format them into a compact per-day block the weekly prompt can use to
+    name real Feishu tasks (instead of inventing project names from
+    by_project aggregates). Empty string when no AI overviews exist."""
+    import json as _json
+    lines: list[str] = []
+    for d in days:
+        row = con.execute(
+            "SELECT value_json FROM day_channel WHERE date=? AND channel='ai_overview'",
+            (d,),
+        ).fetchone()
+        if not row or not row[0]:
+            continue
+        try:
+            v = _json.loads(row[0])
+        except Exception:
+            continue
+        headline = (v.get("headline") or "").strip()
+        ov = v.get("overview") or {}
+        narrative = (ov.get("narrative") if isinstance(ov, dict) else "") or ""
+        highlights = v.get("highlights") or []
+        block = [f"## {d} — {headline}"]
+        if narrative:
+            block.append(narrative.strip())
+        if highlights:
+            block.append("关键任务进展:")
+            for h in highlights[:4]:
+                block.append(f"  • {h}")
+        lines.append("\n".join(block))
+    return "\n\n".join(lines)
+
+
 def _ai_weekly_summary(
     *, week: str, events: list[dict], by_project: list[dict],
     total_minutes: float, active_days: int,
+    days: list[str] | None = None, con=None,
+    last_week_total: int | None = None,
+    last_week_active_minutes: float | None = None,
 ) -> dict | None:
     """Return {headline, narrative, highlights, suggestions} or None if AI
     unavailable / hash unchanged / call failed. Cached on disk by events_hash."""
@@ -3201,41 +3237,61 @@ def _ai_weekly_summary(
         f"- {r['name']}: {r['count']} events ({r['share']*100:.0f}%)"
         for r in by_project[:8]
     )
+    # Per-day AI overviews — gives the weekly model real Feishu task names
+    # and concrete day-of-week landmarks instead of just aggregate stats.
+    daily_overviews_text = ""
+    if con is not None and days:
+        daily_overviews_text = _load_week_daily_overviews(con, days)
+    daily_overviews_block = (
+        f"【本周每日 AI 速读 — 真任务名 + 当天叙事, 用这个串成周叙事】\n"
+        f"{daily_overviews_text}\n\n"
+        if daily_overviews_text else ""
+    )
+    # Light week-over-week numeric reference for work_pattern
+    wow_lines: list[str] = []
+    if last_week_total is not None:
+        wow_lines.append(f"上周事件数 {last_week_total} → 本周 {len(events)}")
+    if last_week_active_minutes is not None:
+        wow_lines.append(f"上周活跃 {last_week_active_minutes/60:.1f}h → 本周 {total_minutes/60:.1f}h")
+    wow_block = ("【上周对比】\n" + "\n".join(wow_lines) + "\n\n") if wow_lines else ""
+
     user = (
-        f"这是 2026 年 ISO 周 {week} 的活动汇总。\n\n"
-        f"总事件数: {len(events)}\n"
-        f"活跃天数: {active_days}/7\n"
-        f"活跃总时长(估计): {total_minutes/60:.1f}h\n\n"
-        f"项目分布 (top 8):\n{top_projects}\n\n"
+        f"【本周】{week} · {len(events)} events · {active_days}/7 天活跃 · "
+        f"{total_minutes/60:.1f}h\n\n"
+        f"{wow_block}"
+        f"【项目分布 (top 8, 仅供参考)】\n{top_projects}\n\n"
+        f"{daily_overviews_block}"
         "请输出严格 JSON, shape 跟日报一致:\n"
         "{\n"
-        '  "headline": "≤30 字, 一句话概括本周的主线 (例: \'评分模型从设计到上线, daytrace UI 收尾\')",\n'
+        '  "headline": "≤30 字, 一句话抓住本周主线 (例: \'评分模型从设计到上线, daytrace UI 收尾\')",\n'
         '  "overview": {\n'
-        '    "narrative": "3-4 句 (100-180 字) 的叙事段落, 像周记不是周报: 本周从哪儿起步、中间在哪儿转弯/卡住、最后停在哪儿; 可以带画面感和节奏 (\'周一上午...\', \'周三起重心转向...\'); **不要列 bullet, 不要重复 highlights 里会出现的具体产出**"\n'
+        '    "narrative": "**5-7 句, 200-320 字** 的叙事段落。像跟熟人讲本周发生了啥: 周一/周二怎么起步, 中间哪儿转弯或卡住, 哪天有个意外发现, 周五/周日怎么收尾。引用具体任务全名、某天的具体动作、用到的工具。**禁止**: bullet, 通报体 (\'本周主要做了…\'), 重复 highlights 内容"\n'
         '  },\n'
         '  "trend": {\n'
         '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
-        '    "comparison": "1 句 (≤60 字) 描述工作重心/节奏 vs 上周有什么变化, 不要复述事件量"\n'
+        '    "comparison": "1 句 (≤60 字) 工作重心/节奏 vs 上周怎么变, 不复述事件量"\n'
         '  },\n'
-        '  "highlights":   ["🚀 关键任务进展 — 1-3 条本周真正推进的飞书任务+具体动作 (用任务全名), 每条 ≤40 字"],\n'
-        '  "work_pattern": ["⏰ 时间安排回顾 — 0-2 条本周节奏观察 (活跃总时长 vs 上周、活跃天数、有没有大块专注/碎片化); 必须 grounded 在数字; 没明显特征就留空"],\n'
-        '  "suggestions":  ["🔔 任务跟进提醒 — 1-3 条下周该盯的任务 (deadline / 已停 N 天 / 未提交); 用任务全名; ❌ 不要回顾本周该做啥"]\n'
+        '  "highlights":   ["🚀 关键任务进展 — **3-5 条** 本周真正推进的飞书任务+具体动作 (用任务全名)。bullet 风格多样化, 不要每条都是 \'任务名: 动作\' 死板模板。每条 ≤50 字"],\n'
+        '  "work_pattern": ["⏰ 时间安排回顾 — **2-4 条** 本周节奏观察。基于活跃时长 vs 上周、活跃天数、有没有大块专注/碎片化、晚间收工节奏。每条带数字。每条 ≤60 字"],\n'
+        '  "suggestions":  ["🔔 任务跟进提醒 — **2-4 条** 下周该盯的任务 (deadline 临近 / 已停 N 天 / 未提交)。用任务全名 + 具体行动建议。每条 ≤60 字。❌ 不要回顾本周该做啥"]\n'
         "}"
     )
     system = (
-        "你是一位软件工程师的私人**周复盘助手**。读者是这位工程师本人; "
-        "聚合数字仅作为证据。\n\n"
-        "**任务视角而非项目视角**: 本周如果有飞书任务在推进 (从 daily AI "
-        "overview 缓存里能看到), 用**任务全名**描述 (例: ‘DayTrace 应用开发’"
-        "而不是 ‘daytrace’); 不要把 daily-manager / misc / daytrace 这类 "
-        "project_guess 名字当主语。\n\n"
-        "你要写: ta 本周作为一个人在推进哪些任务、产出、下一步。\n\n"
+        "你是一位软件工程师的私人**周复盘助手**。读者是这位工程师本人。\n\n"
+        "**任务视角硬规则**: narrative / highlights / suggestions 必须用"
+        "**完整任务标题** (例: ‘DayTrace 应用开发’, 不是 ‘daytrace’)。"
+        "上下文里的【每日 AI 速读】是真任务名的来源, **不要**从【项目分布】"
+        "里拿 daily-manager / misc / daytrace 这种 project_guess 当主体。\n\n"
+        "**写作风格**:\n"
+        "  • narrative 要像跟熟人讲本周发生了啥, 不是写周报。带温度、有画面、"
+        "有节奏 (周一…周三…周五…), 引用某天的具体事 (合 PR, 卡 bug, 和谁讨论)。"
+        "**禁止通报体** (‘本周完成了 X, Y, Z’)。\n"
+        "  • bullet 写法多样化, 不要每条都是 ‘任务名: 动作’ 死板模板。\n\n"
         "**禁止**:\n"
         "  ❌ 用项目名代替任务名\n"
-        "  ❌ 对数据本身提建议 ('梳理 misc'、'合并项目名')\n"
-        "  ❌ 对系统/工具提建议\n"
-        "  ❌ 泛化效率说教\n"
-        "  ❌ 数字复述\n\n"
+        "  ❌ 编造任务名 (只能用每日速读里出现过的真任务)\n"
+        "  ❌ 对数据/系统/工具提建议\n"
+        "  ❌ 泛化效率说教、数字复述\n\n"
         "严格只输出 JSON, 不要 Markdown。"
     )
 
@@ -3261,7 +3317,7 @@ def _ai_weekly_summary(
 
     try:
         resp = ai_client.call_json_validated(
-            system=system, user=user, validator=_validator, max_tokens=2000,
+            system=system, user=user, validator=_validator, max_tokens=2800,
         )
     except Exception as e:
         return {"_error": f"{type(e).__name__}: {e}"}
@@ -4272,10 +4328,15 @@ def weekly_page(
         )
     top_names, palette, overall_dim_totals = _compute_palette_for_week(per_day_stack)
 
-    # AI summary
+    # AI summary — pass days + con + week-over-week refs so the prompt can
+    # see per-day ai_overview rows (real Feishu task names) and quote a
+    # baseline for work_pattern.
     ai_summary = _ai_weekly_summary(
         week=week, events=events, by_project=by_project,
         total_minutes=total_minutes, active_days=active_days,
+        days=days, con=con,
+        last_week_total=last_total,
+        last_week_active_minutes=float(last_active_minutes),
     )
 
     # ── Build cards ────────────────────────────────────────────────────────

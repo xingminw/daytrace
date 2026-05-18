@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v12"  # v12 = 3-column Insights (highlights / work_pattern / suggestions) + 7d baseline
+AI_VERSION = "v13"  # v13 = richer/longer prompts (story-like); weekly sees per-day overviews
 
 
 # ----- Shape validators ------------------------------------------------
@@ -457,20 +457,26 @@ OVERVIEW_SYSTEM = (
     "输出 6 个字段, 每个字段定位**严格不同**:\n"
     "  • headline + overview.narrative — 今天整体怎么过的, 叙事段落\n"
     "  • trend — 和昨天比的整体方向 (chip + 1 句)\n"
-    "  • **highlights (🚀 关键任务进展)** — 今天**已经做了**的具体任务推进, "
-    "用任务全名 + 动作\n"
+    "  • **highlights (🚀 关键任务进展)** — 今天**已经做了**的具体任务推进\n"
     "  • **work_pattern (⏰ 时间安排回顾)** — 今天的**时间数据 vs 基线**, "
-    "必须 grounded 在数字 (例: ‘23:31 收工, 比平时晚 1h’); 没基线就留空\n"
+    "必须 grounded 在数字 (例: ‘23:31 收工, 比平时晚 1h’); 至少 1 条\n"
     "  • **suggestions (🔔 任务跟进提醒)** — **明天/未来**该盯的任务 "
     "(deadline / N 天没碰 / 未提交); 不要回顾今天该做啥\n\n"
+    "**写作风格**:\n"
+    "  • narrative 要像跟熟人讲今天发生了什么, 不是写工作日报。带温度 "
+    "(‘一头扎进 X’, ‘反复拉扯’, ‘临收工还在调’), 有画面 (具体提到某个工具/PR/"
+    "deadline), 有节奏 (上午…下午…傍晚…)。**禁止**通报体 (‘今天主要做了…, "
+    "完成了…’)。\n"
+    "  • bullet 写法多样化, 不要每条都是 ‘任务名:动作’ 死板模板。可以 "
+    "‘任务 X, 评分模型 v2 PR 合掉, scoring 终于稳了’ 这种带感觉的描述。\n\n"
     "**任务视角硬规则**:\n"
     "  • narrative / highlights / suggestions 里提到的活动, 必须用任务清单"
     "**完整标题** (例: ‘DayTrace 应用开发’, 不是 ‘DayTrace’ 或 ‘daytrace’)。\n"
     "  • [proj:Y] 是游离工作, narrative 一笔带过, 不进 highlights/suggestions。\n\n"
     "**禁止**:\n"
-    "  ❌ highlights 和 work_pattern 内容重叠 (一个讲做了啥, 一个讲怎么做的)\n"
-    "  ❌ suggestions 写回顾性内容 (那归 highlights)\n"
-    "  ❌ work_pattern 写空话 ('合理作息'、'减少切换') — 不带基线对比就不写\n"
+    "  ❌ highlights 和 work_pattern 内容重叠\n"
+    "  ❌ suggestions 写回顾性内容\n"
+    "  ❌ work_pattern 写空话 ('合理作息'、'减少切换') — 必须带基线对比\n"
     "  ❌ 用项目名代替任务名\n"
     "  ❌ 对数据本身/系统/工具提建议\n"
     "  ❌ 泛化效率说教、数字复述\n\n"
@@ -498,17 +504,17 @@ def _overview_user(
         f"【事件清单, 按时间; 前缀 [task:X] 表示已关联到任务 X, [proj:Y] 表示游离项目】\n{events_text}\n\n"
         "【输出 JSON, 严格按此 shape, 每个字段都要有】\n"
         '{\n'
-        '  "headline": "≤30 字, 一句话概括今天的主线 (例: \'双线推进 daytrace UI 与评分模型\')",\n'
+        '  "headline": "≤30 字, 一句话抓住今天的主线 (例: \'双线推进 daytrace UI 与评分模型\')",\n'
         '  "overview": {\n'
-        '    "narrative": "3-4 句 (100-180 字) 的叙事段落, 像写日记不是写报告: 讲讲今天 ta 是怎么进入工作的、节奏在哪里转弯、有没有意外或亮点、最后落在哪里; 可以带点画面感和情绪 (\'下午一头扎进 X\'、\'临到收工才把 Y 提上去\'), **不要列 bullet, 不要重复 highlights 里会出现的具体产出**"\n'
+        '    "narrative": "**4-6 句, 150-260 字** 的叙事段落。像跟熟人讲今天发生了啥: 早上怎么进入, 中间在哪儿转弯/卡住/惊喜, 傍晚 / 临收工怎么收尾。具体提到任务全名、用到的工具(Codex / Claude Code / git)、某次提交或讨论。**禁止**: bullet 格式, 通报体, 重复 highlights 的具体产出"\n'
         '  },\n'
         '  "trend": {\n'
         '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
-        '    "comparison": "1 句 (≤60 字) 描述工作重心/节奏 vs 昨天有什么变化, 不要复述事件量"\n'
+        '    "comparison": "1 句 (≤60 字) 工作重心/节奏 vs 昨天怎么变, 不复述事件量"\n'
         '  },\n'
-        '  "highlights":   ["🚀 关键任务进展 — 1-3 条今天真正推进的飞书任务及其具体动作 (用任务全名), 每条 ≤40 字; 不要写数字复述, 不要列没关联任务的游离工作"],\n'
-        '  "work_pattern": ["⏰ 时间安排回顾 — 0-3 条基于【今日骨架统计 vs 近 N 天均值】的具体观察, 必须 grounded 在数字上 (例: \'23:31 收工, 比平时晚 1h\', \'最长专注 155 min, 比均值长 60%\', \'切换 69 次但因为有大块专注, 不算碎\'); ❌ 不要写空话 (\'合理作息\'、\'减少切换\'); 没基线就留空数组"],\n'
-        '  "suggestions":  ["🔔 任务跟进提醒 — 1-3 条前瞻性提醒, 只看任务清单 (未推进 / deadline 临近 / 未提交), 每条用任务全名 + 具体提醒, 每条 ≤50 字; ❌ 不要回顾今天该做啥 (那归 highlights), 不要写空话"]\n'
+        '  "highlights":   ["🚀 关键任务进展 — **2-4 条** 今天真正推进的飞书任务+动作 (用任务全名)。bullet 风格多样化, 不要每条都是 \'任务名: 动作\' 死板模板 — 可以是 \'任务 X 评分模型 v2 PR 合掉, scoring 终于稳了\' 这种带感觉的描述。每条 ≤50 字"],\n'
+        '  "work_pattern": ["⏰ 时间安排回顾 — **1-4 条** 基于【今日骨架统计 vs 近 N 天均值】的具体观察, 必须 grounded 在数字 (例: \'23:31 收工, 比平时晚 1h\', \'最长专注 155 min, 比均值长 60%\', \'切换 69 次但因为大块专注在中段, 节奏其实不算碎\')。每条可以略带判断/解读, 不只是陈述。每条 ≤60 字。❌ 空话禁止"],\n'
+        '  "suggestions":  ["🔔 任务跟进提醒 — **2-4 条** 前瞻性提醒, 只看任务清单 (未推进 / deadline 临近 / 未提交)。用任务全名 + 具体行动建议 (例: \'X 任务已 3 天没碰, deadline 5/22 越来越近, 明天先抓 30min 起头\')。每条 ≤60 字。❌ 不要回顾今天该做啥"]\n'
         '}'
     )
 
@@ -533,7 +539,7 @@ def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> Ch
         system=OVERVIEW_SYSTEM,
         user=_overview_user(ctx.date, stats_text, events_text, tasks_text, baseline_text),
         validator=validate_overview,
-        max_tokens=2400,
+        max_tokens=3200,
     )
     return ChannelResult(
         value=resp.json,
