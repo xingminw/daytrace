@@ -148,12 +148,25 @@ body.events-page form { height:100%; }
 .dr-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin:0 0 12px; }
 @media (max-width:900px) { .dr-grid { grid-template-columns:1fr; } }
 .dr-section h4 { margin:0 0 6px; font-size:12.5px; font-weight:700; color:#4d4438; letter-spacing:.04em; }
-/* Insights card — full-width row below Report+Chart with 3 parallel
-   columns (变化趋势 / 关键进展 / 建议). Collapses to 1 col on narrow. */
+/* Insights card — full-width row below Report+Chart with 3 strictly
+   parallel columns (变化趋势 / 关键进展 / 建议). The three columns share
+   identical structure (title + bullet list) so they read as peers; thin
+   vertical dashed rules separate them. Collapses to 1 col on narrow. */
 .insights-card { margin-top:12px; }
-.insights-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:20px; }
-.insights-grid .dr-section h4 { cursor:help; }  /* hint that hover reveals tooltip */
-@media (max-width:900px) { .insights-grid { grid-template-columns:1fr; } }
+.insights-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:0; align-items:start; }
+.insights-col { padding:0 18px; border-left:1px dashed #eadfcd; min-width:0; }
+.insights-col:first-child { padding-left:0; border-left:none; }
+.insights-col:last-child  { padding-right:0; }
+.insights-col h4 { margin:0 0 8px; font-size:13px; font-weight:700; color:#4d4438; letter-spacing:.02em; cursor:help; }
+.insights-col ul { margin:0; padding-left:18px; }
+.insights-col ul li { font-size:13px; line-height:1.55; color:#362f27; margin-bottom:4px; }
+.insights-col ul li:last-child { margin-bottom:0; }
+.insights-col .muted { font-size:12.5px; }
+@media (max-width:900px) {
+  .insights-grid { grid-template-columns:1fr; gap:14px; }
+  .insights-col { padding:0; border-left:none; border-top:1px dashed #eadfcd; padding-top:12px; }
+  .insights-col:first-child { border-top:none; padding-top:0; }
+}
 .dr-bullets { margin:0; padding-left:18px; font-size:13px; line-height:1.55; }
 .dr-bullets li { margin:3px 0; }
 .dr-highlights li::marker { color:var(--green); }
@@ -220,7 +233,9 @@ body.events-page form { height:100%; }
 
 /* compact stats strip inside the home page daily-report card —
    grid with equal columns so all 4 stats align on every day's render */
-.dr-stats-compact { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:14px; margin:0 0 12px; padding-bottom:10px; border-bottom:1px dashed #eadfcd; }
+/* Stats strip — no bottom border; the following section (`_SECTION_SEP`)
+   already draws the divider, and stacking two dashed lines looks broken. */
+.dr-stats-compact { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:14px; margin:0; }
 .dr-stats-compact .dr-stat { display:flex; flex-direction:column; gap:2px; padding:0; border:none; }
 .dr-stats-compact .dr-stat-num { font-size:16px; font-weight:800; font-variant-numeric:tabular-nums; color:var(--ink); white-space:nowrap; }
 .dr-stats-compact .dr-stat-lbl { font-size:10.5px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
@@ -1464,14 +1479,9 @@ def _section_header(label: str) -> str:
 def _render_dashboard_section(
     header: dict, channels: dict[str, str | None], date_val: str,
 ) -> str:
-    """Dashboard section — pure-data: stats strip + 关键时刻.
-    No leading separator; this is always the first section in the panel."""
-    stats_html = _render_stats_strip_compact(header, channels)
-    facts_html = _render_facts_block(date_val, channels)
-    parts = [stats_html]
-    if facts_html:
-        parts.append(facts_html)
-    return "".join(parts)
+    """Dashboard section — 4-tile stats strip only. The old separate
+    'facts' rows (最长专注 / 峰值) folded into the tile sub-rows."""
+    return _render_stats_strip_compact(header, channels)
 
 
 def _render_overview_section(overview_payload: dict | None) -> str:
@@ -1552,17 +1562,15 @@ _INSIGHTS_TOOLTIPS = {
 
 
 def _render_insights_card(overview_payload: dict | None, *, continuity: dict | None = None) -> str:
-    """Full-width 3-column Insights card sitting below the Report row.
-
-    Columns: 📈 变化趋势 / 🚀 关键进展 / 🎯 建议. Each title carries a
-    `title=` tooltip describing the AI prompt for that column.
-
-    Hidden entirely when no AI payload at all. Empty individual columns
-    show `(无)` so the 3-column grid stays steady."""
+    """Full-width 3-column Insights card. The three columns are strictly
+    parallel: same emoji-prefixed title (with `title=` AI-prompt tooltip),
+    same bullet-list body — so they read as peers, not as a special box
+    plus two lists. Empty columns show `(无)`."""
     if not overview_payload:
         return ""
 
-    # ── column 1: trend ─────────────────────────────────────────────
+    # ── column 1: trend — render as a SINGLE bullet so it's structurally
+    #    identical to the other two columns (no special yellow box).
     direction = ""
     comparison = ""
     tr = overview_payload.get("trend")
@@ -1572,52 +1580,49 @@ def _render_insights_card(overview_payload: dict | None, *, continuity: dict | N
     if not direction and continuity:
         direction = continuity.get("momentum") or ""
         comparison = continuity.get("relation_to_yesterday") or ""
+    trend_items: list[str] = []
     if direction or comparison:
-        trend_body = (
-            '<div class="dr-trend" style="margin:0;">'
-            + (_momentum_chip(direction) if direction else "")
-            + (f'<span class="dr-trend-text">{esc(comparison)}</span>' if comparison else "")
-            + '</div>'
-        )
-    else:
-        trend_body = '<div class="muted small">(无)</div>'
+        chip = _momentum_chip(direction) if direction else ""
+        text = f' {esc(comparison)}' if comparison else ""
+        trend_items.append(f"<li>{chip}{text}</li>")
 
-    # ── column 2: highlights ────────────────────────────────────────
+    # ── column 2: highlights
     highlights = overview_payload.get("highlights") or []
-    if highlights:
-        hl_body = f'<ul class="dr-bullets dr-highlights">{"".join(f"<li>{esc(h)}</li>" for h in highlights)}</ul>'
-    else:
-        hl_body = '<div class="muted small">(无)</div>'
 
     # ── column 3: suggestions (v8) — fall back to v7 recommendations
     suggestions = overview_payload.get("suggestions")
     if not suggestions:
         suggestions = overview_payload.get("recommendations") or []
-    if suggestions:
-        sg_body = f'<ul class="dr-bullets dr-suggestions">{"".join(f"<li>{esc(s)}</li>" for s in suggestions)}</ul>'
-    else:
-        sg_body = '<div class="muted small">(无)</div>'
 
-    def _col(emoji: str, label: str, key: str, body: str) -> str:
+    def _col(emoji: str, label: str, key: str, items: list[str], pre_rendered: list[str] | None = None) -> str:
         tip = _INSIGHTS_TOOLTIPS.get(key, "")
+        if pre_rendered is not None:
+            body_html = (
+                f'<ul>{"".join(pre_rendered)}</ul>' if pre_rendered
+                else '<div class="muted">(无)</div>'
+            )
+        else:
+            body_html = (
+                f'<ul>{"".join(f"<li>{esc(x)}</li>" for x in items)}</ul>' if items
+                else '<div class="muted">(无)</div>'
+            )
         return (
-            '<div class="dr-section">'
+            '<div class="insights-col">'
             f'<h4 title="{esc(tip)}">{emoji} {esc(label)}</h4>'
-            f'{body}'
+            f'{body_html}'
             '</div>'
         )
 
     return (
         '<section class="card insights-card">'
-        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">'
+        '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:10px;">'
         '<h3 style="margin:0;">Insights</h3>'
-        '<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">Insights</span>'
-        '<span class="muted small" style="margin-left:8px;">悬停每列标题查看 AI 引导词</span>'
+        '<span class="muted small">悬停每列标题查看 AI 引导词</span>'
         '</div>'
         '<div class="insights-grid">'
-        + _col("📈", "变化趋势", "trend", trend_body)
-        + _col("🚀", "关键进展", "highlights", hl_body)
-        + _col("🎯", "建议",     "suggestions", sg_body)
+        + _col("📈", "变化趋势",  "trend",       [], pre_rendered=trend_items)
+        + _col("🚀", "关键进展",  "highlights",  highlights)
+        + _col("🎯", "建议",      "suggestions", suggestions)
         + '</div>'
         '</section>'
     )
@@ -1658,22 +1663,46 @@ def _render_facts_block(date_val: str, channels: dict[str, str | None]) -> str:
 
 
 def _render_stats_strip_compact(header: dict, channels: dict[str, str | None]) -> str:
-    """Compact horizontal stats strip for the home page daily-report card."""
+    """4-tile compact stats strip for the daily report card. Mirrors the
+    weekly card's 4-tile layout (events / active / span / longest focus)
+    with a small sub-row under each main number for context (switches,
+    span endpoints, etc.). 峰值 is dropped — it was just noise."""
     time_span = _safe_load_json(channels.get("time_span")) or {}
     switches = _safe_load_json(channels.get("context_switches")) or {}
+    longest  = _safe_load_json(channels.get("longest_focus_block")) or {}
+
     first, last = time_span.get("first") or "?", time_span.get("last") or "?"
-    chips = [
-        (str(header["total_events"]), "events"),
-        (_format_duration_short(header["active_minutes"]), "active"),
-        (f"{first}–{last}", "span"),
-        (str(switches.get("count", 0)), "switches"),
-    ]
+    sw_count = switches.get("count", 0)
+
+    if longest:
+        focus_num = _format_duration_short(longest.get("duration_min", 0))
+        focus_sub = (
+            f'{esc(longest.get("start","?"))}–{esc(longest.get("end","?"))} · '
+            f'{esc(longest.get("dominant_project","?"))}'
+        )
+    else:
+        focus_num = "—"
+        focus_sub = "(无)"
+
+    def _tile(num: str, lbl: str, sub: str | None) -> str:
+        sub_html = (
+            f'<span class="muted" style="font-size:10.5px; margin-top:2px;">{sub}</span>'
+            if sub else ""
+        )
+        return (
+            '<div class="dr-stat">'
+            f'<span class="dr-stat-num">{esc(num)}</span>'
+            f'<span class="dr-stat-lbl">{esc(lbl)}</span>'
+            f'{sub_html}'
+            '</div>'
+        )
+
     return (
         '<div class="dr-stats-compact">'
-        + "".join(
-            f'<div class="dr-stat"><span class="dr-stat-num">{esc(v)}</span><span class="dr-stat-lbl">{esc(lbl)}</span></div>'
-            for v, lbl in chips
-        )
+        + _tile(str(header["total_events"]), "EVENTS", f"切换 {sw_count} 次")
+        + _tile(_format_duration_short(header["active_minutes"]), "ACTIVE", None)
+        + _tile(f"{first}–{last}", "SPAN", None)
+        + _tile(focus_num, "LONGEST FOCUS", focus_sub)
         + '</div>'
     )
 

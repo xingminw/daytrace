@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v8"  # v8 = person-focused prompts + drop concerns, suggestions in place of recommendations
+AI_VERSION = "v9"  # v9 = task-context prompts ([task:X] / [proj:Y] prefixes + active-task list)
 
 
 # ----- Shape validators ------------------------------------------------
@@ -209,22 +209,104 @@ def _redact_event(ev: dict[str, Any]) -> dict[str, Any] | None:
     return ev
 
 
-def _format_events_inline(events: list[dict[str, Any]], summary_cap: int = 120) -> str:
-    """One event per line: `HH:MM source/project title (summary[:cap])`."""
+def _format_events_inline(
+    events: list[dict[str, Any]],
+    summary_cap: int = 120,
+    *,
+    task_map: dict[str, str] | None = None,
+) -> str:
+    """One event per line. Prefix priority: `[task:<title>]` if the event
+    is linked to a Feishu work_item, otherwise `[proj:<project>]`. The
+    task prefix makes the AI talk in terms of *tasks* rather than raw
+    project buckets.
+
+    Format: `HH:MM source [task:Foo] title — summary[:cap]`
+    """
     lines = []
+    task_map = task_map or {}
     for ev in events:
         red = _redact_event(ev)
         if red is None:
             continue
         time = (red.get("start") or "")[11:16]
         src = red.get("source") or "other"
-        proj = red.get("project") or red.get("project_guess") or "misc"
+        eid = red.get("id") or ""
+        task_title = task_map.get(eid)
+        if task_title:
+            label = f"[task:{task_title}]"
+        else:
+            proj = red.get("project") or red.get("project_guess") or "misc"
+            label = f"[proj:{proj}]"
         title = (red.get("title") or "").strip()
         summary = (red.get("summary") or "").strip().replace("\n", " ")
-        line = f"{time} {src}/{proj} {title}"
+        line = f"{time} {src} {label} {title}"
         if summary and summary != title:
             line += f" — {summary[:summary_cap]}"
         lines.append(line)
+    return "\n".join(lines)
+
+
+def _load_event_task_map(con: sqlite3.Connection, date: str) -> dict[str, str]:
+    """For all events on `date` that have a row in event_work_item_links,
+    return {event_id: task_title}. Used to prefix events with their
+    Feishu task label."""
+    try:
+        rows = con.execute(
+            """
+            SELECT l.event_id AS eid, w.title AS title
+              FROM events e
+              JOIN event_work_item_links l ON l.event_id = e.id
+              JOIN work_items w           ON w.record_id = l.record_id
+             WHERE e.date = ?
+             """,
+            (date,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    return {r["eid"]: r["title"] for r in rows if r["title"]}
+
+
+def _load_active_task_context(con: sqlite3.Connection) -> str:
+    """Build a compact bullet list of *active* tasks (status ≠ 完成, OR
+    completed within last 7 days). Excludes the `reviews` table — review
+    items are auto-identifiable from paper titles and would just bloat
+    the prompt. Returns "" when there are no tasks to show."""
+    from datetime import date as _date_mod, timedelta as _td_mod
+    cutoff = (_date_mod.today() - _td_mod(days=7)).isoformat()
+    try:
+        rows = con.execute(
+            """
+            SELECT title, status, due_date
+              FROM work_items
+             WHERE table_key = 'tasks'
+               AND (
+                    (status IS NOT NULL AND status != '完成')
+                 OR (status = '完成' AND due_date >= ?)
+               )
+             ORDER BY
+               CASE status
+                 WHEN '进行中' THEN 0
+                 WHEN '待办'   THEN 1
+                 WHEN '完成'   THEN 2
+                 ELSE 3
+               END,
+               COALESCE(due_date, '9999-12-31')
+            """,
+            (cutoff,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return ""
+    if not rows:
+        return ""
+    lines = []
+    for r in rows:
+        title = (r["title"] or "").strip()
+        status = (r["status"] or "").strip() or "?"
+        due = (r["due_date"] or "").strip()
+        suffix = f" · {status}"
+        if due:
+            suffix += f" · due {due}"
+        lines.append(f"- {title}{suffix}")
     return "\n".join(lines)
 
 
@@ -281,25 +363,33 @@ def _stats_summary(con: sqlite3.Connection, date: str) -> str:
 
 OVERVIEW_SYSTEM = (
     "你是一位软件工程师的私人工作复盘助手。\n\n"
-    "你的读者是这位工程师本人。输入的事件数据(项目分布、时段、来源)来自"
-    "ta 自己的 IDE / git / AI 对话 / 文档, 仅作为**证据**。\n\n"
-    "你要写的是: ta 今天**作为一个人**在做什么、节奏如何、产出在哪里、"
-    "接下来该怎么走。\n\n"
+    "你的读者是这位工程师本人。输入会先给你一份**活跃任务清单**(飞书任务表),"
+    "再给事件清单 — 事件已预标 [task:X] 或 [proj:Y] 前缀。\n\n"
+    "**优先级**: 任务 > 项目。看到 [task:X] 就**以任务为单位**描述, 例如 "
+    "‘今天主要推进了 X 任务, 完成了…’; 看到 [proj:Y] 是没关联任务的游离工作, "
+    "可以一笔带过。\n\n"
+    "你要写的是: ta 今天**作为一个人**在做什么任务、有什么产出、接下来该怎么走。\n\n"
     "**禁止**:\n"
     "  ❌ 对数据本身提建议 (例: '梳理 misc 类别'、'合并项目名')\n"
     "  ❌ 对系统/工具提建议 (例: '配置 webhook'、'增加分类规则')\n"
     "  ❌ 泛化效率说教 (例: '减少 context switching'、'提升专注度')\n"
     "  ❌ 数字复述 (例: '今天 191 个事件、69 次切换')\n\n"
-    "**鼓励**: 具体到项目名 / 具体动作 / 具体产出。\n\n"
+    "**鼓励**: 具体任务名 / 具体动作 / 具体产出。可以在 suggestions 里指出"
+    "任务清单上 N 天没动的任务, 提醒回来推进。\n\n"
     "严格只输出 JSON, 不要 Markdown 代码块, 不要解释。"
 )
 
 
-def _overview_user(date: str, stats_text: str, events_text: str) -> str:
+def _overview_user(date: str, stats_text: str, events_text: str, tasks_text: str) -> str:
+    tasks_block = (
+        f"【活跃任务清单 — 来自飞书任务表, 优先以任务视角描述】\n{tasks_text}\n\n"
+        if tasks_text else "【活跃任务清单】(无)\n\n"
+    )
     return (
         f"【日期】{date}\n\n"
+        f"{tasks_block}"
         f"【骨架统计 — 供你参考节奏, 不要照搬数字】\n{stats_text}\n\n"
-        f"【事件清单, 按时间】\n{events_text}\n\n"
+        f"【事件清单, 按时间; 前缀 [task:X] 表示已关联到任务 X, [proj:Y] 表示游离项目】\n{events_text}\n\n"
         "【输出 JSON, 严格按此 shape, 每个字段都要有】\n"
         '{\n'
         '  "headline": "≤30 字, 一句话概括今天的主线 (例: \'双线推进 daytrace UI 与评分模型\')",\n'
@@ -327,11 +417,13 @@ def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> Ch
         })
     if not ai_client.is_available():
         return ChannelResult(value=None)  # written as JSON null, error=None
-    events_text = _format_events_inline(events)
+    task_map = _load_event_task_map(ctx.con, ctx.date)
+    events_text = _format_events_inline(events, task_map=task_map)
     stats_text = _stats_summary(ctx.con, ctx.date)
+    tasks_text = _load_active_task_context(ctx.con)
     resp = ai_client.call_json_validated(
         system=OVERVIEW_SYSTEM,
-        user=_overview_user(ctx.date, stats_text, events_text),
+        user=_overview_user(ctx.date, stats_text, events_text, tasks_text),
         validator=validate_overview,
         max_tokens=1200,
     )
