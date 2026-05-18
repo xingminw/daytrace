@@ -3844,6 +3844,10 @@ def _alignment_audit_card(con, days: list[str]) -> str:
     ).fetchall()
     wi_rows = []
     for w in wi_rows_all:
+        # 审稿 (reviews) items should already be auto-identifiable from the
+        # paper title — they don't belong in the manual audit dropdown.
+        if (w["table_key"] or "") == "reviews":
+            continue
         if (w["status"] or "") == "完成":
             due = w["due_date"] or ""
             if not due or due < _cutoff:
