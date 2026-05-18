@@ -2893,45 +2893,8 @@ def _weekly_swimlane_card(
             '</div>'
         )
 
-    # Filter pills — All + each top-N dim value (so 项目模式时是每个项目).
-    # CSS-driven hide via JS toggling display on .tl-swim-tick; per-row counts
-    # update with visible-only totals. URL syncs via history.replaceState.
-    filter_pills = [
-        '<button type="button" class="dim-tab'
-        + (' active' if swim_filter == 'all' else '')
-        + '" data-filter="all">全部</button>'
-    ]
-    for n in top_names:
-        if overall_counts.get(n, 0) <= 0:
-            continue
-        color = palette.get(n, _WEEKLY_OTHER_COLOR)
-        cls = "dim-tab active" if swim_filter == n else "dim-tab"
-        # Swatch is a small color dot inside the pill (left of label). Plays
-        # nicely with the rounded pill shape; matches the palette so you can
-        # find a project by color instead of reading its name.
-        swatch = (
-            f'<span style="display:inline-block; width:8px; height:8px; '
-            f'border-radius:50%; background:{color}; margin-right:6px; '
-            f'vertical-align:middle;"></span>'
-        )
-        filter_pills.append(
-            f'<button type="button" class="{cls}" data-filter="{esc(n)}">'
-            f'{swatch}{esc(n)}'
-            f'<span class="muted" style="margin-left:6px; font-weight:500; font-size:11px;">×{overall_counts[n]}</span>'
-            f'</button>'
-        )
-    # Plain wrapping flex container — we want 11+ pills to break across lines
-    # cleanly. .dim-tabs's own 999px oval background would warp into a giant
-    # blob on a multi-line set, so we don't use that class here. Each button
-    # still gets its own .dim-tab pill shape.
-    filter_bar = (
-        '<div data-role="swim-filter" '
-        'style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; '
-        'margin-bottom:12px;">'
-        '<span class="muted small" style="margin-right:4px; font-weight:600;">筛选</span>'
-        + "".join(filter_pills) +
-        '</div>'
-    )
+    # Filter pill bar has moved up to the bottom-card root so swim AND heat
+    # share it. This card just emits the swim DOM + tooltip + JS for tick hover.
 
     # Top axis row, aligned to where the .tl-swim-track starts (offset matches
     # .tl-swim-row's first column = 160px from the daily CSS).
@@ -2970,7 +2933,8 @@ def _weekly_swimlane_card(
         'var w=tip.offsetWidth;if(x+w>card.clientWidth-8)x=card.clientWidth-w-8;'
         'tip.style.left=x+"px";tip.style.top=y+"px";}'
         'function hide(){if(tip)tip.hidden=true;}'
-        # Tick hover tooltip
+        # Tick hover tooltip (filter logic now lives in page-level JS so both
+        # swim and heat respond to the same shared pill bar)
         'card.querySelectorAll(".tl-swim-tick").forEach(function(el){'
         'el.addEventListener("mousemove",function(ev){'
         'var html="<div class=\\"tl-tip-time\\">"+esc(el.dataset.date+" "+el.dataset.time)+"</div>"+'
@@ -2979,25 +2943,6 @@ def _weekly_swimlane_card(
         'chip("活动",el.dataset.activity)+chip("设备",el.dataset.device);'
         'show(html,ev);});'
         'el.addEventListener("mouseleave",hide);});'
-        # Filter pills: hide non-matching ticks via inline display, update
-        # per-row count badges, sync URL via replaceState.
-        'function applyFilter(v){'
-        'card.querySelectorAll(".tl-swim-tick").forEach(function(t){'
-        't.style.display=(v==="all"||t.dataset.value===v)?"":"none";});'
-        'card.querySelectorAll(".tl-swim-row").forEach(function(row){'
-        'var c=row.querySelectorAll(\'.tl-swim-tick:not([style*="display: none"])\').length;'
-        'var b=row.querySelector("[data-row-count]");if(b)b.textContent="×"+c;});'
-        'card.querySelectorAll("[data-role=\\"swim-filter\\"] .dim-tab").forEach(function(b){'
-        'b.classList.toggle("active",b.dataset.filter===v);});'
-        'try{var u=new URL(location.href);'
-        'if(v==="all"){u.searchParams.delete("swim_filter");}else{u.searchParams.set("swim_filter",v);}'
-        'history.replaceState({},"",u);}catch(e){}'
-        '}'
-        'card.querySelectorAll("[data-role=\\"swim-filter\\"] .dim-tab").forEach(function(btn){'
-        'btn.addEventListener("click",function(){applyFilter(btn.dataset.filter);});});'
-        # Apply initial filter from server-rendered active pill
-        'var init=card.querySelector("[data-role=\\"swim-filter\\"] .dim-tab.active");'
-        'if(init&&init.dataset.filter!=="all"){applyFilter(init.dataset.filter);}'
         '})();</script>'
     )
 
@@ -3005,7 +2950,6 @@ def _weekly_swimlane_card(
         # The .timeline-card class pulls in tooltip / tick / track styling
         # from the daily timeline CSS. .weekly-swim is our own scope tag.
         '<div class="timeline-card weekly-swim" style="position:relative; padding:0;">'
-        + filter_bar
         + top_axis
         + "".join(rows_html) +
         legend_html +
@@ -3013,7 +2957,7 @@ def _weekly_swimlane_card(
         js_html +
         '<div class="muted small" style="margin-top:6px;">'
         f'横轴 24h (shifted 边界 {boundary_hour:02d}:00 起)，hover 任意竖线看事件详情。'
-        '点上方筛选 pill 只看某项。颜色跟直方图一致。'
+        '上方筛选 pill 同时控制下面的热力图。'
         '</div>'
         '</div>'
     )
@@ -3232,56 +3176,98 @@ def _distribution_view_body(
     )
 
 
-def _hour_heatmap_card(events: list[dict], days: list[str], boundary_hour: int) -> str:
-    """24×7 heatmap of event density. Y = clock hour 0-23, X = day of week.
-    Background opacity scales with event count. Great for spotting work
-    rhythm patterns ("I always work 22-01" / "I never touch Saturdays")."""
+def _hour_heatmap_card(
+    events: list[dict], days: list[str], boundary_hour: int,
+    *, stack_by: str, palette: dict[str, str], top_names: list[str],
+) -> str:
+    """24×7 heatmap, cells colored by the dominant `stack_by` value in that
+    (day × hour) bucket and opacity scaled to event count.
+
+    Each cell carries data-bins (JSON {dim_value: count}) so the shared
+    swim/heat filter pills can recolor it client-side without a reload:
+    filter=all → dominant value's color, alpha = total/max_total;
+    filter=X    → X's color, alpha = X_count/max_X_count."""
+    import json as _json
     from datetime import datetime, timedelta, date as _date
-    # buckets[(date, hour_of_day_in_clock_local)] → count
-    from collections import Counter
-    buckets: Counter = Counter()
+    from collections import defaultdict
+    if not events:
+        return ""
+
+    # bins[(day, hour)] = {dim_value: count}
+    bins: dict[tuple[str, int], dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    days_set = set(days)
     for ev in events:
         s = ev.get("start") or ""
         try:
             dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
         except ValueError:
             continue
-        # find shifted-day for the event so it sits in the right column
         shifted = (dt - timedelta(hours=boundary_hour)).date().isoformat()
-        if shifted not in days:
+        if shifted not in days_set:
             continue
-        buckets[(shifted, dt.hour)] += 1
+        v = _stack_value_of(ev, stack_by)
+        bins[(shifted, dt.hour)][v] += 1
 
-    if not buckets:
+    if not bins:
         return ""
-    max_c = max(buckets.values()) or 1
+
+    # max_total across all cells (used for filter=all alpha scaling on the
+    # server-side default render; JS recomputes per filter on user input).
+    cell_totals = {k: sum(b.values()) for k, b in bins.items()}
+    max_total = max(cell_totals.values()) or 1
+
+    def hex_to_rgba(hexcol: str, alpha: float) -> str:
+        h = hexcol.lstrip("#")
+        if len(h) == 3:
+            h = "".join(c + c for c in h)
+        try:
+            r = int(h[0:2], 16); g = int(h[2:4], 16); b = int(h[4:6], 16)
+        except ValueError:
+            r, g, b = 47, 111, 237  # fallback blue
+        return f"rgba({r},{g},{b},{alpha:.2f})"
+
+    def dominant(b: dict[str, int]) -> str:
+        return max(b.items(), key=lambda kv: kv[1])[0]
 
     cells_html = []
-    # header row
-    header = ['<div></div>']  # corner
+    # Header row
+    header = ['<div></div>']  # corner spacer
     for d in days:
         wd = _WEEK_ZH[_date.fromisoformat(d).weekday()]
-        header.append(f'<div style="text-align:center; font-size:11px; color:var(--muted);">周{wd}<br><span style="font-size:10px; color:#bbb;">{esc(d[5:])}</span></div>')
+        header.append(
+            f'<div style="text-align:center; font-size:11px; color:var(--muted);">'
+            f'周{wd}<br><span style="font-size:10px; color:#bbb;">{esc(d[5:])}</span></div>'
+        )
     cells_html.append("".join(header))
 
-    # Hour rows ordered by shifted-day axis: boundary_hour, +1, +2, …, +23
-    # so the top of the heatmap matches "start of day" under the same 04:00
-    # convention as the rest of the dashboard (daily timeline, weekly swim).
+    # Hour rows ordered by shifted-day axis (04, 05, …, 23, 00, 01, 02, 03)
     hour_order = [(boundary_hour + i) % 24 for i in range(24)]
     for h in hour_order:
-        row = [f'<div style="font-size:10px; color:var(--muted); text-align:right; padding-right:4px; font-variant-numeric:tabular-nums;">{h:02d}</div>']
+        row = [
+            f'<div style="font-size:10px; color:var(--muted); text-align:right; '
+            f'padding-right:4px; font-variant-numeric:tabular-nums;">{h:02d}</div>'
+        ]
         for d in days:
-            c = buckets.get((d, h), 0)
-            if c == 0:
+            cell_bins = dict(bins.get((d, h), {}))
+            total = sum(cell_bins.values())
+            if total > 0:
+                dom = dominant(cell_bins)
+                color_hex = palette.get(dom, _WEEKLY_OTHER_COLOR)
+                alpha = 0.15 + 0.85 * (total / max_total)
+                bg = hex_to_rgba(color_hex, alpha)
+                fg = "white" if alpha > 0.55 else "var(--ink)"
+                label = str(total)
+            else:
                 bg = "transparent"
                 fg = "transparent"
-            else:
-                alpha = 0.15 + 0.85 * (c / max_c)
-                bg = f"rgba(47, 111, 237, {alpha:.2f})"
-                fg = "white" if alpha > 0.55 else "var(--ink)"
-            label = c if c > 0 else ""
+                label = ""
+            # data-bins encodes the breakdown so filter JS can recolor on
+            # the client without re-fetching anything.
+            bins_attr = esc(_json.dumps(cell_bins, ensure_ascii=False))
             row.append(
-                f'<div title="{d} · {h:02d}:00 · {c} events" '
+                f'<div class="hm-cell" data-bins="{bins_attr}" '
+                f'data-total="{total}" data-day="{esc(d)}" data-hour="{h:02d}" '
+                f'title="{d} {h:02d}:00 · {total} events" '
                 f'style="background:{bg}; color:{fg}; height:18px; border-radius:3px; '
                 f'display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:600;">'
                 f'{label}</div>'
@@ -3289,19 +3275,25 @@ def _hour_heatmap_card(events: list[dict], days: list[str], boundary_hour: int) 
         cells_html.append("".join(row))
 
     grid = (
-        '<div style="display:grid; grid-template-columns:30px repeat(7, 1fr); gap:2px;">'
+        '<div class="hm-grid" style="display:grid; grid-template-columns:30px repeat(7, 1fr); gap:2px;">'
         + "".join(cells_html) +
         '</div>'
     )
 
-    total = sum(buckets.values())
-    busiest_hour = max(range(24), key=lambda h: sum(buckets.get((d, h), 0) for d in days))
-    busiest_count = sum(buckets.get((d, busiest_hour), 0) for d in days)
+    grand_total = sum(cell_totals.values())
+    busiest_hour = max(hour_order, key=lambda h: sum(cell_totals.get((d, h), 0) for d in days))
+    busiest_count = sum(cell_totals.get((d, busiest_hour), 0) for d in days)
+    # Palette JSON for JS to color cells by filter
+    palette_attr = esc(_json.dumps({k: v for k, v in palette.items()}, ensure_ascii=False))
     return (
+        f'<div class="weekly-heat" data-palette="{palette_attr}" '
+        f'data-max-total="{max_total}">'
         '<div class="muted small" style="margin-bottom:8px;">'
-        f'总 {total} 个事件 · 最忙时段 {busiest_hour:02d}:00（{busiest_count} 个）'
+        f'总 {grand_total} 个事件 · 最忙时段 {busiest_hour:02d}:00（{busiest_count} 个）· '
+        '颜色按当前维度上色 · 透明度按条数'
         '</div>'
-        + grid
+        + grid +
+        '</div>'
     )
 
 
@@ -3685,8 +3677,43 @@ def weekly_page(
         or '<div class="muted">本周无事件</div>'
     )
     heat_body = (
-        _hour_heatmap_card(events, days, bh)
+        _hour_heatmap_card(events, days, bh, stack_by=mode,
+                           palette=palette, top_names=top_names)
         or '<div class="muted">本周无事件</div>'
+    )
+
+    # Shared filter pill bar — both swim and heat react to it. Sits above
+    # the view-switcher inside the bottom card so it's visible regardless
+    # of which view (swim/heat) is active.
+    overall_counts = _compute_palette_for_week({d: per_day_stack.get(d, {}) for d in days})[2]
+    filter_pills = [
+        '<button type="button" class="dim-tab'
+        + (' active' if sf == 'all' else '')
+        + '" data-filter="all">全部</button>'
+    ]
+    for n in top_names:
+        if overall_counts.get(n, 0) <= 0:
+            continue
+        color = palette.get(n, _WEEKLY_OTHER_COLOR)
+        cls = "dim-tab active" if sf == n else "dim-tab"
+        swatch = (
+            f'<span style="display:inline-block; width:8px; height:8px; '
+            f'border-radius:50%; background:{color}; margin-right:6px; '
+            f'vertical-align:middle;"></span>'
+        )
+        filter_pills.append(
+            f'<button type="button" class="{cls}" data-filter="{esc(n)}">'
+            f'{swatch}{esc(n)}'
+            f'<span class="muted" style="margin-left:6px; font-weight:500; font-size:11px;">×{int(overall_counts[n]) if isinstance(overall_counts[n], (int, float)) else overall_counts[n]}</span>'
+            f'</button>'
+        )
+    shared_filter_bar = (
+        '<div data-role="swim-filter" '
+        'style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; '
+        'margin:8px 0 12px;">'
+        '<span class="muted small" style="margin-right:4px; font-weight:600;">筛选</span>'
+        + "".join(filter_pills) +
+        '</div>'
     )
 
     bottom_switcher_pills = (
@@ -3699,11 +3726,14 @@ def weekly_page(
         + '</div>'
     )
     bottom_card = (
-        f'<section class="card weekly-viz" id="chart" data-view="{esc(view)}">'
-        '<div style="display:flex; align-items:center; gap:12px; margin-bottom:10px; flex-wrap:wrap;">'
+        f'<section class="card weekly-viz" id="chart" data-view="{esc(view)}" '
+        f'data-filter="{esc(sf)}">'
+        '<div style="display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap;">'
         '<h3 style="margin:0;">视图切换</h3>'
         f'<div style="margin-left:auto;">{bottom_switcher_pills}</div>'
         '</div>'
+        # Shared filter pill bar (controls both swim ticks and heat cells)
+        + shared_filter_bar +
         '<div class="wv-pane" data-pane="swim">' + swim_body + '</div>'
         '<div class="wv-pane" data-pane="heat">' + heat_body + '</div>'
         '</section>'
@@ -3742,7 +3772,64 @@ def weekly_page(
         'b.classList.toggle("active",b.dataset.view===v);});'
         'try{var u=new URL(location.href);u.searchParams.set("view",v);'
         'history.replaceState({},"",u);}catch(e){}'
-        '});});}'
+        '});});'
+        # ── (3a) Shared filter: applies to swim ticks AND heat cells ──
+        # Heatmap reads data-bins per cell + data-palette on the heat root
+        # so it can recolor / re-alpha based on the active filter without
+        # any reload.
+        'function hexToRgba(h,a){h=String(h||"#2f6fed").replace("#","");'
+        'if(h.length===3){h=h.split("").map(function(c){return c+c;}).join("");}'
+        'var r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);'
+        'return "rgba("+r+","+g+","+b+","+a.toFixed(2)+")";}'
+        'function repaintHeat(filter){'
+        'var heat=card.querySelector(".weekly-heat");'
+        'if(!heat)return;'
+        'var palette={};try{palette=JSON.parse(heat.dataset.palette||"{}");}catch(e){}'
+        'var OTHER="#cbd5e1";'
+        'var cells=heat.querySelectorAll(".hm-cell");'
+        # First pass: compute max for current filter
+        'var maxC=0;'
+        'cells.forEach(function(c){'
+        'var bins={};try{bins=JSON.parse(c.dataset.bins||"{}");}catch(e){}'
+        'var n=filter==="all"?parseInt(c.dataset.total||"0",10):(bins[filter]||0);'
+        'if(n>maxC)maxC=n;});'
+        'if(maxC<1)maxC=1;'
+        # Second pass: repaint
+        'cells.forEach(function(c){'
+        'var bins={};try{bins=JSON.parse(c.dataset.bins||"{}");}catch(e){}'
+        'var n,color;'
+        'if(filter==="all"){n=parseInt(c.dataset.total||"0",10);'
+        'var dom=null,dc=0;for(var k in bins){if(bins[k]>dc){dc=bins[k];dom=k;}}'
+        'color=palette[dom]||OTHER;'
+        '}else{n=bins[filter]||0;color=palette[filter]||OTHER;}'
+        'if(n===0){c.style.background="transparent";c.style.color="transparent";c.textContent="";}'
+        'else{var a=0.15+0.85*(n/maxC);'
+        'c.style.background=hexToRgba(color,a);'
+        'c.style.color=a>0.55?"white":"var(--ink)";'
+        'c.textContent=n;}});}'
+        'function applyFilter(v){'
+        'card.setAttribute("data-filter",v);'
+        # swim ticks
+        'card.querySelectorAll(".tl-swim-tick").forEach(function(t){'
+        't.style.display=(v==="all"||t.dataset.value===v)?"":"none";});'
+        # per-row counts
+        'card.querySelectorAll(".tl-swim-row").forEach(function(row){'
+        'var c=row.querySelectorAll(\'.tl-swim-tick:not([style*="display: none"])\').length;'
+        'var b=row.querySelector("[data-row-count]");if(b)b.textContent="×"+c;});'
+        # heat cells
+        'repaintHeat(v);'
+        # active pill
+        'card.querySelectorAll("[data-role=\\"swim-filter\\"] .dim-tab").forEach(function(b){'
+        'b.classList.toggle("active",b.dataset.filter===v);});'
+        'try{var u=new URL(location.href);'
+        'if(v==="all"){u.searchParams.delete("swim_filter");}else{u.searchParams.set("swim_filter",v);}'
+        'history.replaceState({},"",u);}catch(e){}}'
+        'card.querySelectorAll("[data-role=\\"swim-filter\\"] .dim-tab").forEach(function(btn){'
+        'btn.addEventListener("click",function(){applyFilter(btn.dataset.filter);});});'
+        # Initial filter from server-rendered active state
+        'var init=card.getAttribute("data-filter")||"all";'
+        'if(init!=="all"){applyFilter(init);}'
+        '}'
         # ── (4) top chart card switcher (histogram vs distribution) ──
         'var tc=document.querySelector(".top-chart-card");'
         'if(tc){'
