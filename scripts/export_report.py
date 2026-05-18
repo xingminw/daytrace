@@ -138,7 +138,11 @@ def main() -> int:
     if args.upload_feishu:
         from daytrace.report_delivery import import_md_to_feishu_docs
         try:
-            feishu_urls = import_md_to_feishu_docs(md_path, kind=kind, key=key, quiet=args.quiet) or {}
+            feishu_urls = import_md_to_feishu_docs(
+                md_path, kind=kind, key=key,
+                chart_paths=chart_paths,
+                quiet=args.quiet,
+            ) or {}
         except Exception as e:
             print(f"[export_report] feishu import failed: {e}", file=sys.stderr)
             return 3

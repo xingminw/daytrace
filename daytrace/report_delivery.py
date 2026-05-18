@@ -174,27 +174,90 @@ def _import_one(local_path: Path, folder_token: str, *,
     return _lark(args, cwd=local_path.parent)
 
 
+_CHART_ANCHORS = {
+    "hist":  "任务时间分布(按时段)",
+    "donut": "任务总览",
+}
+
+
 def import_md_to_feishu_docs(md_path: Path, *,
-                             kind: str, key: str, quiet: bool = False) -> dict:
+                             kind: str, key: str,
+                             chart_paths: list[Path] | None = None,
+                             quiet: bool = False) -> dict:
     """Import the Markdown summary as a Feishu *cloud docx* document.
 
-    Docx renders natively in Feishu (in-app and in the browser) with real
-    formatting + clickable links — unlike a raw .md file which would
-    download. This is the link we want to surface in the email body.
+    Images can't be inlined via `drive +import` because that endpoint
+    embeds them with temporary signed stream URLs that **expire after
+    ~1 hour** — opening the doc later shows ‘无法导入该图片’. So:
 
-    Returns {"docx": url} (or empty dict on failure)."""
+      1) Strip `![]()` references from the MD before importing (the
+         chart sub-headings stay in place as anchors).
+      2) Import the stripped MD → docx.
+      3) For each chart PNG, run `docs +media-insert` with
+         `--selection-with-ellipsis=<chart sub-heading>`. That endpoint
+         uploads via Feishu's media API and embeds a persistent
+         image_token, so the picture survives indefinitely.
+
+    Returns {"docx": url} (or {} on failure)."""
     cfg = _ensure_folders()
     folder_token = cfg["daily_token"] if kind == "daily" else cfg["weekly_token"]
     if not md_path.exists():
         return {}
-    resp = _import_one(md_path, folder_token, doc_type="docx", name=key)
-    data = resp.get("data") or resp
-    url = data.get("url") or data.get("file_url")
-    if not url and data.get("token"):
-        url = f"https://www.feishu.cn/docx/{data['token']}"
+
+    # ── Step 1: strip image refs from MD into a sibling temp file ──
+    import re as _re
+    upload_path = md_path
+    stripped_path: Path | None = None
+    if chart_paths:
+        original = md_path.read_text(encoding="utf-8")
+        stripped = _re.sub(r"^!\[.*?\]\(\./[^)]+\)\s*\n?", "", original, flags=_re.M)
+        stripped_path = md_path.parent / f".{md_path.stem}.feishu-stripped.md"
+        stripped_path.write_text(stripped, encoding="utf-8")
+        upload_path = stripped_path
+
+    # ── Step 2: import the MD as docx ──
+    try:
+        resp = _import_one(upload_path, folder_token, doc_type="docx", name=key)
+        data = resp.get("data") or resp
+        url = data.get("url") or data.get("file_url")
+        if not url and data.get("token"):
+            url = f"https://www.feishu.cn/docx/{data['token']}"
+    finally:
+        if stripped_path and stripped_path.exists():
+            try: stripped_path.unlink()
+            except Exception: pass
+
+    if not url:
+        if not quiet:
+            print("  ! docx import: no URL returned")
+        return {}
     if not quiet:
-        print(f"  ↑ docx  → {url or '(no url)'}")
-    return {"docx": url} if url else {}
+        print(f"  ↑ docx  → {url}")
+
+    # ── Step 3: insert each chart via media-insert (persistent token) ──
+    if chart_paths:
+        for cp in chart_paths:
+            if not cp.exists():
+                continue
+            # Filename is "<key>-<chart_key>.png"; pull chart_key for the anchor
+            chart_key = cp.stem.rsplit("-", 1)[-1]
+            anchor = _CHART_ANCHORS.get(chart_key)
+            if not anchor:
+                continue
+            try:
+                _lark([
+                    "docs", "+media-insert",
+                    "--doc", url,
+                    "--file", "./" + cp.name,
+                    "--type", "image",
+                    "--selection-with-ellipsis", anchor,
+                ], cwd=cp.parent)
+                if not quiet:
+                    print(f"  ↑ chart {cp.name} → inserted after '{anchor}'")
+            except Exception as e:
+                print(f"  ! chart insert failed for {cp.name}: {e}")
+
+    return {"docx": url}
 
 
 # ───── Email (Gmail SMTP) ────────────────────────────────────────────────
@@ -224,58 +287,54 @@ _EMAIL_CSS = """
 <style>
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
-    color:#2b2722; font-size:16px; line-height:1.75; max-width:780px;
-    margin:0 auto; padding:36px 28px 48px;
+    color:#2b2722; font-size:16px; line-height:1.55; max-width:780px;
+    margin:0 auto; padding:28px 28px 36px;
     background: linear-gradient(180deg, #fdfaf2 0%, #fafaf7 80px, #fafaf7 100%);
   }
 
-  /* Top brand strip */
-  .brand { font-size:11px; font-weight:700; letter-spacing:0.22em; color:#9b8f7d; text-transform:uppercase; margin-bottom:18px; padding-bottom:10px; border-bottom:2px solid #f0d68b; }
+  /* Top brand strip — compact */
+  .brand { font-size:11px; font-weight:700; letter-spacing:0.22em; color:#9b8f7d; text-transform:uppercase; margin-bottom:14px; padding-bottom:8px; border-bottom:2px solid #f0d68b; }
 
-  /* Header card with the two action links */
-  .links { background:linear-gradient(135deg, #fff7e8 0%, #fef3d4 100%); border:1px solid #f0d68b; border-radius:14px; padding:20px 22px; margin-bottom:28px; box-shadow:0 1px 3px rgba(180,140,40,0.06); }
-  .links a { display:block; margin:6px 0; color:#2f6fed; text-decoration:none; font-weight:600; line-height:1.55; }
+  /* Header card with the two action links — tightened */
+  .links { background:linear-gradient(135deg, #fff7e8 0%, #fef3d4 100%); border:1px solid #f0d68b; border-radius:12px; padding:12px 16px; margin-bottom:20px; box-shadow:0 1px 3px rgba(180,140,40,0.06); }
+  .links a { display:block; margin:2px 0; color:#2f6fed; text-decoration:none; font-weight:600; line-height:1.35; }
   .links a:hover { text-decoration:underline; }
   .links .lbl { display:inline-block; min-width:122px; color:#6b6052; font-weight:600; margin-right:10px; font-size:13px; }
 
   /* Headings */
-  h1 { font-size:30px; margin:8px 0 14px; color:#1a1814; letter-spacing:-0.012em; font-weight:800; }
-  h2 { font-size:21px; margin:36px 0 14px; color:#1a1814; padding:8px 0 8px 14px; border-left:4px solid #f59e0b; background:rgba(245,158,11,0.05); border-radius:0 6px 6px 0; }
-  h3 { font-size:16.5px; margin:24px 0 8px; color:#3b352e; padding-left:8px; border-left:3px solid #2f6fed; }
+  h1 { font-size:28px; margin:6px 0 10px; color:#1a1814; letter-spacing:-0.012em; font-weight:800; line-height:1.25; }
+  h2 { font-size:20px; margin:24px 0 10px; color:#1a1814; padding:6px 0 6px 12px; border-left:4px solid #f59e0b; background:rgba(245,158,11,0.05); border-radius:0 6px 6px 0; line-height:1.35; }
+  h3 { font-size:16px; margin:16px 0 6px; color:#3b352e; padding-left:8px; border-left:3px solid #2f6fed; line-height:1.35; }
 
   /* Paragraphs + emphasis */
-  p  { margin:12px 0 16px; }
+  p  { margin:8px 0 12px; }
   strong { color:#1a1814; font-weight:700; }
   em { color:#7a6f5f; font-style:normal; font-size:13.5px; }
 
-  /* Blockquote = narrative paragraph */
-  blockquote { margin:14px 0 22px; padding:14px 20px; background:#fff7e8; border-left:3px solid #f59e0b; border-radius:0 8px 8px 0; color:#3b352e; font-size:15.5px; line-height:1.8; }
-  blockquote p { margin:6px 0; }
+  /* Blockquote = narrative paragraph — tighter */
+  blockquote { margin:10px 0 16px; padding:10px 18px; background:#fff7e8; border-left:3px solid #f59e0b; border-radius:0 8px 8px 0; color:#3b352e; font-size:15.5px; line-height:1.6; }
+  blockquote p { margin:4px 0; }
 
-  /* Lists */
-  ul { margin:10px 0 18px; padding-left:24px; }
-  li { margin:7px 0; line-height:1.7; }
+  /* Lists — tighter */
+  ul { margin:6px 0 12px; padding-left:24px; }
+  li { margin:2px 0; line-height:1.5; }
 
   /* Table = dashboard stats grid */
-  table { width:100%; border-collapse:separate; border-spacing:0; margin:12px 0 24px; background:white; border:1px solid #ecdfc4; border-radius:10px; overflow:hidden; box-shadow:0 1px 2px rgba(180,140,40,0.04); }
+  table { width:100%; border-collapse:separate; border-spacing:0; margin:10px 0 18px; background:white; border:1px solid #ecdfc4; border-radius:10px; overflow:hidden; box-shadow:0 1px 2px rgba(180,140,40,0.04); }
   thead { background:#fdf6e3; }
-  th { text-align:left; padding:10px 14px; font-size:12.5px; font-weight:700; color:#6b6052; letter-spacing:0.04em; text-transform:uppercase; border-bottom:1px solid #ecdfc4; }
-  td { padding:11px 14px; font-size:15px; border-bottom:1px solid #f3ecd9; vertical-align:middle; }
+  th { text-align:left; padding:8px 14px; font-size:12.5px; font-weight:700; color:#6b6052; letter-spacing:0.04em; text-transform:uppercase; border-bottom:1px solid #ecdfc4; line-height:1.3; }
+  td { padding:8px 14px; font-size:15px; border-bottom:1px solid #f3ecd9; vertical-align:middle; line-height:1.4; }
   tr:last-child td { border-bottom:0; }
   td strong { color:#1a1814; font-size:17px; font-weight:800; }
 
   /* Inline code chips (used for 变化趋势 label) */
-  code { background:#f3ecd9; color:#5a4a2e; padding:3px 9px; border-radius:6px; font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:13px; font-weight:600; letter-spacing:0.02em; }
+  code { background:#f3ecd9; color:#5a4a2e; padding:2px 8px; border-radius:5px; font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:13px; font-weight:600; letter-spacing:0.02em; }
 
   /* Images = charts */
-  img { max-width:100%; height:auto; border-radius:10px; margin:18px 0; box-shadow:0 2px 8px rgba(45,30,10,0.08); border:1px solid #f3ecd9; }
+  img { max-width:100%; height:auto; border-radius:10px; margin:14px 0; box-shadow:0 2px 8px rgba(45,30,10,0.08); border:1px solid #f3ecd9; }
 
   /* Horizontal rules: barely there */
-  hr { border:0; border-top:1px dashed #e0d7c5; margin:28px 0; }
-
-  /* Footer */
-  body > p:last-child em,
-  body > p:last-of-type em { color:#9b8f7d; }
+  hr { border:0; border-top:1px dashed #e0d7c5; margin:20px 0; }
 </style>
 """.strip()
 

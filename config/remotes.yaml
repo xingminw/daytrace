@@ -12,6 +12,6 @@
 
 remotes:
   - device_id: omen-wsl                            # must match config.device.id
-    ssh: mtl-tail                                  # alias in ~/.ssh/config
+    ssh: mtl                                       # alias in ~/.ssh/config (was mtl-tail)
     repo_path: /mnt/d/research-programs/daytrace   # checked-out daytrace clone
     config: config/devices/omen-wsl.yaml           # collector config, relative to repo_path

@@ -107,6 +107,21 @@ def _md_trend_line(ai_overview: dict | None) -> str:
     return f"`变化趋势` {chip} **{direction or 'steady'}** — {comparison}".strip()
 
 
+_LEADING_EMOJI_RE = None  # populated lazily below
+
+
+def _strip_leading_section_emoji(text: str) -> str:
+    """The AI sometimes prepends the section emoji (🚀 / ⏰ / 🔔) to each
+    bullet — redundant when the column header already carries that
+    emoji. Strip it at render time so we don't have to invalidate the
+    AI cache."""
+    global _LEADING_EMOJI_RE
+    if _LEADING_EMOJI_RE is None:
+        import re as _re
+        _LEADING_EMOJI_RE = _re.compile(r"^[🚀⏰🔔📌✨📰💡📊🎯]\s*")
+    return _LEADING_EMOJI_RE.sub("", text.lstrip()).strip()
+
+
 def _md_insights(ai_overview: dict | None) -> str:
     if not ai_overview:
         return ""
@@ -114,12 +129,14 @@ def _md_insights(ai_overview: dict | None) -> str:
     h = ai_overview.get("highlights") or []
     w = ai_overview.get("work_pattern") or []
     s = ai_overview.get("suggestions") or ai_overview.get("recommendations") or []
+    def _bullets(xs: list[str]) -> str:
+        return "\n".join(f"- {_strip_leading_section_emoji(x)}" for x in xs)
     if h:
-        out.append("### 🚀 关键任务进展\n" + "\n".join(f"- {x}" for x in h))
+        out.append("### 🚀 关键任务进展\n" + _bullets(h))
     if w:
-        out.append("### ⏰ 时间安排回顾\n" + "\n".join(f"- {x}" for x in w))
+        out.append("### ⏰ 时间安排回顾\n" + _bullets(w))
     if s:
-        out.append("### 🔔 任务跟进提醒\n" + "\n".join(f"- {x}" for x in s))
+        out.append("### 🔔 任务跟进提醒\n" + _bullets(s))
     return "\n\n".join(out)
 
 

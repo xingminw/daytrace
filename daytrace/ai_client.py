@@ -25,10 +25,51 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-v4-flash"
+
+
+# ───── Secrets loading ──────────────────────────────────────────────────
+# When the dashboard or cron is started by launchd, the user's shell
+# profile (which exports DEEPSEEK_API_KEY) is NOT sourced. To keep
+# interactive and unattended runs on the same code path, we also read
+# from ~/.daytrace/secrets.env (KEY=VALUE per line) as a fallback for
+# any DEEPSEEK_* var that isn't already in os.environ.
+
+_SECRETS_PATH = Path.home() / ".daytrace" / "secrets.env"
+_secrets_loaded = False
+
+
+def _load_secrets_into_environ() -> None:
+    """Idempotent: populate os.environ from ~/.daytrace/secrets.env without
+    overwriting anything that's already set. Silently no-ops when the
+    file doesn't exist OR when we're running under pytest (so tests
+    that explicitly `monkeypatch.delenv('DEEPSEEK_API_KEY')` aren't
+    second-guessed)."""
+    global _secrets_loaded
+    if _secrets_loaded:
+        return
+    # Reset on every call when under pytest so monkeypatched envs win,
+    # but don't cache the no-op (tests may toggle env between cases).
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return
+    _secrets_loaded = True
+    if not _SECRETS_PATH.exists():
+        return
+    try:
+        for line in _SECRETS_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, v = line.split("=", 1)
+            k = k.strip(); v = v.strip()
+            if k and k not in os.environ:
+                os.environ[k] = v
+    except Exception:
+        pass
 
 # DeepSeek pricing as of Q2 2026 in USD per 1M tokens (cache-miss path).
 # Used only for display; not load-bearing. Update freely.
@@ -57,7 +98,10 @@ class LLMResponse:
 
 
 def is_available() -> bool:
-    """Cheap pre-flight: have an API key set?"""
+    """Cheap pre-flight: have an API key set? Also lazily populates env
+    from ~/.daytrace/secrets.env so launchd-spawned processes work the
+    same as interactive shells."""
+    _load_secrets_into_environ()
     return bool(os.environ.get("DEEPSEEK_API_KEY", "").strip())
 
 
@@ -122,6 +166,7 @@ def call_json(
 
     Raises LLMError on any failure after `retries` retries.
     """
+    _load_secrets_into_environ()
     api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
     if not api_key:
         raise LLMError("DEEPSEEK_API_KEY not set in environment")
