@@ -2779,6 +2779,7 @@ def _format_value(v: float, unit: str) -> str:
 def _weekly_swimlane_card(
     *, events: list[dict], days: list[str], boundary_hour: int,
     stack_by: str, top_names: list[str], palette: dict[str, str],
+    swim_filter: str = "all",
 ) -> str:
     """7-day swim-lane reusing the daily timeline-card's CSS classes
     (.tl-swim-row, .tl-swim-track, .tl-swim-tick, .tl-tooltip, .tl-tip-*)
@@ -2857,7 +2858,7 @@ def _weekly_swimlane_card(
             f'data-time="{esc(t["time"])}" data-date="{esc(t["date"])}" '
             f'data-source="{esc(t["source"])}" data-project="{esc(t["project"])}" '
             f'data-device="{esc(t["device"])}" data-activity="{esc(t["activity"])}" '
-            f'data-title="{esc(t["title"])}" '
+            f'data-title="{esc(t["title"])}" data-value="{esc(t["value"])}" '
             f'style="left:{t["pos"]:.4f}%; background:{t["color"]};"></span>'
             for t in ticks
         )
@@ -2867,11 +2868,33 @@ def _weekly_swimlane_card(
             '<div class="tl-swim-row">'
             f'<div class="tl-swim-label" style="border-left:3px solid #e6dcc6;">'
             f'<span class="tl-swim-name">周{wd} <span class="muted" style="font-size:11px; font-weight:500;">{esc(d[5:])}</span></span>'
-            f'<span class="tl-swim-count muted">×{len(ticks)}</span>'
+            f'<span class="tl-swim-count muted" data-row-count="1">×{len(ticks)}</span>'
             '</div>'
             f'<div class="tl-swim-track">{grid_lines}{ticks_html}</div>'
             '</div>'
         )
+
+    # Filter pills — All + each top-N dim value (so 项目模式时是每个项目).
+    # CSS-driven hide via JS toggling display on .tl-swim-tick; per-row counts
+    # update with visible-only totals. URL syncs via history.replaceState.
+    filter_pills = ['<button type="button" class="dim-tab' + (' active' if swim_filter == 'all' else '') + '" data-filter="all">全部</button>']
+    for n in top_names:
+        if overall_counts.get(n, 0) <= 0:
+            continue
+        color = palette.get(n, _WEEKLY_OTHER_COLOR)
+        cls = "dim-tab active" if swim_filter == n else "dim-tab"
+        filter_pills.append(
+            f'<button type="button" class="{cls}" data-filter="{esc(n)}" '
+            f'style="border-left:3px solid {color}; padding-left:8px;">'
+            f'{esc(n)}<span class="muted" style="margin-left:6px; font-weight:500; font-size:11px;">×{overall_counts[n]}</span>'
+            f'</button>'
+        )
+    filter_bar = (
+        '<div class="dim-tabs" data-role="swim-filter" '
+        'style="margin-bottom:10px; max-width:100%; overflow-x:auto; flex-wrap:wrap;">'
+        + "".join(filter_pills) +
+        '</div>'
+    )
 
     # Top axis row, aligned to where the .tl-swim-track starts (offset matches
     # .tl-swim-row's first column = 160px from the daily CSS).
@@ -2901,15 +2924,16 @@ def _weekly_swimlane_card(
         '<script>(function(){'
         'var card=document.currentScript&&document.currentScript.closest(".weekly-swim");'
         'if(!card)return;'
-        'var tip=card.querySelector(".tl-tooltip");if(!tip)return;'
+        'var tip=card.querySelector(".tl-tooltip");'
         'function esc(s){return String(s==null?"":s).replace(/[&<>\\"]/g,function(c){return ({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"})[c];});}'
         'function chip(label,val){if(!val)return ""; return "<span class=\\"tl-tip-chip\\"><b>"+label+"</b> "+esc(val)+"</span>";}'
-        'function show(html,ev){tip.innerHTML=html;tip.hidden=false;'
+        'function show(html,ev){if(!tip)return;tip.innerHTML=html;tip.hidden=false;'
         'var r=card.getBoundingClientRect();'
         'var x=ev.clientX-r.left+12;var y=ev.clientY-r.top+12;'
         'var w=tip.offsetWidth;if(x+w>card.clientWidth-8)x=card.clientWidth-w-8;'
         'tip.style.left=x+"px";tip.style.top=y+"px";}'
-        'function hide(){tip.hidden=true;}'
+        'function hide(){if(tip)tip.hidden=true;}'
+        # Tick hover tooltip
         'card.querySelectorAll(".tl-swim-tick").forEach(function(el){'
         'el.addEventListener("mousemove",function(ev){'
         'var html="<div class=\\"tl-tip-time\\">"+esc(el.dataset.date+" "+el.dataset.time)+"</div>"+'
@@ -2918,6 +2942,25 @@ def _weekly_swimlane_card(
         'chip("活动",el.dataset.activity)+chip("设备",el.dataset.device);'
         'show(html,ev);});'
         'el.addEventListener("mouseleave",hide);});'
+        # Filter pills: hide non-matching ticks via inline display, update
+        # per-row count badges, sync URL via replaceState.
+        'function applyFilter(v){'
+        'card.querySelectorAll(".tl-swim-tick").forEach(function(t){'
+        't.style.display=(v==="all"||t.dataset.value===v)?"":"none";});'
+        'card.querySelectorAll(".tl-swim-row").forEach(function(row){'
+        'var c=row.querySelectorAll(\'.tl-swim-tick:not([style*="display: none"])\').length;'
+        'var b=row.querySelector("[data-row-count]");if(b)b.textContent="×"+c;});'
+        'card.querySelectorAll("[data-role=\\"swim-filter\\"] .dim-tab").forEach(function(b){'
+        'b.classList.toggle("active",b.dataset.filter===v);});'
+        'try{var u=new URL(location.href);'
+        'if(v==="all"){u.searchParams.delete("swim_filter");}else{u.searchParams.set("swim_filter",v);}'
+        'history.replaceState({},"",u);}catch(e){}'
+        '}'
+        'card.querySelectorAll("[data-role=\\"swim-filter\\"] .dim-tab").forEach(function(btn){'
+        'btn.addEventListener("click",function(){applyFilter(btn.dataset.filter);});});'
+        # Apply initial filter from server-rendered active pill
+        'var init=card.querySelector("[data-role=\\"swim-filter\\"] .dim-tab.active");'
+        'if(init&&init.dataset.filter!=="all"){applyFilter(init.dataset.filter);}'
         '})();</script>'
     )
 
@@ -2925,13 +2968,15 @@ def _weekly_swimlane_card(
         # The .timeline-card class pulls in tooltip / tick / track styling
         # from the daily timeline CSS. .weekly-swim is our own scope tag.
         '<div class="timeline-card weekly-swim" style="position:relative; padding:0;">'
+        + filter_bar
         + top_axis
         + "".join(rows_html) +
         legend_html +
         tooltip_html +
         js_html +
         '<div class="muted small" style="margin-top:6px;">'
-        f'横轴 24h (shifted 边界 {boundary_hour:02d}:00 起)，hover 任意竖线看事件详情，颜色跟直方图一致。'
+        f'横轴 24h (shifted 边界 {boundary_hour:02d}:00 起)，hover 任意竖线看事件详情。'
+        '点上方筛选 pill 只看某项。颜色跟直方图一致。'
         '</div>'
         '</div>'
     )
@@ -3428,7 +3473,7 @@ def _vs_last_week_card(diffs: list[dict]) -> str:
 def weekly_page(
     db_path: Path, week: str | None,
     *, unit: str | None = None, mode: str | None = None,
-    view: str | None = None,
+    view: str | None = None, swim_filter: str | None = None,
 ) -> str:
     """ISO-week page mirroring the daily report's layout:
 
@@ -3588,9 +3633,13 @@ def weekly_page(
     # Bottom view-switcher card — CSS-driven (no reload), mirrors daily timeline-card.
     # All 3 view bodies are rendered to DOM; data-view attribute on the card root
     # decides which is visible via the .wv-* CSS rules.
+    # Validate swim_filter — accept "all" or any top_name. Junk values fall
+    # back to "all" silently (defensive against stale bookmarks).
+    sf = swim_filter if (swim_filter in top_names or swim_filter == "all") else "all"
     swim_body = (
         _weekly_swimlane_card(events=events, days=days, boundary_hour=bh,
-                              stack_by=mode, top_names=top_names, palette=palette)
+                              stack_by=mode, top_names=top_names, palette=palette,
+                              swim_filter=sf)
         or '<div class="muted">本周无事件</div>'
     )
     heat_body = (
@@ -3733,8 +3782,10 @@ class Handler(BaseHTTPRequestHandler):
                 # Accept both `mode` (new, matches /today) and `stack_by` (legacy)
                 w_mode = qs.get("mode", [None])[0] or qs.get("stack_by", [None])[0] or None
                 w_view = qs.get("view", [None])[0] or None
+                w_swim = qs.get("swim_filter", [None])[0] or None
                 html_response(self, weekly_page(
-                    self.db_path, week, unit=w_unit, mode=w_mode, view=w_view,
+                    self.db_path, week, unit=w_unit, mode=w_mode,
+                    view=w_view, swim_filter=w_swim,
                 ))
             elif parsed.path == "/sources":
                 self.send_response(302)
