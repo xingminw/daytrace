@@ -3125,47 +3125,78 @@ def _main_chart_card(
 def _distribution_view_body(
     *, overall: "Counter", palette: dict[str, str], unit: str, mode: str,
 ) -> str:
-    """Promoted-legend view: one horizontal bar per dim value, sorted desc.
-    Shares the palette + value formatter with the histogram so colors and
-    units line up. Top 12 + "其它" rollup below."""
-    items = overall.most_common(12)
-    if not items:
+    """Promoted-legend view: donut on the left + horizontal bars per dim
+    value on the right (top 12 + 其它 rollup), sorted desc. Donut covers
+    the whole pie; bars give a sortable easy-to-read table next to it."""
+    items_all = list(overall.most_common())
+    if not items_all:
         return '<div class="muted">本周该维度无可用数据</div>'
 
-    rest_total = sum(v for _, v in overall.most_common()[12:])
-    if rest_total > 0:
-        items = items + [("其它", rest_total)]
-    grand_total = sum(v for _, v in overall.items()) or 1
-    max_val = max(v for _, v in items) or 1
+    grand_total = sum(v for _, v in items_all) or 1
+    items_top = overall.most_common(12)
+    rest_total = sum(v for _, v in items_all[12:])
+
     dim_label = {
         "project": "项目", "source": "数据源",
         "activity": "活动", "device_id": "设备",
     }.get(mode, mode)
 
+    # ── Donut (conic-gradient): every visible top item gets its own slice,
+    # everything beyond top-12 rolls into a single 其它 grey slice.
+    segs: list[str] = []
+    pos = 0.0
+    for name, value in items_top:
+        color = palette.get(name, _WEEKLY_OTHER_COLOR)
+        pct = value / grand_total * 100
+        end = pos + pct
+        segs.append(f"{color} {pos:.3f}% {end:.3f}%")
+        pos = end
+    if rest_total > 0:
+        segs.append(f"{_WEEKLY_OTHER_COLOR} {pos:.3f}% 100%")
+    donut_html = (
+        f'<div class="cc-donut" style="background:conic-gradient({", ".join(segs)})">'
+        '<div class="cc-donut-hole">'
+        f'<div class="cc-donut-total">{esc(_format_value(grand_total, unit))}</div>'
+        f'<div class="cc-donut-label">{esc(dim_label)}</div>'
+        '</div></div>'
+    )
+
+    # ── Bars (right column)
+    bar_items = list(items_top)
+    if rest_total > 0:
+        bar_items.append(("其它", rest_total))
+    max_val = max(v for _, v in bar_items) or 1
     rows_html = []
-    for name, value in items:
+    for name, value in bar_items:
         color = palette.get(name, _WEEKLY_OTHER_COLOR)
         share_pct = value / grand_total * 100
         bar_pct = value / max_val * 100
         rows_html.append(
-            '<div style="display:grid; grid-template-columns:14px minmax(140px,1.2fr) minmax(160px,2.5fr) 64px 44px; '
-            'align-items:center; gap:10px; padding:5px 0;">'
-            f'<span style="width:12px; height:12px; border-radius:3px; background:{color}; display:inline-block;"></span>'
-            f'<span class="cc-bar-name" title="{esc(name)}" style="font-weight:600; color:#3b352e;">{esc(name)}</span>'
-            f'<span style="height:10px; background:#ece3d2; border-radius:999px; overflow:hidden;">'
+            '<div style="display:grid; grid-template-columns:14px minmax(120px,1.2fr) minmax(140px,2.5fr) 60px 40px; '
+            'align-items:center; gap:10px; padding:4px 0;">'
+            f'<span style="width:11px; height:11px; border-radius:3px; background:{color}; display:inline-block;"></span>'
+            f'<span class="cc-bar-name" title="{esc(name)}" style="font-weight:600; color:#3b352e; font-size:12.5px;">{esc(name)}</span>'
+            f'<span style="height:9px; background:#ece3d2; border-radius:999px; overflow:hidden;">'
             f'<span style="display:block; height:100%; width:{bar_pct:.2f}%; background:{color}; border-radius:999px;"></span>'
             f'</span>'
-            f'<span style="text-align:right; font-size:13px; font-weight:700; font-variant-numeric:tabular-nums;">{esc(_format_value(value, unit))}</span>'
+            f'<span style="text-align:right; font-size:12.5px; font-weight:700; font-variant-numeric:tabular-nums;">{esc(_format_value(value, unit))}</span>'
             f'<span style="text-align:right; font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums;">{share_pct:.0f}%</span>'
             '</div>'
         )
 
     return (
-        '<div style="padding:4px 8px;">'
-        f'<div class="muted small" style="margin-bottom:6px;">'
-        f'按{esc(dim_label)}排序 · 共 {len(items)} 项'
+        # 2-col layout: donut on left, bars on right. The cc-* classes pull
+        # in styling from the daily composition card so the donut size /
+        # hole / label match.
+        '<div style="display:grid; grid-template-columns:auto 1fr; gap:24px; '
+        'align-items:center; padding:8px 8px 4px;">'
+        f'<div class="cc-donut-wrap" style="flex:none;">{donut_html}</div>'
+        '<div>'
+        f'<div class="muted small" style="margin-bottom:4px;">'
+        f'按{esc(dim_label)}排序 · 共 {len(bar_items)} 项'
         '</div>'
         + "".join(rows_html) +
+        '</div>'
         '</div>'
     )
 
