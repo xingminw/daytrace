@@ -2742,22 +2742,17 @@ def _weekly_dim_bar(
     *, week: str, prev_week: str, next_week: str,
     mode: str, unit: str, view: str, monday: str, sunday: str,
 ) -> str:
-    """Sticky global controls bar — same role as /today's dim-bar. Holds:
+    """Sticky global controls bar — holds:
       - week-nav (prev / next / open this week's events)
-      - unit pills (小时/事件数/字数)
-      - dim pills (项目/数据源/活动/设备)
+      - dim pills (项目/数据源/活动/设备) — applies to every visualization
 
-    All four params (week, mode, unit, view) are preserved across every
-    link so users navigate without losing state."""
+    Unit selector (小时/事件数/字数) was moved inside the top-chart card
+    because it only affects the histogram/distribution views; swim and
+    heatmap are inherently per-event count and ignore unit."""
     week_nav_inner = (
         f'<a href="{_weekly_url(week=prev_week, mode=mode, unit=unit, view=view)}">← 上一周 {esc(prev_week)}</a>'
         f'<a href="{_weekly_url(week=next_week, mode=mode, unit=unit, view=view)}">下一周 {esc(next_week)} →</a>'
         f'<a href="/events?start_from={esc(monday)}&start_to={esc(sunday)}">打开本周数据库</a>'
-    )
-    unit_bar = _pill_bar(
-        css_class="unit-tab", options=_WEEKLY_UNIT_OPTS, current=unit,
-        href_for=lambda v: _weekly_url(week=week, mode=mode, unit=v, view=view),
-        param_name="unit",
     )
     dim_bar = _pill_bar(
         css_class="dim-tab", options=_WEEKLY_DIM_OPTS, current=mode,
@@ -2768,8 +2763,7 @@ def _weekly_dim_bar(
         '<section class="dim-bar">'
         f'<div class="day-nav">{week_nav_inner}</div>'
         '<div class="dim-bar-right">'
-        f'<div title="按小时/条目数/字数统计">{unit_bar}</div>'
-        f'<div title="按哪个维度堆叠/上色">{dim_bar}</div>'
+        f'<div title="按哪个维度堆叠/上色（影响所有视图）">{dim_bar}</div>'
         '</div>'
         '</section>'
     )
@@ -3226,9 +3220,6 @@ def _hour_heatmap_card(
             r, g, b = 47, 111, 237  # fallback blue
         return f"rgba({r},{g},{b},{alpha:.2f})"
 
-    def dominant(b: dict[str, int]) -> str:
-        return max(b.items(), key=lambda kv: kv[1])[0]
-
     cells_html = []
     # Header row
     header = ['<div></div>']  # corner spacer
@@ -3250,27 +3241,42 @@ def _hour_heatmap_card(
         for d in days:
             cell_bins = dict(bins.get((d, h), {}))
             total = sum(cell_bins.values())
+            # Each cell is a flex row of horizontal segments — one per dim
+            # value present, width-weighted by its count. Same alpha (=
+            # total/max_total) on every segment in the cell so the whole
+            # cell still reads "denser = more events", but colors stay
+            # separated rather than blended.
             if total > 0:
-                dom = dominant(cell_bins)
-                color_hex = palette.get(dom, _WEEKLY_OTHER_COLOR)
                 alpha = 0.15 + 0.85 * (total / max_total)
-                bg = hex_to_rgba(color_hex, alpha)
-                fg = "white" if alpha > 0.55 else "var(--ink)"
-                label = str(total)
+                sorted_bins = sorted(cell_bins.items(), key=lambda kv: (-kv[1], kv[0]))
+                segments = []
+                for name, c in sorted_bins:
+                    color_hex = palette.get(name, _WEEKLY_OTHER_COLOR)
+                    segments.append(
+                        f'<span class="hm-seg" data-value="{esc(name)}" '
+                        f'style="background:{hex_to_rgba(color_hex, alpha)}; '
+                        f'flex:{c}; height:100%;"></span>'
+                    )
+                seg_html = "".join(segments)
+                label_html = (
+                    f'<span class="hm-cell-label" style="position:absolute; '
+                    f'inset:0; display:flex; align-items:center; justify-content:center; '
+                    f'font-size:10px; font-weight:700; '
+                    f'color:{"white" if alpha > 0.55 else "var(--ink)"}; '
+                    f'text-shadow:0 1px 2px rgba(0,0,0,0.28); pointer-events:none;">'
+                    f'{total}</span>'
+                )
             else:
-                bg = "transparent"
-                fg = "transparent"
-                label = ""
-            # data-bins encodes the breakdown so filter JS can recolor on
-            # the client without re-fetching anything.
+                seg_html = ""
+                label_html = ""
             bins_attr = esc(_json.dumps(cell_bins, ensure_ascii=False))
             row.append(
                 f'<div class="hm-cell" data-bins="{bins_attr}" '
                 f'data-total="{total}" data-day="{esc(d)}" data-hour="{h:02d}" '
                 f'title="{d} {h:02d}:00 · {total} events" '
-                f'style="background:{bg}; color:{fg}; height:18px; border-radius:3px; '
-                f'display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:600;">'
-                f'{label}</div>'
+                f'style="position:relative; height:18px; border-radius:3px; '
+                f'overflow:hidden; display:flex; align-items:stretch;">'
+                f'{seg_html}{label_html}</div>'
             )
         cells_html.append("".join(row))
 
@@ -3643,18 +3649,29 @@ def weekly_page(
         overall=overall_dim_totals, palette=palette, unit=unit, mode=mode,
     )
     top_chart_switcher = (
-        '<div class="dim-tabs" data-role="tc-switcher" style="margin-left:auto;">'
+        '<div class="dim-tabs" data-role="tc-switcher">'
         f'<button type="button" class="dim-tab{" active" if top_view == "chart" else ""}" data-view="chart">直方图</button>'
         f'<button type="button" class="dim-tab{" active" if top_view == "dist" else ""}" data-view="dist">分布</button>'
         '</div>'
+    )
+    # Unit pills lived in the global dim-bar in v8; moved here because they
+    # only affect the histogram/distribution views (swim + heat are
+    # inherently per-event count).
+    unit_pills = _pill_bar(
+        css_class="unit-tab", options=_WEEKLY_UNIT_OPTS, current=unit,
+        href_for=lambda v: _weekly_url(week=week, mode=mode, unit=v, view=view),
+        param_name="unit",
     )
     unit_label = dict(_WEEKLY_UNIT_OPTS).get(unit, unit)
     dim_label = dict(_WEEKLY_DIM_OPTS).get(mode, mode)
     top_histogram_card = (
         f'<div class="card top-chart-card" id="top-chart" data-tc-view="{esc(top_view)}">'
-        '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:6px;">'
+        '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">'
         f'<h3 style="margin:0;">每日 {esc(unit_label)} <span class="muted small" style="font-weight:500;">· 维度: {esc(dim_label)}</span></h3>'
+        '<div style="margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
+        f'<span class="muted small" style="font-weight:600;">单位</span>{unit_pills}'
         f'{top_chart_switcher}'
+        '</div>'
         '</div>'
         f'<div class="tc-pane" data-pane="chart">{main_chart_body}</div>'
         f'<div class="tc-pane" data-pane="dist">{dist_view_body}</div>'
@@ -3781,32 +3798,40 @@ def weekly_page(
         'if(h.length===3){h=h.split("").map(function(c){return c+c;}).join("");}'
         'var r=parseInt(h.slice(0,2),16),g=parseInt(h.slice(2,4),16),b=parseInt(h.slice(4,6),16);'
         'return "rgba("+r+","+g+","+b+","+a.toFixed(2)+")";}'
+        'function escHtml(s){return String(s==null?"":s).replace(/[&<>\\"]/g,function(c){'
+        'return({"&":"&amp;","<":"&lt;",">":"&gt;","\\"":"&quot;"})[c];});}'
         'function repaintHeat(filter){'
         'var heat=card.querySelector(".weekly-heat");'
         'if(!heat)return;'
         'var palette={};try{palette=JSON.parse(heat.dataset.palette||"{}");}catch(e){}'
         'var OTHER="#cbd5e1";'
         'var cells=heat.querySelectorAll(".hm-cell");'
-        # First pass: compute max for current filter
+        # First pass: compute max for current filter mode
         'var maxC=0;'
         'cells.forEach(function(c){'
         'var bins={};try{bins=JSON.parse(c.dataset.bins||"{}");}catch(e){}'
         'var n=filter==="all"?parseInt(c.dataset.total||"0",10):(bins[filter]||0);'
         'if(n>maxC)maxC=n;});'
         'if(maxC<1)maxC=1;'
-        # Second pass: repaint
+        # Second pass: rebuild each cell's innerHTML
+        # filter=all  → segments per value, widths weighted by count
+        # filter=X    → single segment for X (or empty if no X events)
         'cells.forEach(function(c){'
         'var bins={};try{bins=JSON.parse(c.dataset.bins||"{}");}catch(e){}'
-        'var n,color;'
-        'if(filter==="all"){n=parseInt(c.dataset.total||"0",10);'
-        'var dom=null,dc=0;for(var k in bins){if(bins[k]>dc){dc=bins[k];dom=k;}}'
-        'color=palette[dom]||OTHER;'
-        '}else{n=bins[filter]||0;color=palette[filter]||OTHER;}'
-        'if(n===0){c.style.background="transparent";c.style.color="transparent";c.textContent="";}'
-        'else{var a=0.15+0.85*(n/maxC);'
-        'c.style.background=hexToRgba(color,a);'
-        'c.style.color=a>0.55?"white":"var(--ink)";'
-        'c.textContent=n;}});}'
+        'var total=parseInt(c.dataset.total||"0",10);'
+        'var entries;var n;'
+        'if(filter==="all"){entries=Object.keys(bins).map(function(k){return [k,bins[k]];})'
+        '.sort(function(a,b){return b[1]-a[1]||(a[0]<b[0]?-1:1);});n=total;}'
+        'else{n=bins[filter]||0;entries=n>0?[[filter,n]]:[];}'
+        'if(n===0){c.innerHTML="";return;}'
+        'var a=0.15+0.85*(n/maxC);'
+        'var segHtml=entries.map(function(e){'
+        'var col=palette[e[0]]||OTHER;'
+        'return \'<span class="hm-seg" data-value="\'+escHtml(e[0])+\'" style="background:\'+hexToRgba(col,a)+\'; flex:\'+e[1]+\'; height:100%;"></span>\';'
+        '}).join("");'
+        'var labelColor=a>0.55?"white":"var(--ink)";'
+        'var labelHtml=\'<span class="hm-cell-label" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:\'+labelColor+\'; text-shadow:0 1px 2px rgba(0,0,0,0.28); pointer-events:none;">\'+n+\'</span>\';'
+        'c.innerHTML=segHtml+labelHtml;});}'
         'function applyFilter(v){'
         'card.setAttribute("data-filter",v);'
         # swim ticks
