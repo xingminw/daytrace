@@ -222,24 +222,65 @@ def _load_secrets() -> dict:
 
 _EMAIL_CSS = """
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif; color:#2b2722; font-size:16px; line-height:1.75; max-width:760px; margin:0 auto; padding:32px 28px; background:#fafaf7; }
-  .links { background:#fff7e8; border:1px dashed #f0d68b; border-radius:12px; padding:18px 20px; margin-bottom:26px; font-size:15px; }
-  .links a { display:block; margin:6px 0; color:#2f6fed; text-decoration:none; font-weight:600; line-height:1.5; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
+    color:#2b2722; font-size:16px; line-height:1.75; max-width:780px;
+    margin:0 auto; padding:36px 28px 48px;
+    background: linear-gradient(180deg, #fdfaf2 0%, #fafaf7 80px, #fafaf7 100%);
+  }
+
+  /* Top brand strip */
+  .brand { font-size:11px; font-weight:700; letter-spacing:0.22em; color:#9b8f7d; text-transform:uppercase; margin-bottom:18px; padding-bottom:10px; border-bottom:2px solid #f0d68b; }
+
+  /* Header card with the two action links */
+  .links { background:linear-gradient(135deg, #fff7e8 0%, #fef3d4 100%); border:1px solid #f0d68b; border-radius:14px; padding:20px 22px; margin-bottom:28px; box-shadow:0 1px 3px rgba(180,140,40,0.06); }
+  .links a { display:block; margin:6px 0; color:#2f6fed; text-decoration:none; font-weight:600; line-height:1.55; }
   .links a:hover { text-decoration:underline; }
-  .links .lbl { display:inline-block; min-width:108px; color:#6b6052; font-weight:500; margin-right:8px; }
-  h1 { font-size:30px; margin:28px 0 14px; color:#1a1814; letter-spacing:-0.01em; }
-  h2 { font-size:22px; margin:32px 0 12px; color:#1a1814; border-bottom:1px dashed #e0d7c5; padding-bottom:8px; letter-spacing:-0.005em; }
-  h3 { font-size:17px; margin:22px 0 8px; color:#3b352e; }
+  .links .lbl { display:inline-block; min-width:122px; color:#6b6052; font-weight:600; margin-right:10px; font-size:13px; }
+
+  /* Headings */
+  h1 { font-size:30px; margin:8px 0 14px; color:#1a1814; letter-spacing:-0.012em; font-weight:800; }
+  h2 { font-size:21px; margin:36px 0 14px; color:#1a1814; padding:8px 0 8px 14px; border-left:4px solid #f59e0b; background:rgba(245,158,11,0.05); border-radius:0 6px 6px 0; }
+  h3 { font-size:16.5px; margin:24px 0 8px; color:#3b352e; padding-left:8px; border-left:3px solid #2f6fed; }
+
+  /* Paragraphs + emphasis */
   p  { margin:12px 0 16px; }
   strong { color:#1a1814; font-weight:700; }
-  ul { margin:10px 0 16px; padding-left:26px; }
-  li { margin:6px 0; line-height:1.7; }
-  hr { border:0; border-top:1px dashed #e0d7c5; margin:24px 0; }
-  em { color:#7a6f5f; font-style:normal; font-size:14px; }
-  code { background:#f3ecd9; padding:2px 7px; border-radius:5px; font-family:ui-monospace, monospace; font-size:14px; }
-  img { max-width:100%; height:auto; border-radius:8px; margin:16px 0; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  em { color:#7a6f5f; font-style:normal; font-size:13.5px; }
+
+  /* Blockquote = narrative paragraph */
+  blockquote { margin:14px 0 22px; padding:14px 20px; background:#fff7e8; border-left:3px solid #f59e0b; border-radius:0 8px 8px 0; color:#3b352e; font-size:15.5px; line-height:1.8; }
+  blockquote p { margin:6px 0; }
+
+  /* Lists */
+  ul { margin:10px 0 18px; padding-left:24px; }
+  li { margin:7px 0; line-height:1.7; }
+
+  /* Table = dashboard stats grid */
+  table { width:100%; border-collapse:separate; border-spacing:0; margin:12px 0 24px; background:white; border:1px solid #ecdfc4; border-radius:10px; overflow:hidden; box-shadow:0 1px 2px rgba(180,140,40,0.04); }
+  thead { background:#fdf6e3; }
+  th { text-align:left; padding:10px 14px; font-size:12.5px; font-weight:700; color:#6b6052; letter-spacing:0.04em; text-transform:uppercase; border-bottom:1px solid #ecdfc4; }
+  td { padding:11px 14px; font-size:15px; border-bottom:1px solid #f3ecd9; vertical-align:middle; }
+  tr:last-child td { border-bottom:0; }
+  td strong { color:#1a1814; font-size:17px; font-weight:800; }
+
+  /* Inline code chips (used for 变化趋势 label) */
+  code { background:#f3ecd9; color:#5a4a2e; padding:3px 9px; border-radius:6px; font-family:ui-monospace, "SF Mono", Menlo, monospace; font-size:13px; font-weight:600; letter-spacing:0.02em; }
+
+  /* Images = charts */
+  img { max-width:100%; height:auto; border-radius:10px; margin:18px 0; box-shadow:0 2px 8px rgba(45,30,10,0.08); border:1px solid #f3ecd9; }
+
+  /* Horizontal rules: barely there */
+  hr { border:0; border-top:1px dashed #e0d7c5; margin:28px 0; }
+
+  /* Footer */
+  body > p:last-child em,
+  body > p:last-of-type em { color:#9b8f7d; }
 </style>
 """.strip()
+
+
+_BRAND_STRIP = '<div class="brand">DAYTRACE · 个人工作复盘</div>'
 
 
 def _md_to_html(md_text: str, *, chart_names: list[str] | None = None) -> str:
@@ -322,9 +363,11 @@ def email_report(*, kind: str, key: str, md_text: str,
     chart_names = [p.name for p in (chart_paths or []) if p.exists()]
     md_with_links = _links_block_md(links) + md_text
     html_body = _md_to_html(md_text, chart_names=chart_names)
-    # Inject the styled links box right after <body>
+    # Inject brand strip + styled links box right after <body>
+    inject = _BRAND_STRIP
     if links:
-        html_body = html_body.replace("<body>", "<body>" + _links_block_html(links), 1)
+        inject += _links_block_html(links)
+    html_body = html_body.replace("<body>", "<body>" + inject, 1)
 
     msg = EmailMessage()
     msg["Subject"] = subject

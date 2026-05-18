@@ -1,26 +1,21 @@
-"""Offline report export — render daily / weekly reports as standalone
-HTML (single self-contained file) + Markdown summary, decoupled from
-the dashboard HTTP server.
+"""Offline report export — render daily / weekly reports as Markdown
+summaries that are styled enough to read well on their own (in email,
+in a Feishu Docs import, anywhere).
 
-Two output formats:
-  • HTML  — single file with inlined CSS, no JS dependency on the
-            server. Drop in email, Feishu drive, anywhere. Charts
-            and 4-tile dashboard preserved.
-  • MD    — pure-text summary suitable for email body or chat. Charts
-            dropped; AI narrative + 3-col Insights kept.
+Public API:
+    archive_markdown_for_date(db_path, date, chart_names=[...]) -> str
+    archive_markdown_for_week(db_path, week, chart_names=[...]) -> str
 
-Usage (programmatic):
-    from daytrace.report_export import (
-        archive_html_for_date, archive_html_for_week,
-        archive_markdown_for_date, archive_markdown_for_week,
-    )
+Charts (PNGs) are written separately by the caller (see
+`daytrace.report_charts`); we just inject `![](./<name>)` references so
+both lark-cli's docx import and the email renderer's cid: rewrite pick
+them up.
 
 CLI: see scripts/export_report.py
 """
 from __future__ import annotations
 
 import json
-import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -29,79 +24,6 @@ from typing import Any
 
 def _now_iso() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M")
-
-
-# ───── HTML post-processing ──────────────────────────────────────────────
-
-# What we strip from the live-server HTML to make it self-contained and
-# non-interactive:
-#   • <header>…</header>          — page nav (toggle pills, day-switcher,
-#                                    DB button) — useless offline
-#   • <form …>…</form>             — filter forms that POST to the server
-#   • <script>…</script>           — interactive JS (view-switchers,
-#                                    scroll-restore, sticky-header). The
-#                                    default CSS view stays visible.
-#   • <a href="/…">                — server-relative links → neutralized
-#
-# We then prepend an "archive banner" inside <main>.
-
-_HEADER_RE = re.compile(r"<header>.*?</header>", re.DOTALL)
-_FORM_RE   = re.compile(r"<form\b[^>]*>.*?</form>", re.DOTALL)
-_SCRIPT_RE = re.compile(r"<script\b[^>]*>.*?</script>", re.DOTALL)
-# Internal anchor href starts with /  (e.g. /today?date=..., /events?...)
-_INTERNAL_HREF_RE = re.compile(r'href="(/[^"]*)"')
-
-
-def _archive_banner_html(kind: str, key: str) -> str:
-    label = "每日" if kind == "daily" else "每周"
-    return (
-        '<div class="archive-banner" style="'
-        'margin:0 auto 16px; padding:10px 14px; '
-        'background:#fff7e8; border:1px dashed #f0d68b; '
-        'border-radius:10px; font-size:13px; color:#5a4a2e; '
-        'display:flex; align-items:center; gap:10px;">'
-        '<span style="font-size:16px;">📦</span>'
-        f'<span><b>{label}归档</b> · {key} · 生成于 {_now_iso()}'
-        ' · 此版本为数据快照,无交互;原始 dashboard 链接已禁用</span>'
-        '</div>'
-    )
-
-
-def _strip_to_archive_html(live_html: str, kind: str, key: str) -> str:
-    """Take a full-page HTML string from today_page/weekly_page and turn
-    it into a self-contained archive: no nav, no forms, no JS, internal
-    anchors neutralized, banner injected."""
-    html = live_html
-    html = _HEADER_RE.sub("", html)
-    html = _FORM_RE.sub("", html)
-    html = _SCRIPT_RE.sub("", html)
-    # Neutralize internal anchors — keep the text but disable the link
-    # (offline reader can't reach the server).
-    html = _INTERNAL_HREF_RE.sub(
-        lambda m: 'href="#" data-archived-href="' + m.group(1) + '" '
-                  'title="离线归档版本,链接已禁用" '
-                  'style="pointer-events:none; color:inherit; '
-                  'text-decoration:none; opacity:0.7;"',
-        html,
-    )
-    # Inject banner right after <main>
-    html = html.replace("<main>", "<main>" + _archive_banner_html(kind, key), 1)
-    return html
-
-
-def archive_html_for_date(db_path: Path, date: str) -> str:
-    """Render the daily report as a self-contained archive HTML string."""
-    # Import lazily to avoid circular import (server imports many things).
-    from dashboard.server import today_page
-    live = today_page(db_path, date)
-    return _strip_to_archive_html(live, "daily", date)
-
-
-def archive_html_for_week(db_path: Path, week: str) -> str:
-    """Render the weekly report as a self-contained archive HTML string."""
-    from dashboard.server import weekly_page
-    live = weekly_page(db_path, week)
-    return _strip_to_archive_html(live, "weekly", week)
 
 
 # ───── Markdown export ───────────────────────────────────────────────────
@@ -134,22 +56,40 @@ def _load_day_channels(con: sqlite3.Connection, date: str) -> dict[str, Any]:
     return out
 
 
-def _md_dashboard_line(header: dict, channels: dict[str, Any], ai_cost: float | None) -> str:
+def _md_dashboard_table_daily(header: dict, channels: dict[str, Any], ai_cost: float | None) -> str:
+    """4-row dashboard table for daily reports — renders cleanly in both
+    Feishu Docs (table block) and Gmail HTML (styled <table>)."""
     switches = channels.get("context_switches") or {}
     longest = channels.get("longest_focus_block") or {}
-    bits = [
-        f"**事件总数** {header['total_events']} · 切换 {switches.get('count', 0)} 次",
-        f"**活跃** {_format_duration_short(header['active_minutes'])}",
+    rows = [
+        ("📝", "事件总数", f"{header['total_events']}", f"切换 {switches.get('count', 0)} 次"),
+        ("⏱", "活跃总时长", _format_duration_short(header['active_minutes']), ""),
     ]
     if longest:
-        bits.append(
-            f"**最长专注** {_format_duration_short(longest.get('duration_min', 0))} "
-            f"({longest.get('start','?')}–{longest.get('end','?')} · "
-            f"{longest.get('dominant_project','?')})"
-        )
+        rows.append((
+            "🎯", "最长专注",
+            _format_duration_short(longest.get('duration_min', 0)),
+            f"{longest.get('start','?')}–{longest.get('end','?')} · {longest.get('dominant_project','?')}",
+        ))
     if ai_cost is not None:
-        bits.append(f"**AI 花费** ${ai_cost:.3f}")
-    return " · ".join(bits)
+        rows.append(("💸", "AI 花费", f"${ai_cost:.3f}", "当天累计"))
+    lines = ["|  | 指标 | 数值 | 备注 |", "|---|---|---|---|"]
+    for emoji, name, val, note in rows:
+        lines.append(f"| {emoji} | {name} | **{val}** | {note} |")
+    return "\n".join(lines)
+
+
+def _md_dashboard_table_weekly(*, total_events: int, total_active_min: float,
+                               active_days: int, ai_cost: float) -> str:
+    """4-row dashboard table for weekly reports."""
+    lines = [
+        "|  | 指标 | 数值 | 备注 |", "|---|---|---|---|",
+        f"| 📝 | 事件总数 | **{total_events}** | 全周累计 |",
+        f"| ⏱ | 活跃总时长 | **{total_active_min/60:.1f}h** | 估算 |",
+        f"| 📅 | 活跃天数 | **{active_days}/7** | {'满勤' if active_days == 7 else f'空白 {7-active_days} 天'} |",
+        f"| 💸 | AI 花费 | **${ai_cost:.3f}** | 本周累计 |",
+    ]
+    return "\n".join(lines)
 
 
 def _md_trend_line(ai_overview: dict | None) -> str:
@@ -162,7 +102,9 @@ def _md_trend_line(ai_overview: dict | None) -> str:
     comparison = (tr.get("comparison") or "").strip()
     chip = {"rising": "↗", "steady": "→", "dropping": "↘",
             "new": "✦", "paused": "⏸", "blocked": "🚧"}.get(direction, "→")
-    return f"**变化趋势** {chip} {direction or 'steady'} — {comparison}".strip()
+    # Plain paragraph with inline-code label — renders nicely in both
+    # Feishu (inline code styling) and Gmail (CSS-styled <code>).
+    return f"`变化趋势` {chip} **{direction or 'steady'}** — {comparison}".strip()
 
 
 def _md_insights(ai_overview: dict | None) -> str:
@@ -182,14 +124,23 @@ def _md_insights(ai_overview: dict | None) -> str:
 
 
 def _insert_charts_block(md_lines: list[str], chart_names: list[str]) -> None:
-    """In-place: append a '## 图表' section linking to the named PNG files.
-    The MD is read by `lark-cli drive +import` which inlines local images;
-    in email, the same names are also embedded as cid:NAME inline attachments."""
+    """Append a '## 📊 数据可视化' section with each chart under its own
+    subheading. lark-cli +import inlines the local PNGs into the docx;
+    email's add_related() embeds them as cid:NAME inline attachments."""
     if not chart_names:
         return
-    md_lines.append("## 图表")
+    titles = {
+        "hist":  "任务时间分布(按时段)",
+        "donut": "任务总览",
+    }
+    md_lines.append("## 📊 数据可视化")
     md_lines.append("")
     for name in chart_names:
+        # name = "<key>-<chart_key>.png" → extract chart_key for a friendly heading
+        chart_key = name.rsplit("-", 1)[-1].split(".")[0] if "-" in name else "chart"
+        title = titles.get(chart_key, chart_key)
+        md_lines.append(f"### {title}")
+        md_lines.append("")
         md_lines.append(f"![{name}](./{name})")
         md_lines.append("")
 
@@ -213,37 +164,54 @@ def archive_markdown_for_date(db_path: Path, date: str, *,
         "WHERE date=? AND generator='ai'", (date,)
     ).fetchone()[0] or 0.0
 
-    parts: list[str] = [f"# 每日 Report · {date}", ""]
-    parts.append(_md_dashboard_line(dict(row), channels, float(ai_cost)))
-    parts.append("")
+    parts: list[str] = [
+        f"# 📊 每日 Report · {date}",
+        "",
+        f"> **{date}** · 工作日复盘 · 数据来源:本机 + 远程设备 ssh catchup",
+        "",
+        _md_dashboard_table_daily(dict(row), channels, float(ai_cost)),
+        "",
+        "---",
+        "",
+    ]
 
     if ai_overview:
         headline = ai_overview.get("headline") or ""
         ov = ai_overview.get("overview")
         narrative = (ov or {}).get("narrative") if isinstance(ov, dict) else ai_overview.get("narrative")
         if headline:
-            parts.append(f"## 📰 {headline}")
+            parts.append(f"## ✨ {headline}")
             parts.append("")
         if narrative:
-            parts.append(narrative.strip())
+            # Blockquote highlights the narrative — visually anchors the page.
+            for line in narrative.strip().split("\n"):
+                parts.append(f"> {line}" if line.strip() else ">")
             parts.append("")
         trend_line = _md_trend_line(ai_overview)
         if trend_line:
             parts.append(trend_line)
             parts.append("")
+        # Charts go between narrative and insights — visual breather.
+        if chart_names:
+            parts.append("---")
+            parts.append("")
+            _insert_charts_block(parts, chart_names)
+            parts.append("---")
+            parts.append("")
         insights = _md_insights(ai_overview)
         if insights:
-            parts.append("## Insights")
+            parts.append("## 💡 Insights")
             parts.append("")
             parts.append(insights)
             parts.append("")
     else:
         parts.append("_(AI overview 未生成 — DEEPSEEK_API_KEY 未配置或 backfill 未跑)_")
         parts.append("")
+        if chart_names:
+            _insert_charts_block(parts, chart_names)
 
-    _insert_charts_block(parts, chart_names or [])
     parts.append("---")
-    parts.append(f"_DayTrace 归档 · 生成于 {_now_iso()}_")
+    parts.append(f"🌿 _DayTrace 归档 · 生成于 {_now_iso()}_")
     return "\n".join(parts)
 
 
@@ -283,41 +251,56 @@ def archive_markdown_for_week(db_path: Path, week: str, *,
         except Exception:
             summary = None
 
-    parts: list[str] = [f"# 周报 · {week} ({monday} ~ {sunday})", ""]
-    dashboard_bits = [
-        f"**事件总数** {total_events}",
-        f"**活跃总时长** {total_active_min/60:.1f}h",
-        f"**活跃天数** {active_days}/7",
-        f"**AI 花费** ${ai_cost:.3f}",
+    parts: list[str] = [
+        f"# 📊 周报 · {week}",
+        "",
+        f"> **{monday} ~ {sunday}** · ISO Week {week.split('-W')[-1]} · "
+        f"{active_days}/7 天活跃 · {total_active_min/60:.1f}h 总投入",
+        "",
+        _md_dashboard_table_weekly(
+            total_events=total_events,
+            total_active_min=total_active_min,
+            active_days=active_days,
+            ai_cost=float(ai_cost),
+        ),
+        "",
+        "---",
+        "",
     ]
-    parts.append(" · ".join(dashboard_bits))
-    parts.append("")
 
     if summary:
         headline = summary.get("headline") or ""
         ov = summary.get("overview")
         narrative = (ov or {}).get("narrative") if isinstance(ov, dict) else summary.get("narrative")
         if headline:
-            parts.append(f"## 📰 {headline}")
+            parts.append(f"## ✨ {headline}")
             parts.append("")
         if narrative:
-            parts.append(narrative.strip())
+            for line in narrative.strip().split("\n"):
+                parts.append(f"> {line}" if line.strip() else ">")
             parts.append("")
         trend_line = _md_trend_line(summary)
         if trend_line:
             parts.append(trend_line)
             parts.append("")
+        if chart_names:
+            parts.append("---")
+            parts.append("")
+            _insert_charts_block(parts, chart_names)
+            parts.append("---")
+            parts.append("")
         insights = _md_insights(summary)
         if insights:
-            parts.append("## Insights")
+            parts.append("## 💡 Insights")
             parts.append("")
             parts.append(insights)
             parts.append("")
     else:
         parts.append("_(本周 AI 速读未生成 — 请先访问 /weekly?week=" + week + " 触发)_")
         parts.append("")
+        if chart_names:
+            _insert_charts_block(parts, chart_names)
 
-    _insert_charts_block(parts, chart_names or [])
     parts.append("---")
-    parts.append(f"_DayTrace 归档 · 生成于 {_now_iso()}_")
+    parts.append(f"🌸 _DayTrace 归档 · 生成于 {_now_iso()}_")
     return "\n".join(parts)
