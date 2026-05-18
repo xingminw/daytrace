@@ -1,14 +1,43 @@
-# config/work_items.yaml — Feishu work-items table to mirror locally.
-# Read-only on the Feishu side. Disabling this just hides the Tasks panel +
-# 任务 dim option; nothing else breaks.
+# config/work_items.yaml — Feishu Bitables to mirror locally.
+# Read-only on the Feishu side. Disabling this just hides the Tasks panel
+# + 任务 dim option; nothing else breaks.
 
 enabled: true
 
-# Feishu Bitable identifiers. Found via:
-#   lark-cli drive +search --query "<your table name>" --doc-types bitable
-# Then look at the result's `icon_info.token` (app_token) and
-#   lark-cli base +table-list --as user --base-token <app_token>
-# for table_id.
-app_token: F9p4bjm24axBY8sd8macJIySnYe
-table_id:  tbldFwiuV4K0l2Lp
-as:        user
+# 1..N tables. Each table gets a `key` (local id used as table_key in
+# SQLite + as a chip label) and a `field_map` mapping logical names →
+# actual Feishu column names. Tables can have different column schemas;
+# missing keys in field_map are simply not stored.
+tables:
+
+  - key: tasks
+    name: 任务
+    app_token: F9p4bjm24axBY8sd8macJIySnYe
+    table_id:  tbldFwiuV4K0l2Lp
+    as: user
+    field_map:
+      title:            任务
+      status:           状态
+      priority:         重要程度
+      tags:             标签
+      subtitle:         项目来源
+      due_date:         截止时间
+      next_action_date: 下一步时间
+      weekly_hours:     每周预计投入
+      next_action:      下一步动作
+      agent_workspace:  Agent 工作区
+      external_links:   [外部链接 1, 外部链接 2, 外部链接 3]
+
+  - key: reviews
+    name: 审稿
+    app_token: FJTLbsd6RaP1omsbvYDcuN5ZnTe
+    table_id:  tblQW1NW564DUa1D
+    as: user
+    field_map:
+      title:    题目
+      status:   状态
+      tags:     期刊        # 期刊 (journal) plays the "tags" role here
+      subtitle: 稿件编号
+      due_date: 截止日期
+      # 备注 contains GitHub issue URLs in plain text; we parse them out.
+      external_links: [工作区链接, 备注]

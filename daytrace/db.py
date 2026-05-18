@@ -7,7 +7,7 @@ from typing import Iterable, Any
 
 from .schema import TraceEvent
 
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 DEFAULT_DEVICE_ID = "Mac"
 DEFAULT_LOCATION_ID = "unknown"
 DEFAULT_COLLECTOR_ID = "hub-local"
@@ -212,22 +212,26 @@ CREATE INDEX IF NOT EXISTS idx_device_pull_log_date ON device_pull_log(date);
 -- snapshot; we never write back to Feishu in v11.
 CREATE TABLE IF NOT EXISTS work_items (
   record_id        TEXT PRIMARY KEY,            -- 飞书 record id
-  title            TEXT NOT NULL,               -- 任务
+  table_key        TEXT NOT NULL DEFAULT 'tasks', -- which configured table (tasks / reviews / …)
+  title            TEXT NOT NULL,               -- 任务 / 题目 / …
+  subtitle         TEXT,                        -- 项目来源 / 稿件编号 / …
   status           TEXT,                        -- 待办 / 进行中 / 完成
-  priority         TEXT,                        -- P0..P3
-  tags             TEXT,                        -- JSON array
-  project_source   TEXT,                        -- 项目来源 (free text)
+  priority         TEXT,                        -- P0..P3 (任务 only)
+  tags             TEXT,                        -- JSON array (标签 / 期刊)
+  project_source   TEXT,                        -- legacy alias of subtitle for tasks
   external_links   TEXT,                        -- JSON array of URLs
-  due_date         TEXT,                        -- 截止时间 (YYYY-MM-DD)
-  next_action_date TEXT,                        -- 下一步时间
-  weekly_hours     REAL,                        -- 每周预计投入
+  due_date         TEXT,                        -- YYYY-MM-DD
+  next_action_date TEXT,                        -- 下一步时间 (任务 only)
+  weekly_hours     REAL,                        -- 每周预计投入 (任务 only)
   next_action      TEXT,                        -- 下一步动作
-  agent_workspace  TEXT,                        -- Agent 工作区 (kept read-only)
+  agent_workspace  TEXT,                        -- Agent 工作区 (任务 only, kept read-only)
   last_synced_at   TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   raw_fields_json  TEXT                         -- full row dump for debugging
 );
 CREATE INDEX IF NOT EXISTS idx_work_items_status ON work_items(status);
 CREATE INDEX IF NOT EXISTS idx_work_items_priority ON work_items(priority);
+-- table_key index is created post-migration in init_db (the v11→v12 ALTER
+-- TABLE in _ensure_column has to run before we can index this column).
 -- (event, work_item) bridge — multiple match strategies stamp distinct rows;
 -- the consumer picks the highest-confidence link per event.
 CREATE TABLE IF NOT EXISTS event_work_item_links (
@@ -324,6 +328,11 @@ def init_db(con: sqlite3.Connection) -> None:
     )
     _drop_column_if_exists(con, "events", "category")
     _drop_column_if_exists(con, "events", "confidence")
+    # work_items v12 migration: existing v11 rows had table_key/subtitle missing
+    _ensure_column(con, "work_items", "table_key",
+                   "table_key TEXT NOT NULL DEFAULT 'tasks'")
+    _ensure_column(con, "work_items", "subtitle", "subtitle TEXT")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_work_items_table_key ON work_items(table_key)")
     seed_single_machine_defaults(con)
     con.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",

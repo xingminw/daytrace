@@ -4172,17 +4172,35 @@ def _chip(text: str, palette: tuple[str, str] | None) -> str:
     )
 
 
-def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
-    """┃ Tasks panel ┃ — per-task time + last activity + due chip.
-    Scope: rows are ALL work_items; the time/event columns are scoped to
-    `days`, the last_activity column is all-time.
+_TABLE_KEY_COLOR = {
+    "tasks":   ("#dcf3e3", "#1f7a3e"),
+    "reviews": ("#e9e4ff", "#5a3fb8"),
+}
 
-    Returns "" if work_items table is empty (feature disabled / not synced)."""
+
+def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
+    """┃ Tasks panel ┃ — multi-table list of work_items with per-window
+    activity stats, sortable columns, and a "hide completed" toggle.
+
+    Returns "" if work_items table is empty (sync disabled / never run).
+
+    Each row carries `data-*` attributes used by client-side JS to:
+    - Sort by any header column (numeric vs text resolved per-column).
+    - Filter out rows whose status === "完成" when the toggle is off.
+    """
     from daytrace.work_items import list_work_items
     items = list_work_items(con)
     if not items:
         return ""
     stats = _compute_task_stats(con, days, boundary_hour)
+
+    # Group label helper — fetch each table's display name
+    table_labels = {}
+    for r in con.execute(
+        "SELECT DISTINCT table_key FROM work_items"
+    ).fetchall():
+        tk = r["table_key"]
+        table_labels[tk] = {"tasks": "任务", "reviews": "审稿"}.get(tk, tk)
 
     rows_html = []
     for wi in items:
@@ -4191,10 +4209,10 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         minutes = st.get("minutes", 0)
         ev_count = st.get("event_count", 0)
         last_iso = st.get("last_activity")
-        # Compose row
         status = wi.get("status") or ""
         priority = wi.get("priority") or ""
-        # External links (first one)
+        table_key = wi.get("table_key") or "tasks"
+        # External link button
         ext = wi.get("external_links") or []
         link_html = ""
         if isinstance(ext, list) and ext:
@@ -4203,13 +4221,19 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
                 f'title="{esc(ext[0])}" style="color:#2f6fed; font-size:10px; '
                 f'margin-left:6px;">↗</a>'
             )
-        # Inactivity warning: P0/P1 & 进行中-or-待办 & no activity in window
+        # ⚠ when high-priority + stale in window
         is_stale = (
             status in ("进行中", "待办")
             and priority in ("P0", "P1")
             and ev_count == 0
         )
+        subtitle = wi.get("subtitle") or wi.get("project_source") or ""
+        subtitle_html = (
+            f'<div style="font-size:10.5px; color:var(--muted); margin-top:2px;">{esc(subtitle)}</div>'
+            if subtitle else ""
+        )
         title_html = (
+            '<div style="line-height:1.25;">'
             f'<span style="font-weight:600; color:#3b352e;">{esc(wi.get("title") or "")}</span>'
             f'{link_html}'
         )
@@ -4218,6 +4242,7 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
                 '<span style="margin-left:8px; color:#b32a2a; font-size:11px;" '
                 'title="高优先级任务但本期零活动">⚠</span>'
             )
+        title_html += f"{subtitle_html}</div>"
 
         time_html = (
             f'<span style="font-variant-numeric:tabular-nums; font-weight:700;">'
@@ -4232,9 +4257,24 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
             '<span class="muted">·</span>'
         )
 
+        # Sortable data-* attrs: numeric where applicable, "" → fallback to bottom
+        from datetime import date as _date_mod
+        due_sort = wi.get("due_date") or "9999-12-31"
+        priority_sort = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}.get(priority, 9)
+        status_sort = {"进行中": 0, "待办": 1, "完成": 2}.get(status, 9)
+        last_sort = last_iso or "0000"
         rows_html.append(
-            '<tr>'
-            f'<td>{_chip(priority, _PRIORITY_COLOR.get(priority))}</td>'
+            f'<tr class="task-row" data-status="{esc(status)}" '
+            f'data-status-sort="{status_sort}" '
+            f'data-priority-sort="{priority_sort}" '
+            f'data-table="{esc(table_key)}" '
+            f'data-hours="{minutes / 60.0:.4f}" '
+            f'data-events="{ev_count}" '
+            f'data-due-sort="{esc(due_sort)}" '
+            f'data-last-sort="{esc(last_sort)}" '
+            f'data-title="{esc(wi.get("title") or "")}">'
+            f'<td>{_chip(table_labels.get(table_key, table_key), _TABLE_KEY_COLOR.get(table_key))}</td>'
+            f'<td>{_chip(priority, _PRIORITY_COLOR.get(priority)) or chr(0x2014)}</td>'
             f'<td>{_chip(status, _STATUS_COLOR.get(status))}</td>'
             f'<td>{title_html}</td>'
             f'<td style="text-align:right;">{time_html}</td>'
@@ -4244,38 +4284,117 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
             '</tr>'
         )
 
-    # Summary line for the panel header
+    # Counters per table + stale warning
+    counts: dict[str, int] = {}
+    for wi in items:
+        counts[wi.get("table_key") or "tasks"] = counts.get(wi.get("table_key") or "tasks", 0) + 1
     active_p01_stale = sum(
         1 for wi in items
         if wi.get("status") in ("进行中", "待办")
         and wi.get("priority") in ("P0", "P1")
         and stats.get(wi["record_id"], {}).get("event_count", 0) == 0
     )
-    total_count = len(items)
-    summary_bits = [f"{total_count} 个任务"]
+    completed_count = sum(1 for wi in items if wi.get("status") == "完成")
+
+    summary_bits = []
+    for tk, n in counts.items():
+        summary_bits.append(f"{table_labels.get(tk, tk)} {n}")
     if active_p01_stale:
         summary_bits.append(f'<span style="color:#b32a2a;">{active_p01_stale} 个 P0/P1 本期零活动</span>')
     summary_line = " · ".join(summary_bits)
 
+    # Toggle pill: hide / show completed
+    toggle_html = (
+        '<label class="tasks-show-completed" style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); cursor:pointer; user-select:none;">'
+        '<input type="checkbox" data-role="tasks-show-completed" '
+        f'{"checked" if completed_count == 0 else ""}'
+        ' style="cursor:pointer;">'
+        f'显示已完成 ({completed_count})'
+        '</label>'
+    )
+
+    # Header cells with sort affordance
+    def thead_cell(label: str, sort_key: str, *, align: str = "left", default_dir: str = "asc") -> str:
+        return (
+            f'<th data-sort="{sort_key}" data-default-dir="{default_dir}" '
+            f'style="text-align:{align}; cursor:pointer; user-select:none;">'
+            f'{esc(label)} <span class="sort-arrow" style="color:var(--muted); font-size:10px;">↕</span>'
+            '</th>'
+        )
+    thead_html = (
+        '<tr>'
+        + thead_cell("源", "table", default_dir="asc")
+        + thead_cell("P",  "priority", default_dir="asc")
+        + thead_cell("状态","status",   default_dir="asc")
+        + thead_cell("任务","title",    default_dir="asc")
+        + thead_cell("时长","hours",    align="right", default_dir="desc")
+        + thead_cell("事件","events",   align="right", default_dir="desc")
+        + thead_cell("最近活动","last",  default_dir="desc")
+        + thead_cell("截止","due",      default_dir="asc")
+        + '</tr>'
+    )
+
+    sort_filter_js = (
+        '<script>(function(){'
+        'var panel=document.getElementById("tasks");'
+        'if(!panel)return;'
+        'var tbody=panel.querySelector("tbody");if(!tbody)return;'
+        # ── Hide-completed toggle ──
+        'var cb=panel.querySelector(\'[data-role="tasks-show-completed"]\');'
+        'function applyVis(){'
+        'var show=cb&&cb.checked;'
+        'panel.querySelectorAll(".task-row").forEach(function(r){'
+        'r.style.display=(!show&&r.dataset.status==="完成")?"none":"";});'
+        '}'
+        'if(cb)cb.addEventListener("change",applyVis);'
+        # ── Click-to-sort headers ──
+        'var sortState={key:null,dir:1};'
+        'function getKey(row,key){'
+        'switch(key){'
+        'case"hours":return parseFloat(row.dataset.hours||"0");'
+        'case"events":return parseInt(row.dataset.events||"0",10);'
+        'case"priority":return parseInt(row.dataset.prioritySort||"9",10);'
+        'case"status":return parseInt(row.dataset.statusSort||"9",10);'
+        'case"due":return row.dataset.dueSort||"9999";'
+        'case"last":return row.dataset.lastSort||"0";'
+        'case"table":return row.dataset.table||"";'
+        'case"title":return (row.dataset.title||"").toLowerCase();'
+        '}return"";}'
+        'function applySort(key,dir){'
+        'var rows=Array.prototype.slice.call(panel.querySelectorAll(".task-row"));'
+        'rows.sort(function(a,b){'
+        'var va=getKey(a,key),vb=getKey(b,key);'
+        'if(va===vb)return 0;'
+        'return (va>vb?1:-1)*dir;});'
+        'rows.forEach(function(r){tbody.appendChild(r);});'
+        '}'
+        'panel.querySelectorAll("th[data-sort]").forEach(function(th){'
+        'th.addEventListener("click",function(){'
+        'var key=th.dataset.sort;'
+        'if(sortState.key===key){sortState.dir*=-1;}'
+        'else{sortState.key=key;sortState.dir=(th.dataset.defaultDir==="desc")?-1:1;}'
+        'panel.querySelectorAll(".sort-arrow").forEach(function(a){a.textContent="↕";});'
+        'var arrow=th.querySelector(".sort-arrow");if(arrow)arrow.textContent=sortState.dir>0?"↑":"↓";'
+        'applySort(sortState.key,sortState.dir);'
+        '});});'
+        # Initial visibility (default: hide completed)
+        'applyVis();'
+        '})();</script>'
+    )
+
     return (
         '<section class="card" id="tasks">'
-        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">'
+        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">'
         '<h3 style="margin:0;">工作项</h3>'
         '<span class="tag source" style="background:rgba(22,163,74,0.14); color:#16a34a;">Tasks</span>'
-        f'<span class="muted small" style="margin-left:auto;">{summary_line}</span>'
+        f'<span class="muted small">{summary_line}</span>'
+        f'<span style="margin-left:auto;">{toggle_html}</span>'
         '</div>'
         '<table class="mini-table" style="width:100%;">'
-        '<thead><tr>'
-        '<th style="text-align:left;">P</th>'
-        '<th style="text-align:left;">状态</th>'
-        '<th style="text-align:left;">任务</th>'
-        '<th style="text-align:right;">时长</th>'
-        '<th style="text-align:right;">事件</th>'
-        '<th style="text-align:left;">最近活动</th>'
-        '<th style="text-align:left;">截止</th>'
-        '</tr></thead>'
+        f'<thead>{thead_html}</thead>'
         f'<tbody>{"".join(rows_html)}</tbody>'
         '</table>'
+        + sort_filter_js +
         '</section>'
     )
 
