@@ -7,7 +7,7 @@ from typing import Iterable, Any
 
 from .schema import TraceEvent
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 8
 DEFAULT_DEVICE_ID = "Mac"
 DEFAULT_LOCATION_ID = "unknown"
 DEFAULT_COLLECTOR_ID = "hub-local"
@@ -124,6 +124,74 @@ CREATE TABLE IF NOT EXISTS runs (
   event_count INTEGER NOT NULL,
   notes TEXT
 );
+-- One row per date. Denormalized columns expose the common stats so cross-
+-- day SQL queries don't have to crack the channel JSON.
+CREATE TABLE IF NOT EXISTS day_report (
+  date            TEXT PRIMARY KEY,
+  events_hash     TEXT,
+  total_events    INTEGER NOT NULL DEFAULT 0,
+  active_minutes  INTEGER NOT NULL DEFAULT 0,
+  updated_at      TEXT DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS day_channel (
+  date              TEXT NOT NULL,
+  channel           TEXT NOT NULL,
+  value_json        TEXT,
+  generator         TEXT NOT NULL,
+  generator_version TEXT NOT NULL,
+  source_hash       TEXT,
+  generated_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+  tokens_in         INTEGER NOT NULL DEFAULT 0,
+  tokens_out        INTEGER NOT NULL DEFAULT 0,
+  cost_usd          REAL NOT NULL DEFAULT 0,
+  error             TEXT,
+  PRIMARY KEY (date, channel),
+  FOREIGN KEY (date) REFERENCES day_report(date) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_day_channel_channel ON day_channel(channel);
+-- One row per (date, project). project='misc' captures previously NULL projects.
+CREATE TABLE IF NOT EXISTS day_project_report (
+  date            TEXT NOT NULL,
+  project         TEXT NOT NULL,
+  events_hash     TEXT,
+  event_count     INTEGER NOT NULL DEFAULT 0,
+  active_minutes  INTEGER NOT NULL DEFAULT 0,
+  share           REAL NOT NULL DEFAULT 0,
+  updated_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (date, project),
+  FOREIGN KEY (date) REFERENCES day_report(date) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_day_project_report_project ON day_project_report(project);
+CREATE TABLE IF NOT EXISTS day_project_channel (
+  date              TEXT NOT NULL,
+  project           TEXT NOT NULL,
+  channel           TEXT NOT NULL,
+  value_json        TEXT,
+  generator         TEXT NOT NULL,
+  generator_version TEXT NOT NULL,
+  source_hash       TEXT,
+  generated_at      TEXT DEFAULT CURRENT_TIMESTAMP,
+  tokens_in         INTEGER NOT NULL DEFAULT 0,
+  tokens_out        INTEGER NOT NULL DEFAULT 0,
+  cost_usd          REAL NOT NULL DEFAULT 0,
+  error             TEXT,
+  PRIMARY KEY (date, project, channel),
+  FOREIGN KEY (date, project) REFERENCES day_project_report(date, project) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_day_project_channel_channel ON day_project_channel(channel);
+-- Per-event activity label. AI fills it in batch; `source='manual'` reserved
+-- for future user override. Lives in its own table (not in events.evidence)
+-- so it's cheap to JOIN and to UPDATE without touching the immutable event row.
+CREATE TABLE IF NOT EXISTS event_activity_labels (
+  event_id     TEXT PRIMARY KEY,
+  label        TEXT NOT NULL,
+  source       TEXT NOT NULL DEFAULT 'ai',  -- 'ai' | 'manual'
+  confidence   REAL NOT NULL DEFAULT 0.0,
+  model        TEXT,
+  assigned_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_event_activity_labels_label ON event_activity_labels(label);
 """
 
 
@@ -192,6 +260,14 @@ def init_db(con: sqlite3.Connection) -> None:
         "collector_id",
         f"collector_id TEXT NOT NULL DEFAULT '{DEFAULT_COLLECTOR_ID}'",
     )
+    # char_count: cached length(title)+length(summary), used by the global
+    # "条目 / 字数" unit toggle so per-source/-project aggregations can be
+    # weighted by content size, not just event count. Backfilled lazily.
+    _ensure_column(con, "events", "char_count", "char_count INTEGER NOT NULL DEFAULT 0")
+    con.execute(
+        "UPDATE events SET char_count = COALESCE(LENGTH(title), 0) + COALESCE(LENGTH(summary), 0)"
+        " WHERE char_count = 0"
+    )
     con.execute("CREATE INDEX IF NOT EXISTS idx_events_device ON events(device_id)")
     con.execute("CREATE INDEX IF NOT EXISTS idx_events_location ON events(location_id)")
     con.execute(
@@ -233,14 +309,23 @@ def upsert_events(
             "INSERT OR IGNORE INTO locations(id, name, kind, status) VALUES (?, ?, ?, ?)",
             (event.location_id, event.location_id, "branch", "active"),
         )
+        # Defensive: collectors that emit "YYYY-MM-DD HH:MM:SS" (space) break
+        # our lexicographic range filters because ' ' (0x20) < 'T' (0x54).
+        # Normalize on the write path so the column is always canonical.
+        canon_start = event.start
+        if canon_start and len(canon_start) >= 11 and canon_start[10] == " ":
+            canon_start = canon_start[:10] + "T" + canon_start[11:]
+        canon_end = event.end
+        if canon_end and len(canon_end) >= 11 and canon_end[10] == " ":
+            canon_end = canon_end[:10] + "T" + canon_end[11:]
         rows.append(
             (
                 event.id,
                 run_date or event_date(event),
                 event.source,
                 event.kind,
-                event.start,
-                event.end,
+                canon_start,
+                canon_end,
                 event.title,
                 event.summary,
                 event.project_guess,
@@ -250,12 +335,13 @@ def upsert_events(
                 event.device_id,
                 event.location_id,
                 event.collector_id,
+                len(event.title or "") + len(event.summary or ""),
             )
         )
     con.executemany(
         """
-        INSERT INTO events(id, date, source, kind, start, end, title, summary, project_guess, sensitivity, evidence_json, raw_ref, device_id, location_id, collector_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO events(id, date, source, kind, start, end, title, summary, project_guess, sensitivity, evidence_json, raw_ref, device_id, location_id, collector_id, char_count)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
           date=excluded.date,
           source=excluded.source,
@@ -270,7 +356,8 @@ def upsert_events(
           raw_ref=excluded.raw_ref,
           device_id=excluded.device_id,
           location_id=excluded.location_id,
-          collector_id=excluded.collector_id
+          collector_id=excluded.collector_id,
+          char_count=excluded.char_count
         """,
         rows,
     )
@@ -307,7 +394,7 @@ def _where(filters: dict[str, Any]) -> tuple[str, list[Any]]:
         params.append(start_to)
     project = filters.get("project")
     if project:
-        if project == "未归因":
+        if project == "misc":
             clauses.append("project_guess IS NULL")
         else:
             clauses.append("project_guess = ?")
@@ -327,7 +414,7 @@ def _count_by(
     con: sqlite3.Connection, field: str, label: str, where: str, params: list[Any]
 ) -> list[dict[str, Any]]:
     rows = con.execute(
-        f"SELECT COALESCE({field}, '未归因') AS {label}, COUNT(*) AS count FROM events {where} GROUP BY COALESCE({field}, '未归因') ORDER BY count DESC, {label}",
+        f"SELECT COALESCE({field}, 'misc') AS {label}, COUNT(*) AS count FROM events {where} GROUP BY COALESCE({field}, 'misc') ORDER BY count DESC, {label}",
         params,
     ).fetchall()
     return [dict(r) for r in rows]
@@ -390,7 +477,7 @@ def query_events(
     )
     direction = "ASC" if order.lower() == "asc" else "DESC"
     sql = f"""
-        SELECT id, date, source, kind, start, end, title, summary, project_guess, sensitivity, evidence_json, raw_ref, device_id, location_id, collector_id
+        SELECT id, date, source, kind, start, end, title, summary, project_guess, sensitivity, evidence_json, raw_ref, device_id, location_id, collector_id, char_count
         FROM events
         {where}
         ORDER BY start {direction}, source, kind
@@ -405,7 +492,7 @@ def query_events(
             d["evidence"] = json.loads(d.pop("evidence_json") or "{}")
         except Exception:
             d["evidence"] = {}
-        d["project"] = d.get("project_guess") or "未归因"
+        d["project"] = d.get("project_guess") or "misc"
         out.append(d)
     return out
 
@@ -457,7 +544,7 @@ def query_filter_options(
             "SELECT DISTINCT location_id FROM events ORDER BY location_id"
         ),
         "project": options(
-            f"SELECT DISTINCT COALESCE(project_guess, '未归因') AS project FROM events {project_where} ORDER BY project",
+            f"SELECT DISTINCT COALESCE(project_guess, 'misc') AS project FROM events {project_where} ORDER BY project",
             tuple(project_params),
         ),
     }
@@ -469,7 +556,7 @@ def query_timeline(con: sqlite3.Connection, date: str) -> list[dict[str, Any]]:
         SELECT substr(start, 12, 2) || ':00' AS hour,
                COUNT(*) AS count,
                COUNT(DISTINCT source) AS source_count,
-               COUNT(DISTINCT COALESCE(project_guess, '未归因')) AS project_count,
+               COUNT(DISTINCT COALESCE(project_guess, 'misc')) AS project_count,
                GROUP_CONCAT(DISTINCT source) AS sources
         FROM events
         WHERE date = ?
@@ -479,6 +566,118 @@ def query_timeline(con: sqlite3.Connection, date: str) -> list[dict[str, Any]]:
         (date,),
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def events_for_shifted_day(
+    con: sqlite3.Connection,
+    date: str,
+    *,
+    boundary_hour: int | None = None,
+    order: str = "asc",
+    limit: int | None = 2000,
+) -> list[dict[str, Any]]:
+    """Return events for "the day named `date`" under a shifted-boundary
+    day definition.
+
+    A day named "YYYY-MM-DD" is the half-open interval
+    [date T HH:00, next_date T HH:00) where HH = boundary_hour.
+
+    Default boundary comes from `daytrace.stats.DAY_BOUNDARY_HOUR` (env var
+    DAYTRACE_DAY_BOUNDARY_HOUR, default 4). Passing boundary_hour=0 collapses
+    to the legacy calendar-day behavior.
+    """
+    if boundary_hour is None:
+        from . import stats as _stats
+        boundary_hour = _stats.DAY_BOUNDARY_HOUR
+    from datetime import date as _date, timedelta
+    base = _date.fromisoformat(date)
+    if boundary_hour == 0:
+        # Legacy calendar-day: [00:00, 23:59:59] of the named date.
+        start = f"{date}T00:00:00"
+        end = f"{date}T23:59:59"
+    else:
+        next_date = (base + timedelta(days=1)).isoformat()
+        start = f"{date}T{boundary_hour:02d}:00:00"
+        # query_events uses inclusive `start <= ?`; subtract one second to
+        # keep the window half-open (no event lands in two days).
+        end = f"{next_date}T{boundary_hour - 1:02d}:59:59"
+    return query_events(
+        con, start_from=start, start_to=end, order=order, limit=limit,
+    )
+
+
+def load_activity_labels_for_event_ids(
+    con: sqlite3.Connection, event_ids: list[str], *, chunk: int = 900
+) -> dict[str, str]:
+    """Return {event_id: label} for the given event ids. Empty on schema race."""
+    if not event_ids:
+        return {}
+    out: dict[str, str] = {}
+    unique = list({eid for eid in event_ids if eid})
+    try:
+        for start in range(0, len(unique), chunk):
+            sub = unique[start:start + chunk]
+            ph = ",".join("?" for _ in sub)
+            for r in con.execute(
+                f"SELECT event_id, label FROM event_activity_labels WHERE event_id IN ({ph})",
+                sub,
+            ).fetchall():
+                out[r["event_id"]] = r["label"]
+    except sqlite3.OperationalError:
+        return {}
+    return out
+
+
+def load_activity_labels_for_date(con: sqlite3.Connection, date: str) -> dict[str, str]:
+    """Return {event_id: label} for all labeled events on the given date.
+
+    Events without labels are simply omitted; callers default missing values
+    to '未分类'. Falls back to empty dict on schema/migration races."""
+    try:
+        rows = con.execute(
+            "SELECT eal.event_id, eal.label FROM event_activity_labels eal"
+            " JOIN events e ON e.id = eal.event_id WHERE e.date = ?",
+            (date,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    return {r["event_id"]: r["label"] for r in rows}
+
+
+def upsert_activity_labels(
+    con: sqlite3.Connection,
+    rows: list[dict[str, Any]],
+    *,
+    commit: bool = True,
+) -> int:
+    """Insert / overwrite labels. `rows`: list of {event_id, label, source?, confidence?, model?}."""
+    if not rows:
+        return 0
+    con.executemany(
+        """
+        INSERT INTO event_activity_labels(event_id, label, source, confidence, model, assigned_at)
+        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(event_id) DO UPDATE SET
+          label=excluded.label,
+          source=excluded.source,
+          confidence=excluded.confidence,
+          model=excluded.model,
+          assigned_at=CURRENT_TIMESTAMP
+        """,
+        [
+            (
+                r["event_id"],
+                r["label"],
+                r.get("source") or "ai",
+                float(r.get("confidence") or 0.0),
+                r.get("model"),
+            )
+            for r in rows
+        ],
+    )
+    if commit:
+        con.commit()
+    return len(rows)
 
 
 def query_today(con: sqlite3.Connection, date: str) -> dict[str, Any]:

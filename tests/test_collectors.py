@@ -218,7 +218,6 @@ def test_make_outcomes_promotes_hermes_assistant_results():
         title="Dashboard updated",
         summary="已改好了，测试通过。",
         project_guess="daytrace",
-        confidence=0.8,
         sensitivity="normal",
         evidence={"session": "test"},
     )

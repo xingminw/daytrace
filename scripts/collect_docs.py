@@ -74,7 +74,6 @@ def collect_doc_events(
                         title=rel_title,
                         summary=f"Document modified: {path}",
                         project_guess=project,
-                        confidence=0.75 if project else 0.4,
                         sensitivity="normal",
                         evidence={
                             "path": str(path),

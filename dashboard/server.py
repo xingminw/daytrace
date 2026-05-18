@@ -13,7 +13,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from daytrace.db import connect, query_events, query_filter_options, query_summary, query_today
+from daytrace.db import connect, init_db, query_events, query_filter_options, query_summary, query_today
 
 DEFAULT_DB = Path(__file__).resolve().parents[1] / "data" / "daytrace.sqlite"
 
@@ -28,14 +28,271 @@ nav { display:flex; gap:6px; flex-wrap:nowrap; justify-content:flex-end; justify
 main { padding:12px 18px 28px; max-width:none; margin:0 auto; min-height:calc(100vh - 51px); }
 body.events-page main { height:calc(100vh - 51px); min-height:0; overflow:hidden; padding-bottom:12px; }
 body.events-page form { height:100%; }
-.grid { display:grid; grid-template-columns: repeat(4, minmax(150px,1fr)); gap:10px; }.section-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }.three-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }.report-grid { display:grid; grid-template-columns:minmax(360px,1.15fr) minmax(320px,.85fr); gap:12px; align-items:start; }.analysis-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:12px; }.wide-card { grid-column:1 / -1; }
+.grid { display:grid; grid-template-columns: repeat(4, minmax(150px,1fr)); gap:10px; }.section-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }.three-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }.report-grid { display:grid; grid-template-columns:minmax(320px,1fr) minmax(320px,1fr); gap:12px; align-items:stretch; }
+.right-column { display:flex; flex-direction:column; gap:12px; min-width:0; }
+.highlights-card .dr-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin:0; }
+@media (max-width:900px) { .highlights-card .dr-grid { grid-template-columns:1fr; } }
+/* Global controls (day nav + 5-dim selector) — sticks under the page header
+   so they're always reachable while scrolling through the daily report
+   and project cards. */
+.dim-bar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin:0 -18px 12px; padding:8px 18px; flex-wrap:wrap; position:sticky; top:50px; z-index:4; background:rgba(247,245,239,.92); backdrop-filter:blur(10px); border-bottom:1px solid var(--line); }
+.dim-bar .day-nav { margin-top:0; padding-top:0; }
+.dim-bar-right { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.dim-tabs, .unit-tabs { display:flex; gap:4px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
+.dim-tab, .unit-tab { font-size:12.5px; padding:4px 14px; border-radius:999px; border:none; background:transparent; color:#3b352e; font-weight:650; cursor:pointer; transition:background .12s, color .12s; }
+.dim-tab:hover, .unit-tab:hover { background:rgba(0,0,0,.04); }
+.dim-tab.active, .unit-tab.active { background:var(--ink); color:white; }.analysis-grid { display:grid; grid-template-columns:repeat(2,minmax(260px,1fr)); gap:12px; }.wide-card { grid-column:1 / -1; }
 .card { background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:14px; padding:12px; box-shadow:0 8px 18px rgba(65,45,10,.05); }
 .metric { font-size:26px; font-weight:850; letter-spacing:-0.04em; }.metric-small { font-size:18px; font-weight:850; }.label { color:var(--muted); margin-top:3px; font-size:12px; } section { margin-top:12px; } h2 { font-size:16px; margin:0 0 8px; } h3 { margin:0 0 5px; font-size:14px; }
 .bar { display:flex; align-items:center; gap:10px; margin:9px 0; }.bar-name { width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }.bar-track { flex:1; height:10px; border-radius:999px; background:#ece3d2; overflow:hidden; }.bar-fill { height:100%; background:linear-gradient(90deg,#2f6fed,#7b61ff); border-radius:999px; }.bar-count { width:42px; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
 .filters { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:0 0 8px; } input,select,button { border:1px solid var(--line); background:white; border-radius:8px; padding:5px 7px; font:inherit; font-size:12px; } button { background:var(--accent); color:white; border-color:var(--accent); cursor:pointer; }.checkbox { display:flex; gap:4px; align-items:center; }
 .bucket-head { display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:8px; }.mini-event { padding:8px 0; border-top:1px dashed #eadfcd; }.mini-event:first-of-type { border-top:none; }.event-title { font-weight:700; }.muted { color:var(--muted); }.pills { display:flex; flex-wrap:wrap; gap:6px; }.tag { display:inline-flex; max-width:100%; border-radius:999px; padding:2px 8px; background:#ebe6ff; color:#4632a8; font-size:12px; font-weight:650; overflow:hidden; text-overflow:ellipsis; }.source { background:#e8f0ff; color:#174ea6; }.device { background:#dcfce7; color:#166534; }.location { background:#ffedd5; color:#9a3412; }.low { background:#fff3cd; color:#8a5a00; }
-.daily-report { line-height:1.55; }.daily-report ul { margin:8px 0 0 18px; padding:0; }.daily-report li { margin:5px 0; }.report-lede { font-size:15px; color:#362f27; margin:0 0 8px; }.day-nav { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }.day-nav a { border:1px solid var(--line); background:white; border-radius:999px; padding:4px 9px; font-size:12px; font-weight:700; }
-.donut-row { display:grid; grid-template-columns:120px 1fr; gap:12px; align-items:center; }.donut { width:112px; height:112px; border-radius:50%; display:grid; place-items:center; background:conic-gradient(var(--accent) 0 40%, var(--purple) 40% 70%, var(--orange) 70% 88%, #cbd5e1 88% 100%); }.donut:after { content:attr(data-label); width:70px; height:70px; border-radius:50%; background:var(--card); display:grid; place-items:center; font-size:13px; font-weight:800; color:var(--muted); text-align:center; }.legend-dot { width:9px; height:9px; display:inline-block; border-radius:50%; margin-right:6px; }.stack { display:flex; height:18px; overflow:hidden; border-radius:999px; background:#ece3d2; border:1px solid #e2d6c4; }.stack-seg { min-width:2px; height:100%; }.mini-table { width:100%; border-collapse:separate; border-spacing:0; }.mini-table th,.mini-table td { font-size:12px; padding:6px 4px; border-bottom:1px solid #eadfcd; }.mini-table th { position:static; background:transparent; box-shadow:none; color:var(--muted); }.spark { display:grid; grid-template-columns:repeat(24,1fr); gap:2px; align-items:end; height:86px; padding-top:6px; }.spark-bar { background:linear-gradient(180deg,#7b61ff,#2f6fed); border-radius:4px 4px 0 0; min-height:3px; }.spark-labels { display:grid; grid-template-columns:repeat(4,1fr); color:var(--muted); font-size:11px; margin-top:4px; }
+.daily-report { line-height:1.55; display:flex; flex-direction:column; }.daily-report ul { margin:8px 0 0 18px; padding:0; }.daily-report li { margin:5px 0; }.report-lede { font-size:15px; color:#362f27; margin:0 0 8px; }.day-nav { display:flex; gap:8px; flex-wrap:wrap; margin-top:auto; padding-top:14px; }.day-nav a { border:1px solid var(--line); background:white; border-radius:999px; padding:4px 9px; font-size:12px; font-weight:700; }
+.donut-row { display:grid; grid-template-columns:120px 1fr; gap:12px; align-items:center; }.donut { width:112px; height:112px; border-radius:50%; display:grid; place-items:center; background:conic-gradient(var(--accent) 0 40%, var(--purple) 40% 70%, var(--orange) 70% 88%, #cbd5e1 88% 100%); }.donut:after { content:attr(data-label); width:70px; height:70px; border-radius:50%; background:var(--card); display:grid; place-items:center; font-size:13px; font-weight:800; color:var(--muted); text-align:center; }.legend-dot { width:9px; height:9px; display:inline-block; border-radius:50%; margin-right:6px; }.stack { display:flex; height:18px; overflow:hidden; border-radius:999px; background:#ece3d2; border:1px solid #e2d6c4; }.stack-seg { min-width:2px; height:100%; }.mini-table { width:100%; border-collapse:separate; border-spacing:0; }.mini-table th,.mini-table td { font-size:12px; padding:6px 4px; border-bottom:1px solid #eadfcd; }.mini-table th { position:static; background:transparent; box-shadow:none; color:var(--muted); }.composition-card .cc-tabs { display:flex; gap:4px; flex-wrap:wrap; }
+.composition-card .cc-tab { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:white; color:#3b352e; font-weight:650; cursor:pointer; }
+.composition-card .cc-tab.active { background:var(--ink); color:white; border-color:var(--ink); }
+.composition-card { display:flex; flex-direction:column; }
+.composition-card .cc-pane { display:none; flex:1; }
+.composition-card .cc-pane.show { display:flex; }
+.composition-card .cc-pane-body { display:grid; grid-template-columns:minmax(180px,.85fr) minmax(220px,1.15fr); gap:20px; align-items:center; width:100%; }
+.composition-card .cc-pane-empty { place-items:center; }
+.composition-card .cc-donut-wrap { display:flex; justify-content:center; align-items:center; padding:4px; }
+.composition-card .cc-donut { width:210px; height:210px; border-radius:50%; display:grid; place-items:center; box-shadow:0 8px 18px rgba(40,30,10,.10); position:relative; }
+.composition-card .cc-donut-hole { width:124px; height:124px; border-radius:50%; background:var(--card); display:grid; place-items:center; text-align:center; box-shadow:inset 0 1px 2px rgba(0,0,0,.05); }
+.composition-card .cc-donut-total { font-size:28px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; line-height:1; }
+.composition-card .cc-donut-label { font-size:11px; color:var(--muted); margin-top:3px; letter-spacing:.06em; text-transform:uppercase; }
+.composition-card .cc-bars { display:flex; flex-direction:column; gap:7px; max-height:none; padding-right:2px; }
+.composition-card .cc-bar { display:grid; grid-template-columns:11px minmax(70px,1fr) minmax(80px,2fr) 36px 36px; align-items:center; gap:9px; font-size:12.5px; }
+.composition-card .cc-bar-sw { width:10px; height:10px; border-radius:3px; flex:none; }
+.composition-card .cc-bar-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#3b352e; font-weight:600; }
+.composition-card .cc-bar-track { height:9px; border-radius:999px; background:#ece3d2; overflow:hidden; }
+.composition-card .cc-bar-fill { display:block; height:100%; border-radius:999px; }
+.composition-card .cc-bar-count { text-align:right; font-variant-numeric:tabular-nums; color:#3b352e; font-weight:600; }
+.composition-card .cc-bar-pct { text-align:right; font-variant-numeric:tabular-nums; color:var(--muted); font-size:11px; }
+@media (max-width:1100px) { .composition-card .cc-pane-body { grid-template-columns:1fr; } }
+.timeline-section { margin:12px 0; }
+/* ----- day_report cards (one card per day) ----- */
+.dr-filter-strip { display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding:8px 12px; margin:0 0 12px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:12px; font-size:12.5px; }
+.dr-filter-inline { display:flex; gap:14px; align-items:center; flex-wrap:wrap; flex:1; }
+.dr-filter-strip label { display:inline-flex; gap:4px; align-items:center; }
+.dr-filter-strip select { border:1px solid var(--line); border-radius:8px; padding:3px 6px; background:white; font:inherit; font-size:12px; }
+.dr-rowcount { margin-left:auto; }
+.dr-reset { color:var(--accent); font-weight:650; }
+.day-report-cards { display:flex; flex-direction:column; gap:14px; }
+.day-report-card { background:rgba(255,250,240,.96); border:1px solid var(--line); border-radius:14px; padding:14px 18px; box-shadow:0 6px 14px rgba(65,45,10,.04); }
+.dr-head { display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-bottom:10px; padding-bottom:10px; border-bottom:1px dashed #eadfcd; }
+.dr-date { font-size:17px; font-weight:800; color:var(--ink); font-variant-numeric:tabular-nums; }
+.dr-stats { display:flex; gap:14px; flex-wrap:wrap; flex:1; }
+.dr-stat { display:flex; flex-direction:column; align-items:flex-start; padding:0 10px; border-left:1px solid #eadfcd; }
+.dr-stat:first-child { border-left:none; padding-left:0; }
+.dr-stat-num { font-size:15px; font-weight:700; color:var(--ink); font-variant-numeric:tabular-nums; }
+.dr-stat-lbl { font-size:10.5px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
+.dr-actions { display:flex; gap:10px; font-size:12px; }
+.dr-actions a { color:var(--accent); white-space:nowrap; }
+.dr-headline { font-size:18px; font-weight:800; color:var(--ink); margin:6px 0 6px; line-height:1.3; }
+.dr-narrative { font-size:14px; line-height:1.65; color:#362f27; margin:0 0 12px; }
+.dr-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin:0 0 12px; }
+@media (max-width:900px) { .dr-grid { grid-template-columns:1fr; } }
+.dr-section h4 { margin:0 0 6px; font-size:12.5px; font-weight:700; color:#4d4438; letter-spacing:.04em; }
+.dr-bullets { margin:0; padding-left:18px; font-size:13px; line-height:1.55; }
+.dr-bullets li { margin:3px 0; }
+.dr-highlights li::marker { color:var(--green); }
+.dr-concerns li::marker { color:var(--red); }
+.dr-changes li::marker { color:var(--orange); }
+.dr-continuity { background:#fff7e8; border:1px solid #f0d68b; border-radius:10px; padding:9px 12px; margin-bottom:12px; font-size:13px; line-height:1.5; }
+.dr-cont-label { color:var(--muted); font-weight:650; margin-right:6px; }
+.dr-cont-text { color:#362f27; }
+.dr-facts { display:flex; flex-direction:column; gap:4px; padding:10px 12px; background:#faf6ec; border-radius:10px; font-size:12.5px; color:#4d4438; margin-bottom:10px; }
+.dr-fact { font-variant-numeric:tabular-nums; }
+.dr-raw-wrap > summary { cursor:pointer; color:var(--muted); font-size:11px; padding:4px 0; }
+.dr-raw-row { margin:4px 0; padding-left:14px; }
+.dr-raw-row > summary { cursor:pointer; color:var(--accent); font-size:11.5px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.dr-raw-row pre { margin:4px 0; padding:8px; background:#fff; border:1px solid var(--line); border-radius:8px; font-size:11px; max-height:240px; overflow:auto; }
+
+/* ----- momentum + status chips (used in cards and project rows) ----- */
+.momentum-chip { display:inline-flex; align-items:center; gap:3px; font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+.momentum-rising   { background:#dcfce7; color:#166534; }
+.momentum-steady   { background:#e0e7ff; color:#3730a3; }
+.momentum-dropping { background:#fee2e2; color:#991b1b; }
+.momentum-new      { background:#fef3c7; color:#92400e; }
+.momentum-paused   { background:#f1f5f9; color:#475569; }
+.momentum-blocked  { background:#fee2e2; color:#7f1d1d; }
+.status-chip { display:inline-flex; align-items:center; font-size:11px; font-weight:700; padding:2px 9px; border-radius:999px; white-space:nowrap; }
+.status-in_progress { background:#dbeafe; color:#1e40af; }
+.status-done        { background:#dcfce7; color:#166534; }
+.status-blocked     { background:#fee2e2; color:#991b1b; }
+.status-explored    { background:#fef3c7; color:#92400e; }
+.status-unknown     { background:#f1f5f9; color:#475569; }
+
+/* ----- day_project_report table ----- */
+.dpr-table table { font-size:12.5px; }
+.dpr-table th { background:#fff7e8; }
+.dpr-table .col-date { width:90px; white-space:nowrap; }
+.dpr-table .col-project { width:140px; }
+.dpr-table .col-num { width:60px; text-align:right; font-variant-numeric:tabular-nums; }
+.dpr-table .col-share { width:120px; }
+.dpr-table .col-status { width:90px; }
+.dpr-table .col-ai { min-width:280px; max-width:420px; }
+.dpr-table .col-cont { width:170px; }
+.dpr-table .col-titles { width:220px; }
+.dpr-table .col-meta { width:160px; }
+.project-chip { display:inline-flex; padding:2px 9px; border-radius:999px; background:#ebe6ff; color:#4632a8; font-size:12px; font-weight:650; text-decoration:none; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.project-chip:hover { background:#dcd3ff; }
+.share-cell { display:flex; align-items:center; gap:6px; }
+.share-bar { flex:1; height:6px; background:#ece3d2; border-radius:999px; overflow:hidden; }
+.share-fill { height:100%; background:linear-gradient(90deg, var(--accent), var(--purple)); border-radius:999px; }
+.share-pct { font-size:11px; font-variant-numeric:tabular-nums; color:#4d4438; min-width:30px; }
+.ai-summary-text { font-weight:600; color:var(--ink); line-height:1.4; margin-bottom:4px; }
+.ai-bullets { margin:3px 0; padding-left:16px; font-size:11.5px; line-height:1.45; }
+.ai-bullets li { margin:1px 0; color:#4d4438; }
+.ai-next-label { font-size:10px; color:var(--muted); margin-top:4px; letter-spacing:.05em; text-transform:uppercase; }
+.ai-next li { color:#7b61ff; }
+.cont-text { font-size:11.5px; color:#4d4438; margin-top:3px; line-height:1.4; }
+.top-titles-list { margin:0; padding-left:16px; font-size:11.5px; line-height:1.45; color:#4d4438; }
+.top-titles-list li { margin:1px 0; }
+.tt-time { font-variant-numeric:tabular-nums; color:var(--muted); margin-right:4px; }
+
+/* segmented pill group — same look as the global dim-bar */
+.table-switcher { display:inline-flex; gap:4px; margin:0 0 12px; padding:3px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; box-shadow:0 4px 10px rgba(65,45,10,.04); flex-wrap:wrap; }
+.table-tab { font-size:12.5px; padding:5px 14px; border-radius:999px; border:none; background:transparent; color:#3b352e; font-weight:650; text-decoration:none; transition:background .12s, color .12s; }
+.table-tab:hover { background:rgba(0,0,0,.04); }
+.table-tab.active { background:var(--ink); color:white; }
+
+/* compact stats strip inside the home page daily-report card —
+   grid with equal columns so all 4 stats align on every day's render */
+.dr-stats-compact { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:14px; margin:0 0 12px; padding-bottom:10px; border-bottom:1px dashed #eadfcd; }
+.dr-stats-compact .dr-stat { display:flex; flex-direction:column; gap:2px; padding:0; border:none; }
+.dr-stats-compact .dr-stat-num { font-size:16px; font-weight:800; font-variant-numeric:tabular-nums; color:var(--ink); white-space:nowrap; }
+.dr-stats-compact .dr-stat-lbl { font-size:10.5px; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; }
+
+/* project cards section on /today */
+.project-cards-section { margin:14px 0; }
+.section-title { font-size:14px; font-weight:700; color:#4d4438; margin:0 0 10px; letter-spacing:.02em; }
+.project-cards { display:flex; flex-direction:column; gap:8px; }
+.project-card { background:rgba(255,250,240,.96); border:1px solid var(--line); border-radius:12px; padding:0; box-shadow:0 4px 10px rgba(65,45,10,.04); overflow:hidden; transition:box-shadow .12s; }
+.project-card[open] { box-shadow:0 8px 18px rgba(65,45,10,.07); }
+/* Fixed-width columns so bars align across every row regardless of name /
+   percent width. Mobile collapses below. */
+.project-card > summary {
+  list-style:none; cursor:pointer; padding:12px 14px;
+  display:grid; align-items:center; gap:14px;
+  grid-template-columns:
+    minmax(0, 200px)   /* name */
+    48px              /* share % (tabular) */
+    minmax(120px, 1fr) /* bar fills */
+    150px             /* events · time */
+    24px;             /* chevron */
+}
+.project-card > summary::-webkit-details-marker { display:none; }
+.project-card > summary::marker { content:""; }
+.project-card > summary:hover { background:rgba(0,0,0,.02); }
+.pc-project-name { font-weight:700; font-size:14px; color:var(--ink); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pc-share-pct { font-size:12px; color:#4d4438; font-weight:700; font-variant-numeric:tabular-nums; text-align:right; }
+.pc-share-bar { height:7px; background:#ece3d2; border-radius:999px; overflow:hidden; }
+.pc-share-fill { height:100%; background:linear-gradient(90deg, var(--accent), var(--purple)); border-radius:999px; transition:width .2s; }
+.pc-events { font-size:12px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; text-align:right; }
+.pc-chevron { color:var(--muted); font-size:14px; line-height:1; transition:transform .15s; display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; border-radius:50%; background:rgba(0,0,0,.04); }
+.project-card > summary:hover .pc-chevron { background:rgba(0,0,0,.08); color:var(--ink); }
+/* Collapsed = ◂ (points left). Expanded rotates 90° clockwise → ▾ (down,
+   pointing at the now-visible content). */
+.project-card[open] .pc-chevron { transform:rotate(-90deg); }
+.pc-body { padding:0 14px 14px; border-top:1px dashed #eadfcd; font-size:13px; line-height:1.55; color:#362f27; }
+.pc-summary-text { font-size:14px; font-weight:600; margin:12px 0 8px; color:var(--ink); }
+.pc-section-label { font-size:11px; font-weight:700; color:var(--muted); letter-spacing:.06em; text-transform:uppercase; margin:10px 0 4px; }
+.pc-bullets { margin:0; padding-left:18px; font-size:13px; line-height:1.55; }
+.pc-bullets li { margin:2px 0; }
+.pc-next li { color:#5b3fc7; }
+.pc-continuity { background:#fff7e8; border:1px solid #f0d68b; border-radius:10px; padding:8px 12px; margin:10px 0; font-size:12.5px; }
+.pc-cont-label { color:var(--muted); font-weight:650; margin-right:6px; }
+.pc-titles { margin:0; padding-left:18px; font-size:12.5px; color:#4d4438; }
+.pc-titles li { margin:2px 0; }
+.pc-titles .tt-time { font-variant-numeric:tabular-nums; color:var(--muted); margin-right:6px; }
+.pc-meta { font-size:11.5px; margin-top:10px; }
+.pc-actions { margin-top:10px; font-size:12px; }
+.pc-actions a { color:var(--accent); }
+@media (max-width:900px) {
+  .project-card > summary { grid-template-columns:1fr 48px 110px 24px; gap:10px; }
+  .pc-share-bar, .pc-events { display:none; }
+}
+.channel-cell summary { cursor:pointer; color:var(--accent); font-size:12px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; display:block; }
+.channel-cell pre { white-space:pre-wrap; overflow:auto; max-height:240px; max-width:340px; margin:6px 0 0; padding:6px 8px; background:#fff; border:1px solid var(--line); border-radius:8px; font-size:11px; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.small { font-size:11px; } .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+.timeline-card .tl-tab-group { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+.timeline-card .tl-tabs, .timeline-card .tl-style-tabs { display:flex; gap:4px; flex-wrap:wrap; }
+.timeline-card .tl-tab, .timeline-card .tl-style-tab { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:white; color:#3b352e; font-weight:650; cursor:pointer; }
+.timeline-card .tl-tab.active, .timeline-card .tl-style-tab.active { background:var(--ink); color:white; border-color:var(--ink); }
+.timeline-card .tl-style-tab { background:#fff3cd; border-color:#f0d68b; color:#8a5a00; }
+.timeline-card .tl-style-tab.active { background:#7c5c00; border-color:#7c5c00; color:white; }
+.timeline-card .tl-axis-wrap { position:relative; margin:14px 0 6px; }
+/* Shared 24h canvas */
+.timeline-card .tl-axis, .timeline-card .tl-hist { position:relative; height:200px; background:linear-gradient(180deg,#faf6ec,#f3ead8); border:1px solid #e6dcc6; border-radius:12px; overflow:hidden; }
+.timeline-card .tl-hist { display:none; }
+.timeline-card[data-style="histogram"] .tl-axis { display:none; }
+.timeline-card[data-style="histogram"] .tl-hist { display:block; }
+.timeline-card[data-style="swimlane"] .tl-axis { display:none; }
+.timeline-card[data-style="swimlane"] .tl-hist { display:none; }
+/* Hour grid (shared markup) */
+.timeline-card .tl-hour { position:absolute; top:0; bottom:0; border-left:1px dashed #e0d4bd; width:0; pointer-events:none; }
+.timeline-card .tl-hour span { position:absolute; bottom:3px; left:4px; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; }
+/* Tick view */
+.timeline-card .tl-tick { position:absolute; top:10px; bottom:18px; width:3px; border-radius:2px; background:#9b8e76; transform:translateX(-1px); opacity:.86; transition:opacity .12s, transform .12s; cursor:pointer; }
+.timeline-card .tl-tick:hover { opacity:1; transform:translateX(-1px) scaleY(1.18); box-shadow:0 0 0 2px rgba(255,255,255,.6); z-index:2; }
+/* Histogram view: 3 panes, only the one matching data-mode is visible.
+   Pane is inset on the left to make room for the y-axis tick labels. */
+.timeline-card .tl-hist-pane { display:none; position:absolute; left:38px; right:6px; top:8px; bottom:22px; }
+.timeline-card[data-mode="source"]   .tl-hist-pane[data-for="source"]   { display:block; }
+.timeline-card[data-mode="project"]  .tl-hist-pane[data-for="project"]  { display:block; }
+.timeline-card[data-mode="device"]   .tl-hist-pane[data-for="device"]   { display:block; }
+.timeline-card[data-mode="location"] .tl-hist-pane[data-for="location"] { display:block; }
+.timeline-card[data-mode="activity"] .tl-hist-pane[data-for="activity"] { display:block; }
+.timeline-card .tl-grid-line { position:absolute; left:0; right:0; border-top:1px dashed #d9ccaf; height:0; pointer-events:none; }
+.timeline-card .tl-y-ticks { position:absolute; left:0; right:0; top:0; bottom:0; pointer-events:none; }
+.timeline-card .tl-y-tick { position:absolute; left:-36px; transform:translateY(50%); width:32px; text-align:right; font-size:10px; color:var(--muted); font-variant-numeric:tabular-nums; background:transparent; }
+.timeline-card .tl-bin { position:absolute; bottom:0; display:flex; flex-direction:column-reverse; border-radius:3px 3px 0 0; overflow:hidden; cursor:pointer; transition:filter .12s, transform .12s; }
+.timeline-card .tl-bin:hover { filter:brightness(1.12) saturate(1.1); transform:scaleY(1.04); transform-origin:bottom; z-index:2; box-shadow:0 -2px 8px rgba(0,0,0,.18); }
+.timeline-card .tl-seg { display:block; min-height:1px; }
+/* Swimlane view */
+.timeline-card .tl-swim { display:none; padding:6px 0; }
+.timeline-card[data-style="swimlane"] .tl-swim { display:block; }
+.timeline-card .tl-swim-pane { display:none; }
+.timeline-card[data-mode="source"]   .tl-swim-pane[data-for="source"]   { display:block; }
+.timeline-card[data-mode="project"]  .tl-swim-pane[data-for="project"]  { display:block; }
+.timeline-card[data-mode="device"]   .tl-swim-pane[data-for="device"]   { display:block; }
+.timeline-card[data-mode="location"] .tl-swim-pane[data-for="location"] { display:block; }
+.timeline-card[data-mode="activity"] .tl-swim-pane[data-for="activity"] { display:block; }
+.timeline-card .tl-swim-row { display:grid; grid-template-columns:160px 1fr; gap:10px; align-items:center; padding:4px 0; }
+.timeline-card .tl-swim-label { display:flex; gap:6px; align-items:baseline; justify-content:space-between; padding:2px 10px; font-size:12.5px; font-weight:650; color:#3b352e; }
+.timeline-card .tl-swim-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.timeline-card .tl-swim-count { font-size:11px; font-variant-numeric:tabular-nums; flex:none; color:var(--muted); }
+.timeline-card .tl-swim-track { position:relative; height:24px; background:linear-gradient(180deg,#faf6ec,#f3ead8); border:1px solid #e6dcc6; border-radius:6px; }
+.timeline-card .tl-swim-tick { position:absolute; top:3px; bottom:3px; width:3px; border-radius:2px; transform:translateX(-1px); cursor:pointer; transition:transform .12s; }
+.timeline-card .tl-swim-tick:hover { transform:translateX(-1px) scaleY(1.4) scaleX(1.6); z-index:2; box-shadow:0 0 0 2px rgba(255,255,255,.6); }
+/* Overall row sits above per-dim panes, taller and a neutral ink color */
+.timeline-card .tl-swim-overall { padding-bottom:8px; margin-bottom:4px; border-bottom:1px dashed #e6dcc6; }
+.timeline-card .tl-swim-overall-label .tl-swim-name { font-weight:800; color:var(--ink); }
+.timeline-card .tl-swim-overall-track { height:30px; background:linear-gradient(180deg,#f7f1e0,#ebe3cf); border-color:#d9ccaf; }
+/* Fallback color for overall ticks whose value isn't in the active dim's
+   top-10 palette — they show as a neutral grey instead of inheriting the
+   ink color. Per-(dim,value) rules generated server-side override this. */
+.timeline-card .tl-swim-tick-overall { background:#b8ad95; opacity:.85; }
+/* Axis bottom labels */
+.timeline-card .tl-axis-bottom { display:flex; justify-content:space-between; color:var(--muted); font-size:11px; padding:0 2px; font-variant-numeric:tabular-nums; }
+.timeline-card .tl-meta { margin-top:8px; color:var(--muted); font-size:11px; }
+.timeline-card .tl-empty { margin-top:8px; color:var(--muted); font-size:12px; text-align:center; padding:18px; }
+/* Legends */
+.timeline-card .tl-legend { display:none; flex-wrap:wrap; gap:6px 14px; margin-top:10px; font-size:12px; color:#4d4438; }
+.timeline-card .tl-legend.show { display:flex; }
+.timeline-card .tl-legend-item { display:inline-flex; align-items:center; gap:5px; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.timeline-card .tl-swatch { width:10px; height:10px; border-radius:3px; flex:none; }
+/* Floating tooltip (one per card, repositioned on hover) */
+.timeline-card .tl-tooltip { position:absolute; pointer-events:none; z-index:10; background:rgba(34,28,18,.95); color:#fff7e8; border-radius:10px; padding:8px 10px; box-shadow:0 10px 26px rgba(0,0,0,.28); font-size:11.5px; max-width:320px; line-height:1.45; }
+.timeline-card .tl-tooltip[hidden] { display:none; }
+.timeline-card .tl-tip-time { font-weight:700; font-variant-numeric:tabular-nums; color:#ffe7a8; margin-bottom:2px; }
+.timeline-card .tl-tip-title { font-weight:600; margin-bottom:5px; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; }
+.timeline-card .tl-tip-chip { display:inline-flex; align-items:center; gap:4px; margin:2px 6px 0 0; padding:1px 7px; border-radius:999px; background:rgba(255,255,255,.1); font-size:11px; }
+.timeline-card .tl-tip-chip b { font-weight:600; color:#ffd58a; }
+.timeline-card .tl-tip-sw { width:8px; height:8px; border-radius:50%; flex:none; }
+.spark { display:grid; grid-template-columns:repeat(24,1fr); gap:2px; align-items:end; height:86px; padding-top:6px; }.spark-bar { background:linear-gradient(180deg,#7b61ff,#2f6fed); border-radius:4px 4px 0 0; min-height:3px; }.spark-labels { display:grid; grid-template-columns:repeat(4,1fr); color:var(--muted); font-size:11px; margin-top:4px; }
 .table-wrap { max-height:none; min-height:calc(100vh - 86px); overflow:auto; border:1px solid var(--line); border-radius:16px; background:var(--card); }
 body.events-page .table-wrap { height:100%; min-height:0; max-height:100%; overflow:hidden; overscroll-behavior:contain; }
 table { width:100%; min-width:0; border-collapse:separate; border-spacing:0; background:var(--card); table-layout:fixed; }
@@ -45,8 +302,8 @@ body.events-page tbody { flex:1; min-height:0; overflow-y:auto; overflow-x:hidde
 body.events-page tr { display:table; width:100%; table-layout:fixed; }
 th,td { padding:7px 9px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; font-size:12px; }
 th { position:sticky; top:0; background:#fff7e8; z-index:3; color:#4d4438; box-shadow:0 1px 0 var(--line); } tr:last-child td { border-bottom:none; }
-th .th-title { display:flex; align-items:center; justify-content:space-between; gap:6px; font-weight:750; margin-bottom:5px; } th .sort { color:var(--muted); font-size:11px; } th input, th select { width:100%; min-width:0; padding:4px 5px; font-size:11px; } th select + select { margin-top:4px; } .header-filter { margin:0; display:flex; align-items:center; gap:5px; white-space:nowrap; } .header-filter select { max-width:132px; }
-.col-time { width:190px; }.col-source { width:78px; }.col-device { width:70px; }.col-location { width:76px; }.col-project { width:130px; }.col-title { width:auto; }
+th .th-title { display:flex; align-items:center; justify-content:space-between; gap:6px; font-weight:750; margin-bottom:5px; } .clear-filters { font-size:11px; font-weight:600; text-decoration:none; padding:2px 8px; border-radius:999px; background:#fff3cd; color:#8a5a00; border:1px solid #f0d68b; white-space:nowrap; } .clear-filters:hover { background:#ffe69c; } .clear-filters.muted { background:transparent; color:var(--muted); border-color:transparent; cursor:default; } th .sort { color:var(--muted); font-size:11px; } th input, th select { width:100%; min-width:0; padding:4px 5px; font-size:11px; } th select + select { margin-top:4px; } .header-filter { margin:0; display:flex; align-items:center; gap:5px; white-space:nowrap; } .header-filter select { max-width:132px; }
+.col-time { width:190px; }.col-source { width:78px; }.col-activity { width:96px; }.col-location { width:76px; }.col-project { width:130px; }.col-title { width:auto; }
 body.events-page th:nth-child(1), body.events-page td:nth-child(1) { width:190px; }
 body.events-page th:nth-child(2), body.events-page td:nth-child(2) { width:78px; }
 body.events-page th:nth-child(3), body.events-page td:nth-child(3) { width:70px; }
@@ -225,7 +482,7 @@ def html_response(handler: BaseHTTPRequestHandler, body: str, status=200):
     handler.wfile.write(data)
 
 
-def layout(title: str, subtitle: str, active: str, content: str, date_control: str = "") -> str:
+def layout(title: str, subtitle: str, active: str, content: str, date_control: str = "", body_class: str | None = None) -> str:
     nav = "".join(
         f'<a class="{ "active" if active == key else "" }" href="{href}">{label}</a>'
         for key, label, href in [
@@ -233,7 +490,8 @@ def layout(title: str, subtitle: str, active: str, content: str, date_control: s
             ("events", "数据库", "/events"),
         ]
     )
-    body_class = f'{active}-page'
+    if body_class is None:
+        body_class = f'{active}-page'
     script = """
 <script>
 document.addEventListener('click', (event) => {
@@ -416,6 +674,121 @@ def donut(items, name_key, label):
     return f'<div class="donut-row"><div class="donut" data-label="{esc(label)}" style="background:conic-gradient({bg})"></div><div>{bar_list(items, name_key)}</div></div>'
 
 
+_COMPOSITION_OTHER_COLOR = "#b8ad95"
+
+
+def composition_pane(items: list[dict[str, Any]], name_keys: list[str] | str,
+                      *, unit_label: str = "events") -> str:
+    """One pane: a large donut (left, half the card) + a colored bar list
+    (right, half the card). Donut segments and bar fills share the same
+    TIMELINE_PALETTE so colors line up across donut → bars → timeline.
+
+    `name_keys` is a list of dict keys to try in order when extracting the
+    bucket name from an item — supports rows from compute_breakdown (which
+    uses 'name') and rows from query_summary (which uses 'source'/'project'
+    /etc) without forking the function."""
+    if isinstance(name_keys, str):
+        name_keys = [name_keys]
+
+    def _name_of(item: dict) -> str:
+        for k in name_keys:
+            v = item.get(k)
+            if v:
+                return str(v)
+        return "misc"
+
+    items = list(items or [])
+    total = sum(int(i["count"]) for i in items)
+    if total <= 0:
+        return '<div class="cc-pane-body cc-pane-empty"><div class="label">暂无数据</div></div>'
+
+    # Stable per-item color: ranked by current order (which is count desc from
+    # query_summary), top-N from the timeline palette, rest neutral grey so
+    # the dominant categories never collide with each other.
+    color_for: dict[str, str] = {}
+    for idx, item in enumerate(items):
+        name = _name_of(item)
+        color_for[name] = (
+            TIMELINE_PALETTE[idx] if idx < len(TIMELINE_PALETTE) else _COMPOSITION_OTHER_COLOR
+        )
+
+    # Conic gradient segments for the donut, in the same order as the bar list.
+    segs: list[str] = []
+    pos = 0.0
+    for item in items:
+        name = _name_of(item)
+        pct = int(item["count"]) / total * 100
+        end = pos + pct
+        segs.append(f"{color_for[name]} {pos:.3f}% {end:.3f}%")
+        pos = end
+    if pos < 100:
+        segs.append(f"#ece3d2 {pos:.3f}% 100%")
+    donut_html = (
+        f'<div class="cc-donut" style="background:conic-gradient({", ".join(segs)})">'
+        f'<div class="cc-donut-hole">'
+        f'<div class="cc-donut-total">{total}</div>'
+        f'<div class="cc-donut-label">{esc(unit_label)}</div>'
+        f"</div></div>"
+    )
+
+    # Bars: width ∝ count / max, share% to the right; matched swatch on the left.
+    max_count = max((int(i["count"]) for i in items), default=1)
+    bar_rows = []
+    for item in items[:14]:
+        name = _name_of(item)
+        count = int(item["count"])
+        width = max(3, count / max_count * 100)
+        share = count / total * 100
+        color = color_for[name]
+        bar_rows.append(
+            f'<div class="cc-bar">'
+            f'<span class="cc-bar-sw" style="background:{color}"></span>'
+            f'<span class="cc-bar-name" title="{esc(name)}">{esc(name)}</span>'
+            f'<span class="cc-bar-track"><span class="cc-bar-fill" style="width:{width:.2f}%;background:{color}"></span></span>'
+            f'<span class="cc-bar-count">{count}</span>'
+            f'<span class="cc-bar-pct">{share:.0f}%</span>'
+            f"</div>"
+        )
+
+    return (
+        '<div class="cc-pane-body">'
+        f'<div class="cc-donut-wrap">{donut_html}</div>'
+        f'<div class="cc-bars">{"".join(bar_rows)}</div>'
+        "</div>"
+    )
+
+
+def composition_card(today: dict[str, Any], *, mode: str = "source", unit: str = "count") -> str:
+    """Multi-dimension composition card. One donut + matching colored bar
+    list per dimension, only the pane matching the global `data-mode` is
+    shown. The global dim-bar above the page drives `data-mode` for both
+    this card and the timeline card."""
+    # name_key was per-dim historically (matched the SQL column alias from
+    # query_summary). With compute_breakdown all rows now use "name", but we
+    # still fall back to the legacy keys so dims that haven't been recomputed
+    # (composition card on pages other than /today) keep working.
+    dims = [
+        ("source", today.get("by_source") or [], ["name", "source"]),
+        ("project", today.get("by_project") or [], ["name", "project"]),
+        ("device", today.get("by_device") or [], ["name", "device_id"]),
+        ("location", today.get("by_location") or [], ["name", "location_id"]),
+        ("activity", today.get("by_activity") or [], ["name"]),
+    ]
+    unit_label = "chars" if unit == "chars" else "events"
+    panes = []
+    for dim_id, items, name_keys in dims:
+        cls = "cc-pane show" if dim_id == mode else "cc-pane"
+        panes.append(
+            f'<div class="{cls}" data-for="{dim_id}">{composition_pane(items, name_keys, unit_label=unit_label)}</div>'
+        )
+    return (
+        f'<div class="card composition-card" data-mode="{esc(mode)}">'
+        f'<div class="bucket-head"><h2>分布构成</h2></div>'
+        f'{"".join(panes)}'
+        f"</div>"
+    )
+
+
 def pct_text(count: int, total: int) -> str:
     if total <= 0:
         return "0%"
@@ -470,10 +843,385 @@ def sparkline(hours: list[dict[str, Any]]) -> str:
     return f'<div class="spark">{"".join(bars)}</div><div class="spark-labels"><span>00</span><span>06</span><span>12</span><span style="text-align:right">23</span></div>'
 
 
+# Top-2 colors must be perceptually far apart, because the dominant source
+# and the runner-up usually account for >70% of events and any blue/purple
+# adjacency makes the timeline unreadable. Hues are spaced ~120° apart for
+# the first three slots, then we fill in.
+TIMELINE_PALETTE = [
+    "#2f6fed",  # 1. blue
+    "#f59e0b",  # 2. amber       (very far from blue)
+    "#16a34a",  # 3. green
+    "#ef4444",  # 4. red
+    "#7b61ff",  # 5. purple
+    "#14b8a6",  # 6. teal
+    "#d946ef",  # 7. magenta
+    "#0ea5e9",  # 8. sky
+    "#84cc16",  # 9. lime
+    "#f43f5e",  # 10. rose
+]
+
+
+HISTOGRAM_BIN_MINUTES = 20  # 24h / 20min = 72 bins
+SWIMLANE_MAX_LANES = 8       # top-N categories get their own lane; rest -> "其他"
+
+
+def event_timeline_card(
+    events: list[dict[str, Any]], date: str,
+    *, mode: str = "source", boundary_hour: int | None = None,
+) -> str:
+    """A 24h horizontal timeline with three switchable view styles and three
+    switchable color-by dimensions. All views share one tooltip element so
+    hovering any tick / histogram segment / swimlane chip shows the same rich
+    info card. Clicking jumps to /events with the relevant time-window filter.
+
+    View styles:
+      - ticks      : every event is a hair-line at its exact minute (default)
+      - histogram  : 20-min bins, stacked by current color-by dimension
+                     (read total volume + per-category breakdown at a glance)
+      - swimlane   : one row per top-N category, ticks placed in their own lane
+                     (instantly see what you were doing when)
+
+    Switching is CSS-driven via `data-style` + `data-mode` attributes on the
+    card root, so we never re-render — one attribute flip toggles visibility
+    and recolors. The histogram and swimlane DOM trees are rendered once per
+    dimension (3 panes each); CSS attribute selectors show only the active
+    combination."""
+
+    from collections import defaultdict
+
+    DIMS = ("source", "project", "device", "location", "activity")
+    if mode not in DIMS:
+        mode = "source"
+
+    # Shifted-day boundary: events at e.g. 02:30 rendered as if at the
+    # END of "yesterday's" timeline (i.e. position 22:30 if boundary=4).
+    from daytrace.stats import DAY_BOUNDARY_HOUR as _DAY_B
+    if boundary_hour is None:
+        boundary_hour = _DAY_B
+    boundary_min = (boundary_hour % 24) * 60
+
+    def shifted(abs_min: int) -> int:
+        """Map clock-minute (0..1439) to position-minute (0..1439) on the
+        shifted day axis where boundary_hour is the left edge."""
+        return (abs_min - boundary_min) % (24 * 60)
+
+    # ---- 1. Place each event on the 0..1440-minute axis -----------------
+    ticks: list[dict[str, Any]] = []
+    counts: dict[str, dict[str, int]] = {d: {} for d in DIMS}
+    for ev in events:
+        start = ev.get("start") or ""
+        if len(start) < 16:
+            continue
+        try:
+            hour = int(start[11:13])
+            minute = int(start[14:16])
+        except ValueError:
+            continue
+        if not (0 <= hour < 24 and 0 <= minute < 60):
+            continue
+        abs_min = hour * 60 + minute
+        pos_min = shifted(abs_min)
+        source = (ev.get("source") or "other") or "other"
+        project = (ev.get("project") or "misc") or "misc"
+        device = (ev.get("device_id") or "unknown") or "unknown"
+        location = (ev.get("location_id") or "unknown") or "unknown"
+        activity = (ev.get("activity") or "未分类") or "未分类"
+        counts["source"][source] = counts["source"].get(source, 0) + 1
+        counts["project"][project] = counts["project"].get(project, 0) + 1
+        counts["device"][device] = counts["device"].get(device, 0) + 1
+        counts["location"][location] = counts["location"].get(location, 0) + 1
+        counts["activity"][activity] = counts["activity"].get(activity, 0) + 1
+        ticks.append(
+            {
+                "min": pos_min,                    # axis-relative for bin indexing
+                "pos": pos_min / (24 * 60) * 100,  # axis-relative percentage
+                "source": source,
+                "project": project,
+                "device": device,
+                "location": location,
+                "activity": activity,
+                "title": ev.get("title") or "",
+                "time": start[11:16],              # original wall-clock for tooltip
+            }
+        )
+
+    # ---- 2. Palette per dimension (top-N, rest get a neutral grey) ------
+    palettes: dict[str, dict[str, str]] = {}
+    for cat, by_count in counts.items():
+        top = sorted(by_count.items(), key=lambda kv: (-kv[1], kv[0]))[: len(TIMELINE_PALETTE)]
+        palettes[cat] = {name: TIMELINE_PALETTE[i] for i, (name, _) in enumerate(top)}
+
+    OTHER_COLOR = "#b8ad95"
+
+    def color_for(cat: str, name: str) -> str:
+        return palettes[cat].get(name, OTHER_COLOR)
+
+    # CSS color rules for the **Overall** swim row — those ticks live above
+    # the per-dim panes and recolor when `data-mode` changes. We emit one
+    # rule per (dim, value) so a single attribute flip on the card recolors
+    # all 248 overall ticks at once, with no DOM rewrite.
+    color_rules: list[str] = []
+    for cat in DIMS:
+        for name, color in palettes[cat].items():
+            safe = name.replace("\\", "\\\\").replace('"', '\\"')
+            color_rules.append(
+                f'.timeline-card[data-mode="{cat}"] '
+                f'.tl-swim-tick-overall[data-{cat}="{safe}"]'
+                f'{{background:{color};}}'
+            )
+
+    # ---- 4. Tick view ---------------------------------------------------
+    # Hour grid labels are wall-clock hours, but positions follow the
+    # shifted axis. For boundary=4 the labels read 04,06,08,...,02,04.
+    hour_grid = "".join(
+        f'<div class="tl-hour" style="left:{i / 12 * 100:.4f}%"><span>{(boundary_hour + i * 2) % 24:02d}</span></div>'
+        for i in range(13)  # 13 ticks at positions 0%, 8.33%, ..., 100%
+    )
+
+    # (ticks view was removed — histogram + swimlane cover both
+    # "see-every-event" and "see-density" use cases.)
+
+    # ---- 5. Histogram view: 20-min stacked bins per dimension ----------
+    # Per-dimension bins[bin_idx][name] = count
+    bin_count = (24 * 60) // HISTOGRAM_BIN_MINUTES  # 72
+    bins_by_cat: dict[str, list[dict[str, int]]] = {
+        cat: [defaultdict(int) for _ in range(bin_count)] for cat in DIMS
+    }
+    for t in ticks:
+        idx = t["min"] // HISTOGRAM_BIN_MINUTES
+        for cat in DIMS:
+            bins_by_cat[cat][idx][t[cat]] += 1
+
+    bin_width_pct = 100.0 / bin_count
+    # Global max bin total per dimension to scale heights independently.
+    max_total_by_cat: dict[str, int] = {
+        cat: max((sum(b.values()) for b in bins), default=0) or 1
+        for cat, bins in bins_by_cat.items()
+    }
+
+    def render_hist_pane(cat: str) -> str:
+        bins = bins_by_cat[cat]
+        max_total = max_total_by_cat[cat]
+        # Per-pane y-axis: 4 ticks (25/50/75/100% of max) with dashed grid lines.
+        grid_parts: list[str] = []
+        ytick_parts: list[str] = []
+        for frac in (0.25, 0.5, 0.75, 1.0):
+            value = max(1, round(max_total * frac))
+            pct = frac * 100
+            grid_parts.append(
+                f'<div class="tl-grid-line" style="bottom:{pct:.0f}%"></div>'
+            )
+            ytick_parts.append(
+                f'<span class="tl-y-tick" style="bottom:{pct:.0f}%">{value}</span>'
+            )
+        bin_html_parts = []
+        for idx, bucket in enumerate(bins):
+            total = sum(bucket.values())
+            if total == 0:
+                continue
+            left = idx * bin_width_pct
+            height = total / max_total * 100
+            # Sort segments: known palette names first (palette order), then unknowns by count desc.
+            ordered = sorted(
+                bucket.items(),
+                key=lambda kv: (
+                    list(palettes[cat].keys()).index(kv[0])
+                    if kv[0] in palettes[cat]
+                    else len(palettes[cat]) + 1,
+                    -kv[1],
+                ),
+            )
+            # column-reverse stacks bottom-up; segments share the column height by flex weight
+            seg_html = "".join(
+                f'<span class="tl-seg" data-name="{esc(name)}" data-count="{c}" '
+                f'style="background:{color_for(cat, name)};flex:{c}"></span>'
+                for name, c in ordered
+            )
+            start_min = idx * HISTOGRAM_BIN_MINUTES
+            end_min = start_min + HISTOGRAM_BIN_MINUTES
+            window = f"{start_min // 60:02d}:{start_min % 60:02d}–{end_min // 60:02d}:{end_min % 60:02d}"
+            # Encode breakdown as a compact data-attr for tooltip rendering
+            breakdown_json = ";".join(
+                f"{esc(n)}|{c}|{color_for(cat, n)}" for n, c in ordered
+            )
+            bin_html_parts.append(
+                f'<div class="tl-bin" '
+                f'data-bin="{idx}" data-window="{window}" data-total="{total}" '
+                f'data-breakdown="{breakdown_json}" data-start="{start_min}" data-end="{end_min}" '
+                f'style="left:{left:.4f}%;width:{bin_width_pct:.4f}%;height:{height:.2f}%">'
+                f"{seg_html}"
+                f"</div>"
+            )
+        # Hour grid is rendered inside the pane so its 0-100% spans the pane's
+        # x-range (which is inset for the y-axis labels), not the full canvas.
+        # Labels rotate to match the shifted-day boundary.
+        pane_hour_grid = "".join(
+            f'<div class="tl-hour" style="left:{i / 12 * 100:.4f}%"><span>{(boundary_hour + i * 2) % 24:02d}</span></div>'
+            for i in range(13)
+        )
+        return (
+            f'<div class="tl-hist-pane" data-for="{cat}">'
+            f"{pane_hour_grid}"
+            f'{"".join(grid_parts)}'
+            f'<div class="tl-y-ticks">{"".join(ytick_parts)}</div>'
+            f'{"".join(bin_html_parts)}'
+            f"</div>"
+        )
+
+    histogram_html = (
+        f'<div class="tl-hist">{"".join(render_hist_pane(c) for c in DIMS)}</div>'
+    )
+
+    # ---- 6. Swimlane view: top-N categories each get a row -------------
+    def render_swim_pane(cat: str) -> str:
+        names = list(palettes[cat].keys())[:SWIMLANE_MAX_LANES]
+        has_other = any(t[cat] not in names for t in ticks)
+        lanes = names + (["其他"] if has_other else [])
+        lane_html_parts = []
+        for lane_name in lanes:
+            if lane_name == "其他":
+                lane_ticks = [t for t in ticks if t[cat] not in names]
+                color = OTHER_COLOR
+                count = len(lane_ticks)
+            else:
+                lane_ticks = [t for t in ticks if t[cat] == lane_name]
+                color = color_for(cat, lane_name)
+                count = len(lane_ticks)
+            tick_marks = "".join(
+                f'<span class="tl-swim-tick" '
+                f'data-time="{esc(t["time"])}" data-min="{t["min"]}" '
+                f'data-source="{esc(t["source"])}" data-project="{esc(t["project"])}" '
+                f'data-device="{esc(t["device"])}" data-location="{esc(t["location"])}" '
+                f'data-activity="{esc(t["activity"])}" '
+                f'data-title="{esc(t["title"])}" '
+                f'style="left:{t["pos"]:.4f}%;background:{color}"></span>'
+                for t in lane_ticks
+            )
+            lane_html_parts.append(
+                f'<div class="tl-swim-row">'
+                f'<div class="tl-swim-label" style="border-left:3px solid {color}">'
+                f'<span class="tl-swim-name" title="{esc(lane_name)}">{esc(lane_name)}</span>'
+                f'<span class="tl-swim-count muted">×{count}</span>'
+                f"</div>"
+                f'<div class="tl-swim-track">{tick_marks}</div>'
+                f"</div>"
+            )
+        return f'<div class="tl-swim-pane" data-for="{cat}">{"".join(lane_html_parts)}</div>'
+
+    # Overall aggregate lane: ALL events on one track, drawn above the
+    # per-category panes so density is visible regardless of the active
+    # dimension. Neutral color so it doesn't masquerade as one category.
+    overall_ticks = "".join(
+        f'<span class="tl-swim-tick tl-swim-tick-overall" '
+        f'data-time="{esc(t["time"])}" data-min="{t["min"]}" '
+        f'data-source="{esc(t["source"])}" data-project="{esc(t["project"])}" '
+        f'data-device="{esc(t["device"])}" data-location="{esc(t["location"])}" '
+        f'data-activity="{esc(t["activity"])}" '
+        f'data-title="{esc(t["title"])}" '
+        f'style="left:{t["pos"]:.4f}%"></span>'
+        for t in ticks
+    )
+    overall_row = (
+        '<div class="tl-swim-row tl-swim-overall">'
+        '<div class="tl-swim-label tl-swim-overall-label">'
+        '<span class="tl-swim-name">总览</span>'
+        f'<span class="tl-swim-count muted">×{len(ticks)}</span>'
+        '</div>'
+        f'<div class="tl-swim-track tl-swim-overall-track">{overall_ticks}</div>'
+        '</div>'
+    )
+    swimlane_html = (
+        f'<div class="tl-swim">{overall_row}{"".join(render_swim_pane(c) for c in DIMS)}</div>'
+    )
+
+    # ---- 7. Legends, tabs, tooltip, JS ---------------------------------
+    def legend_block(cat: str, palette: dict[str, str], active: bool) -> str:
+        if not palette:
+            items_html = '<span class="muted">无数据</span>'
+        else:
+            items_html = "".join(
+                f'<span class="tl-legend-item"><span class="tl-swatch" style="background:{color}"></span>{esc(name)} <span class="muted">×{counts[cat][name]}</span></span>'
+                for name, color in palette.items()
+            )
+        cls = "tl-legend show" if active else "tl-legend"
+        return f'<div class="{cls}" data-for="{cat}">{items_html}</div>'
+
+    legends_html = "".join(
+        legend_block(c, palettes[c], active=(c == mode)) for c in DIMS
+    )
+
+    style_tabs_html = (
+        '<div class="tl-style-tabs" role="tablist" aria-label="视图样式">'
+        '<button type="button" class="tl-style-tab active" data-style="swimlane">泳道</button>'
+        '<button type="button" class="tl-style-tab" data-style="histogram">直方图</button>'
+        "</div>"
+    )
+
+    style_html = "<style>" + "".join(color_rules) + "</style>" if color_rules else ""
+
+    tooltip_html = '<div class="tl-tooltip" hidden></div>'
+
+    # The handler does three things: tab switching (style+mode), hover tooltip
+    # rendering, and click → /events filter jump. All scoped to this card via
+    # the wrapping closure on document.currentScript.
+    js_html = (
+        "<script>(function(){"
+        "var s=document.currentScript;var card=s&&s.closest('.timeline-card');if(!card)return;"
+        "var date=card.getAttribute('data-date');"
+        "var tip=card.querySelector('.tl-tooltip');"
+        # Style tab handler (mode tabs were removed — global dim-bar drives mode)
+        "card.querySelectorAll('.tl-style-tab').forEach(function(btn){btn.addEventListener('click',function(){"
+        "card.setAttribute('data-style',btn.dataset.style);"
+        "card.querySelectorAll('.tl-style-tab').forEach(function(b){b.classList.toggle('active',b===btn);});"
+        "});});"
+        # tooltip helpers
+        "function chip(label,val,color){if(!val)return '';var sw=color?('<span class=\"tl-tip-sw\" style=\"background:'+color+'\"></span>'):'';return '<span class=\"tl-tip-chip\">'+sw+'<b>'+label+'</b> '+val+'</span>';}"
+        "function esc(s){return String(s==null?'':s).replace(/[&<>\"]/g,function(c){return({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'})[c];});}"
+        "function showTip(html,ev){tip.innerHTML=html;tip.hidden=false;var r=card.getBoundingClientRect();var x=ev.clientX-r.left+12;var y=ev.clientY-r.top+12;var w=tip.offsetWidth;if(x+w>card.clientWidth-8)x=card.clientWidth-w-8;tip.style.left=x+'px';tip.style.top=y+'px';}"
+        "function hideTip(){tip.hidden=true;}"
+        # Per-tick / per-swim-tick tooltip
+        "function bindEvent(el){el.addEventListener('mousemove',function(ev){var html='<div class=\"tl-tip-time\">'+esc(el.dataset.time)+'</div><div class=\"tl-tip-title\">'+esc(el.dataset.title||'(无标题)')+'</div>'+chip('活动',esc(el.dataset.activity),null)+chip('来源',esc(el.dataset.source),null)+chip('项目',esc(el.dataset.project),null)+chip('设备',esc(el.dataset.device),null)+chip('位置',esc(el.dataset.location),null);showTip(html,ev);});el.addEventListener('mouseleave',hideTip);el.addEventListener('click',function(){if(!date)return;var t=el.dataset.time||'00:00';location.href='/events?start_from='+encodeURIComponent(date)+'&start_to='+encodeURIComponent(date)+'&search='+encodeURIComponent(el.dataset.title||'');});}"
+        "card.querySelectorAll('.tl-swim-tick').forEach(bindEvent);"
+        # Per-bin tooltip + click filters to the 20-min window
+        "card.querySelectorAll('.tl-bin').forEach(function(bin){bin.addEventListener('mousemove',function(ev){var bd=(bin.dataset.breakdown||'').split(';').filter(Boolean);var rows=bd.map(function(p){var x=p.split('|');return chip(esc(x[0]),'×'+x[1],x[2]);}).join('');var html='<div class=\"tl-tip-time\">'+esc(bin.dataset.window)+' · 共 '+bin.dataset.total+' 条</div>'+rows;showTip(html,ev);});bin.addEventListener('mouseleave',hideTip);bin.addEventListener('click',function(){if(!date)return;var sm=parseInt(bin.dataset.start,10),em=parseInt(bin.dataset.end,10);function fmt(m){return ('0'+(m/60|0)).slice(-2)+':'+('0'+(m%60)).slice(-2)+':00';}location.href='/events?start_from='+encodeURIComponent(date+'T'+fmt(sm))+'&start_to='+encodeURIComponent(date+'T'+fmt(em-1));});});"
+        "})();</script>"
+    )
+
+    empty_hint = (
+        '<div class="tl-empty">当天暂无事件</div>'
+        if not ticks
+        else f'<div class="tl-meta">共 {len(ticks)} 条事件 · 切换 <b>视图样式</b> 看不同呈现；hover 看详情，点击跳到对应时间窗的数据库</div>'
+    )
+
+    return (
+        f'<div class="card wide-card timeline-card" data-mode="{esc(mode)}" data-style="swimlane" data-date="{esc(date or "")}">'
+        f'<div class="bucket-head"><h2>一天时间轴 · {esc(date or "")}</h2>'
+        f'<div class="tl-tab-group">{style_tabs_html}</div>'
+        f"</div>"
+        f"{style_html}"
+        f'<div class="tl-axis-wrap">'
+        f"  {histogram_html}"
+        f"  {swimlane_html}"
+        f"  {tooltip_html}"
+        f"</div>"
+        f'<div class="tl-axis-bottom">'
+        f'<span>{boundary_hour:02d}:00</span>'
+        f'<span>{(boundary_hour + 6) % 24:02d}:00</span>'
+        f'<span>{(boundary_hour + 12) % 24:02d}:00</span>'
+        f'<span>{(boundary_hour + 18) % 24:02d}:00</span>'
+        f'<span>{boundary_hour:02d}:00</span>'
+        f'</div>'
+        f"{empty_hint}"
+        f"{legends_html}"
+        f"{js_html}"
+        f"</div>"
+    )
+
+
 def mini_table(items: list[dict[str, Any]], name_key: str, total: int, label: str) -> str:
     rows = []
     for item in items[:8]:
-        name = item.get(name_key) or "未归因"
+        name = item.get(name_key) or "misc"
         count = int(item["count"])
         rows.append(f'<tr><td>{esc(name)}</td><td style="text-align:right;font-variant-numeric:tabular-nums">{count}</td><td style="text-align:right;color:var(--muted)">{pct_text(count,total)}</td></tr>')
     body = "".join(rows) or '<tr><td colspan="3" class="label">暂无数据</td></tr>'
@@ -498,8 +1246,8 @@ def daily_report_text(today: dict[str, Any], hours: list[dict[str, Any]]) -> str
 <ul>
   <li>主导来源是 <strong>{esc(display_source(top_source))}</strong>，主导项目是 <strong>{esc(top_project)}</strong>。</li>
   <li>活跃时间覆盖 <strong>{len(active_hours)}</strong> 个小时段，峰值在 <strong>{esc(busiest['hour'])}</strong>，该小时有 <strong>{int(busiest['count'])}</strong> 条事件。</li>
-  <li>未归因/待检查事件 <strong>{low}</strong> 条，占当天 <strong>{pct_text(low,total)}</strong>；{confidence_note}。</li>
-  <li>下面优先看来源、项目、设备/位置和小时分布，不再展示质量较差的时间轴。</li>
+  <li>misc/待检查事件 <strong>{low}</strong> 条，占当天 <strong>{pct_text(low,total)}</strong>；{confidence_note}。</li>
+  <li>下方时间轴可按 来源 / 项目 / 设备 切换上色，看一天的真实分布。</li>
 </ul>
 """
 
@@ -508,7 +1256,67 @@ def date_filter(action: str, date: str | None, extra: str = "") -> str:
     return f"""<div class="filters card"><form method="get" action="{action}" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label>日期 <input name="date" value="{esc(date or '')}" placeholder="YYYY-MM-DD"></label>{extra}<button type="submit">查看</button><a href="{action}">全部日期</a></form></div>"""
 
 
-def today_page(db_path: Path, date: str | None):
+DIMENSIONS = [
+    ("source", "来源"),
+    ("project", "项目"),
+    ("device", "设备"),
+    ("activity", "活动"),
+]
+
+# Global unit toggle: "条目" weights each event as 1, "字数" weights each
+# event by len(title)+len(summary). Affects donut shares and project-card
+# share bars. Persisted via URL ?unit=chars.
+UNITS = [
+    ("count", "条目"),
+    ("chars", "字数"),
+]
+
+
+def _event_weight(ev: dict, unit: str) -> int:
+    if unit == "chars":
+        return int(ev.get("char_count") or 0)
+    return 1
+
+
+def compute_breakdown(events: list[dict], field: str, unit: str = "count") -> list[dict]:
+    """Group events by `field`, return [{name, count, share}] desc by count.
+
+    `count` here is the unit-weighted aggregate (events or chars). `share`
+    is normalized over the unit total."""
+    from collections import Counter
+    bag: Counter = Counter()
+    for ev in events:
+        name = ev.get(field)
+        if not name:
+            # field-specific fallback
+            if field == "project":
+                name = ev.get("project_guess") or "misc"
+            elif field == "device_id":
+                name = "unknown"
+            elif field == "location_id":
+                name = "unknown"
+            elif field == "activity":
+                name = "未分类"
+            else:
+                name = "other"
+        bag[str(name)] += _event_weight(ev, unit)
+    total = sum(bag.values()) or 1
+    return [{"name": n, "count": c, "share": round(c / total, 4)} for n, c in bag.most_common()]
+
+
+def _mode_link(path: str, params: dict[str, str | None]) -> str:
+    """Build a URL preserving only the truthy params (drops empty values)."""
+    qs = urlencode({k: v for k, v in params.items() if v})
+    return f"{path}?{qs}" if qs else path
+
+
+def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: str | None = None):
+    valid_modes = {dim_id for dim_id, _ in DIMENSIONS}
+    if mode not in valid_modes:
+        mode = "source"
+    valid_units = {u for u, _ in UNITS}
+    if unit not in valid_units:
+        unit = "count"
     con = connect(db_path)
     all_dates = available_dates(con)
     if not date:
@@ -523,44 +1331,163 @@ def today_page(db_path: Path, date: str | None):
         "needs_review": [],
     }
     today = query_today(con, date) if date else empty_today
-    s = today["summary"]
-    total = int(s["total_events"])
     hours = hourly_distribution(con, date) if date else []
-    review_rows = "".join(
-        f"<div class='mini-event'><strong>{esc(e['title'])}</strong><div class='muted'>{esc(display_source(e['source']))} · {esc(e['project'])}</div></div>"
-        for e in today["needs_review"][:8]
-    ) or "<div class='label'>暂无需要人工检查的事件</div>"
+    # Shifted-day window: 04:00–04:00 by default. Affects timeline + project
+    # cards + composition shares. Cached day_report rows use the same window.
+    from daytrace.db import events_for_shifted_day
+    day_events = events_for_shifted_day(con, date, limit=2000) if date else []
+    total = len(day_events)  # subtitle uses shifted-day total, not calendar-day
+    # Enrich events with activity labels from the side table (filled by AI).
+    if date:
+        from daytrace.db import load_activity_labels_for_date
+        labels = load_activity_labels_for_date(con, date)
+        for ev in day_events:
+            ev["activity"] = labels.get(ev["id"], "未分类") if labels else "未分类"
+        # Recompute every dim breakdown with the active unit (count or chars)
+        # so the composition donut + per-project shares reflect what the user
+        # picked in the dim-bar.
+        today["by_source"]   = compute_breakdown(day_events, "source",      unit)
+        today["by_project"]  = compute_breakdown(day_events, "project",     unit)
+        today["by_device"]   = compute_breakdown(day_events, "device_id",   unit)
+        today["by_location"] = compute_breakdown(day_events, "location_id", unit)
+        today["by_activity"] = compute_breakdown(day_events, "activity",    unit)
+    timeline_html = event_timeline_card(day_events, date or "", mode=mode)
+    composition_html = composition_card(today, mode=mode, unit=unit)
+
+    # Lazy-regenerate stats channels if the day_report row is missing or
+    # stale. AI channels stay untouched (those are expensive — user triggers
+    # them via the backfill script / API explicitly).
+    day_report_row = None
+    day_channels: dict[str, str | None] = {}
+    if date:
+        from daytrace.daily_report import regenerate_day_from_db
+        if not con.execute(
+            "SELECT 1 FROM day_report WHERE date = ?", (date,)
+        ).fetchone():
+            try:
+                regenerate_day_from_db(con, date, include_ai=False)
+            except Exception:  # never let report-render fail because of regen
+                pass
+        day_report_row = con.execute(
+            "SELECT total_events, active_minutes, events_hash FROM day_report WHERE date = ?",
+            (date,),
+        ).fetchone()
+        if day_report_row:
+            for r in con.execute(
+                "SELECT channel, value_json FROM day_channel WHERE date = ?",
+                (date,),
+            ).fetchall():
+                day_channels[r["channel"]] = r["value_json"]
+
+    # Build the rich daily-report body (AI overview + continuity + facts).
+    ai_overview = _safe_load_json(day_channels.get("ai_overview"))
+    ai_continuity = _safe_load_json(day_channels.get("ai_continuity_day"))
+    if day_report_row is None:
+        rich_daily_body = (
+            f"{daily_report_text(today, hours)}"
+            "<div class='muted small' style='margin-top:8px'>(还没有 day_report 缓存；"
+            "运行 backfill 后可看到 AI 速读)</div>"
+        )
+    else:
+        rich_daily_body = (
+            _render_stats_strip_compact(dict(day_report_row), day_channels)
+            + _render_ai_overview_block(ai_overview)
+            + _render_continuity_block(ai_continuity)
+            + _render_facts_block(date or "", day_channels)
+        )
+
     dates_desc = all_dates
     prev_link = next_link = ""
     if date in dates_desc:
         idx = dates_desc.index(date)
         if idx + 1 < len(dates_desc):
             prev_day = dates_desc[idx + 1]
-            prev_link = f'<a href="/today?date={esc(prev_day)}">← 前一天 {esc(prev_day)}</a>'
+            href = _mode_link("/today", {"date": prev_day, "mode": mode if mode != "source" else None})
+            prev_link = f'<a href="{esc(href)}">← 前一天 {esc(prev_day)}</a>'
         if idx - 1 >= 0:
             next_day = dates_desc[idx - 1]
-            next_link = f'<a href="/today?date={esc(next_day)}">后一天 {esc(next_day)} →</a>'
-    day_nav = f'<div class="day-nav">{prev_link}{next_link}<a href="/events?start_from={esc(date)}&start_to={esc(date)}">打开当天数据库</a></div>' if date else ""
+            href = _mode_link("/today", {"date": next_day, "mode": mode if mode != "source" else None})
+            next_link = f'<a href="{esc(href)}">后一天 {esc(next_day)} →</a>'
+    day_nav_inner = (
+        f"{prev_link}{next_link}"
+        f'<a href="/events?start_from={esc(date)}&start_to={esc(date)}">打开当天数据库</a>'
+        if date else ""
+    )
+
+    # Global control bar — day-nav on the left, unit toggle (条目/字数) and
+    # dimension selector on the right. Both selectors are cross-card concerns
+    # that affect every visualization on the page.
+    dim_tabs = "".join(
+        f'<button type="button" class="dim-tab{" active" if dim_id == mode else ""}" data-mode="{dim_id}">{label}</button>'
+        for dim_id, label in DIMENSIONS
+    )
+    unit_tabs = "".join(
+        f'<button type="button" class="unit-tab{" active" if u_id == unit else ""}" data-unit="{u_id}">{label}</button>'
+        for u_id, label in UNITS
+    )
+    dim_bar = (
+        f'<section class="dim-bar">'
+        f'<div class="day-nav">{day_nav_inner}</div>'
+        f'<div class="dim-bar-right">'
+        f'<div class="unit-tabs" title="按条目数或字数统计">{unit_tabs}</div>'
+        f'<div class="dim-tabs">{dim_tabs}</div>'
+        f'</div>'
+        f"</section>"
+    )
+    dim_sync_js = (
+        "<script>(function(){"
+        "function apply(mode){"
+        "document.querySelectorAll('.dim-tab').forEach(function(b){b.classList.toggle('active',b.dataset.mode===mode);});"
+        "document.querySelectorAll('.composition-card,.timeline-card').forEach(function(c){c.setAttribute('data-mode',mode);});"
+        "document.querySelectorAll('.composition-card .cc-pane').forEach(function(p){p.classList.toggle('show',p.dataset.for===mode);});"
+        "document.querySelectorAll('.timeline-card .tl-legend').forEach(function(l){l.classList.toggle('show',l.dataset.for===mode);});"
+        "var url=new URL(location.href);if(mode==='source'){url.searchParams.delete('mode');}else{url.searchParams.set('mode',mode);}"
+        "history.replaceState({},'',url);"
+        # Rewrite same-page links (day-nav etc.) so any in-page navigation
+        # keeps the mode without us threading it everywhere server-side.
+        "document.querySelectorAll('a[href^=\"/today\"]').forEach(function(a){try{var u=new URL(a.href,location.origin);if(mode==='source'){u.searchParams.delete('mode');}else{u.searchParams.set('mode',mode);}a.href=u.pathname+(u.search||'');}catch(e){}});"
+        "}"
+        "document.querySelectorAll('.dim-tab').forEach(function(btn){btn.addEventListener('click',function(){apply(btn.dataset.mode);});});"
+        # Unit toggle reloads — the breakdowns are recomputed server-side.
+        # Save scrollY to sessionStorage before reload, restore on next load.
+        # This keeps users in the project card they were inspecting.
+        "var SCROLL_KEY='daytrace.today.scrollY';"
+        "var saved=sessionStorage.getItem(SCROLL_KEY);"
+        "if(saved!==null){window.scrollTo(0,parseInt(saved,10)||0);sessionStorage.removeItem(SCROLL_KEY);}"
+        "document.querySelectorAll('.unit-tab').forEach(function(btn){btn.addEventListener('click',function(){"
+        "if(btn.classList.contains('active'))return;"
+        "sessionStorage.setItem(SCROLL_KEY,String(window.scrollY));"
+        "var u=btn.dataset.unit;var url=new URL(location.href);"
+        "if(u==='count'){url.searchParams.delete('unit');}else{url.searchParams.set('unit',u);}"
+        "location.href=url.toString();"
+        "});});"
+        "})();</script>"
+    )
+
+    project_cards_html = (
+        project_cards_section(con, date, day_events=day_events, unit=unit, top_n_open=3)
+        if date else ""
+    )
+    highlights_concerns_html = _render_highlights_concerns_card(ai_overview)
+
     content = f"""
-<div class="grid">
-  <div class="card"><div class="metric">{total}</div><div class="label">当天事件</div></div>
-  <div class="card"><div class="metric">{len(s['sources'])}</div><div class="label">来源数量</div></div>
-  <div class="card"><div class="metric">{len(s['projects'])}</div><div class="label">项目数量</div></div>
-  <div class="card"><div class="metric">{s['low_confidence']}</div><div class="label">未归因 / 待检查</div></div>
-</div>
+{dim_bar}
 <section class="report-grid">
-  <div class="card daily-report"><div class="bucket-head"><h2>每日 Report · {esc(date or '无日期')}</h2><span class="tag source">Daily</span></div>{daily_report_text(today, hours)}{day_nav}</div>
-  <div class="card"><h2>来源结构</h2>{donut(today['by_source'], 'source', 'Source')}{report_stack(today['by_source'])}</div>
+  <div class="card daily-report"><div class="bucket-head"><h2>每日 Report · {esc(date or '无日期')}</h2><span class="tag source">Daily</span></div>{rich_daily_body}</div>
+  <div class="right-column">
+    {composition_html}
+    {highlights_concerns_html}
+  </div>
 </section>
-<section class="analysis-grid">
-  <div class="card"><h2>项目占比</h2>{donut(today['by_project'], 'project', 'Project')}</div>
-  <div class="card"><h2>项目排行</h2>{mini_table(today['by_project'], 'project', total, 'Project')}</div>
-  <div class="card"><h2>小时分布</h2>{sparkline(hours)}<div class="label">用于看当天事件密度；这里不再渲染事件时间轴。</div></div>
-  <div class="card"><h2>时空上下文</h2><h3>Device</h3>{bar_list(today['by_device'], 'device_id')}<h3 style="margin-top:16px">Location</h3>{bar_list(today['by_location'], 'location_id')}</div>
-  <div class="card wide-card"><h2>待人工检查</h2>{review_rows}</div>
+<section class="timeline-section">
+  {timeline_html}
 </section>
+{project_cards_html}
+{dim_sync_js}
 """
-    date_control = calendar_control('/today', date, all_dates)
+    # Calendar control: thread `mode` so picking a date on the header keeps it.
+    cal_hidden = {"mode": mode} if mode != "source" else {}
+    date_control = calendar_control('/today', date, all_dates, hidden=cal_hidden)
     return layout("DayTrace · 报告", f"{total} events · daily report", "today", content, date_control=date_control)
 
 
@@ -587,7 +1514,7 @@ def events_table(events, filters: dict[str, str | None], options: dict[str, Any]
 <tr class="{row_class}">
   <td><span class="time" title="{esc(e['start'])}">{esc(format_event_time(e['start']))}</span></td>
   <td class="db-cell"><strong>{esc(display_source(e['source']))}</strong></td>
-  <td class="db-cell">{esc(e['device_id'])}</td>
+  <td class="db-cell">{esc(e.get('activity') or '未分类')}</td>
   <td class="db-cell">{esc(e['location_id'])}</td>
   <td class="db-cell">{esc(e['project'])}</td>
   <td>{display_title_content(e.get('title'), e.get('summary'))}</td>
@@ -599,7 +1526,7 @@ def events_table(events, filters: dict[str, str | None], options: dict[str, Any]
     sort_params = {
         k: v for k, v in {
             "source": filters.get("source"),
-            "device_id": filters.get("device_id"),
+            "activity": filters.get("activity"),
             "location_id": filters.get("location_id"),
             "project": filters.get("project"),
             "start_from": filters.get("start_from"),
@@ -613,7 +1540,7 @@ def events_table(events, filters: dict[str, str | None], options: dict[str, Any]
     date_counts = options.get("date_counts", {})
     date_hidden = {
         "source": filters.get("source"),
-        "device_id": filters.get("device_id"),
+        "activity": filters.get("activity"),
         "location_id": filters.get("location_id"),
         "project": filters.get("project"),
         "search": filters.get("search"),
@@ -623,19 +1550,725 @@ def events_table(events, filters: dict[str, str | None], options: dict[str, Any]
         "start_to": format_date_input(filters.get("start_to")),
     }
     time_filter = f"""<div class=\"time-range\">{date_filter_calendar_control('/events', 'start_from', filters.get('start_from'), date_counts, date_hidden, 'Start', 'All dates')}{date_filter_calendar_control('/events', 'start_to', filters.get('start_to') or filters.get('start_from'), date_counts, date_hidden, 'End', 'Same day' if filters.get('start_from') else 'No end', min_date=filters.get('start_from'), picker_class='end-date')}</div>"""
+    has_active_filter = any(
+        filters.get(k)
+        for k in ("source", "activity", "location_id", "project", "search", "start_from", "start_to")
+    )
+    clear_link = (
+        '<a class="clear-filters" href="/events" title="清空所有筛选条件">✕ 清空筛选</a>'
+        if has_active_filter
+        else '<span class="clear-filters muted" title="当前未设置任何筛选">✕ 清空筛选</span>'
+    )
     return f"""
 <form method="get" action="/events">
   {hidden_order}
-  <div class="table-wrap"><table><colgroup><col class="col-time"><col class="col-source"><col class="col-device"><col class="col-location"><col class="col-project"><col class="col-title"></colgroup>
+  <div class="table-wrap"><table><colgroup><col class="col-time"><col class="col-source"><col class="col-activity"><col class="col-location"><col class="col-project"><col class="col-title"></colgroup>
   <thead><tr>
-    <th><div class="th-title"><a class="sort-link" href="{esc(sort_href)}">Time {sort_arrow}</a></div>{time_filter}</th>
+    <th><div class="th-title"><a class="sort-link" href="{esc(sort_href)}">Time {sort_arrow}</a><span class="clear-filters-wrap">{clear_link}</span></div>{time_filter}</th>
     <th><div class="th-title"><span>Source</span></div>{select_control('source', options['source'], filters.get('source'))}</th>
-    <th><div class="th-title"><span>Device</span></div>{select_control('device_id', options['device_id'], filters.get('device_id'))}</th>
+    <th><div class="th-title"><span>Activity</span></div>{select_control('activity', options['activity'], filters.get('activity'))}</th>
     <th><div class="th-title"><span>Location</span></div>{select_control('location_id', options['location_id'], filters.get('location_id'))}</th>
     <th><div class="th-title"><span>Project</span></div>{select_control('project', options['project'], filters.get('project'))}</th>
     <th><div class="th-title"><span>Title / Content</span><label class="header-filter"><span>Rows</span>{event_limit_control(filters.get('limit'))}</label></div><input name="search" value="{esc(filters.get('search') or '')}" placeholder="Search title/content"></th>
   </tr></thead><tbody>{''.join(rows) or '<tr><td colspan="6">暂无事件</td></tr>'}</tbody></table></div>
 </form>"""
+
+TABLE_TABS = [
+    ("events",      "原始事件"),
+    ("day",         "日报告 (day_report)"),
+    ("day_project", "项目日报告 (day_project_report)"),
+]
+
+
+def table_switcher_html(active: str, qs: dict[str, list[str]]) -> str:
+    """Pill row at the top of the /events page for switching which table to view.
+
+    Preserves the `date` query param so a user filtering by date keeps that
+    filter when they switch tables. Other event-specific filters (source,
+    project, search, etc.) are intentionally dropped — they don't translate."""
+    date = (qs.get("date", [None])[0] or "")
+    pills = []
+    for table_id, label in TABLE_TABS:
+        params = {"table": table_id}
+        if date:
+            params["date"] = date
+        href = "/events" + ("?" + urlencode(params) if params else "")
+        cls = "table-tab" + (" active" if table_id == active else "")
+        pills.append(f'<a class="{cls}" href="{esc(href)}">{esc(label)}</a>')
+    return f'<section class="table-switcher">{"".join(pills)}</section>'
+
+
+def _format_channels_cell(json_str: str | None) -> str:
+    """Render a channel cell: a <details> with raw JSON inside, summary
+    showing key short fact (e.g., headline for AI) when available."""
+    if json_str is None or json_str == "":
+        return '<span class="muted">∅</span>'
+    try:
+        data = json.loads(json_str)
+    except (json.JSONDecodeError, TypeError):
+        return f'<span class="muted">非 JSON</span><pre>{esc(json_str[:120])}</pre>'
+    if data is None:
+        return '<span class="muted">null</span>'
+    if isinstance(data, dict):
+        # Pick a one-line teaser
+        teaser = (
+            data.get("headline")
+            or data.get("summary")
+            or (f"total={data.get('total')}" if "total" in data else "")
+            or (f"count={data.get('count')}" if "count" in data else "")
+            or ""
+        )
+    elif isinstance(data, list):
+        teaser = f"{len(data)} 项"
+    else:
+        teaser = str(data)[:80]
+    pretty = json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True)
+    return (
+        f'<details class="channel-cell"><summary>{esc(teaser)}</summary>'
+        f'<pre>{esc(pretty)}</pre></details>'
+    )
+
+
+def _safe_load_json(json_str: str | None):
+    if not json_str:
+        return None
+    try:
+        return json.loads(json_str)
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def _format_duration_short(minutes: int) -> str:
+    if minutes is None:
+        return "—"
+    if minutes < 60:
+        return f"{minutes}m"
+    h, m = divmod(int(minutes), 60)
+    return f"{h}h {m}m" if m else f"{h}h"
+
+
+def _momentum_chip(momentum: str | None) -> str:
+    icons = {
+        "rising": "↗", "steady": "→", "dropping": "↘",
+        "new": "✨", "paused": "⏸", "blocked": "⛔",
+    }
+    if not momentum:
+        return ""
+    icon = icons.get(momentum, "•")
+    return f'<span class="momentum-chip momentum-{esc(momentum)}">{icon} {esc(momentum)}</span>'
+
+
+def _status_chip(status: str | None) -> str:
+    if not status:
+        return ""
+    return f'<span class="status-chip status-{esc(status)}">{esc(status)}</span>'
+
+
+# ----- day_report: card-per-day human view -----------------------------
+
+def _render_ai_overview_block(overview: dict | None) -> str:
+    """Headline + narrative only. Highlights / Concerns are rendered
+    separately so they can live in the right column next to the donut."""
+    if not overview:
+        return '<div class="dr-headline muted">📰 (今天的 AI 速读还没有生成)</div>'
+    headline = overview.get("headline") or "(尚未生成 AI 速读)"
+    narrative = overview.get("narrative") or ""
+    return (
+        f'<div class="dr-headline">📰 {esc(headline)}</div>'
+        f'<p class="dr-narrative">{esc(narrative)}</p>'
+    )
+
+
+def _render_highlights_concerns_card(overview: dict | None) -> str:
+    """Two-column card (✨ Highlights / ⚠️ Concerns) for the right column.
+    Returns empty string if there's nothing to show — caller can omit it."""
+    if not overview:
+        return ""
+    highlights = overview.get("highlights") or []
+    concerns = overview.get("concerns") or []
+    if not highlights and not concerns:
+        return ""
+    hl = "".join(f"<li>{esc(h)}</li>" for h in highlights)
+    cn = "".join(f"<li>{esc(c)}</li>" for c in concerns)
+    sections = []
+    if hl:
+        sections.append(f'<div class="dr-section"><h4>✨ Highlights</h4><ul class="dr-bullets dr-highlights">{hl}</ul></div>')
+    if cn:
+        sections.append(f'<div class="dr-section"><h4>⚠️ Concerns</h4><ul class="dr-bullets dr-concerns">{cn}</ul></div>')
+    return (
+        '<div class="card highlights-card">'
+        f'<div class="dr-grid">{"".join(sections)}</div>'
+        '</div>'
+    )
+
+
+def _render_continuity_block(continuity: dict | None) -> str:
+    if not continuity:
+        return ""
+    relation = continuity.get("relation_to_yesterday") or ""
+    momentum = continuity.get("momentum") or ""
+    changes = continuity.get("notable_changes") or []
+    changes_html = ""
+    if changes:
+        changes_html = (
+            "<ul class='dr-bullets dr-changes'>"
+            + "".join(f"<li>{esc(c)}</li>" for c in changes)
+            + "</ul>"
+        )
+    return (
+        '<div class="dr-continuity">'
+        f'<span class="dr-cont-label">vs 昨天</span> '
+        f'{_momentum_chip(momentum)} '
+        f'<span class="dr-cont-text">{esc(relation)}</span>'
+        f"{changes_html}"
+        "</div>"
+    )
+
+
+def _render_facts_block(date_val: str, channels: dict[str, str | None]) -> str:
+    longest = _safe_load_json(channels.get("longest_focus_block"))
+    peaks = _safe_load_json(channels.get("peak_windows")) or []
+    quality = _safe_load_json(channels.get("quality")) or {}
+    facts: list[str] = []
+    if longest:
+        facts.append(
+            f"⏱ 最长专注 <b>{esc(longest.get('start','?'))}–{esc(longest.get('end','?'))}</b> "
+            f"({_format_duration_short(longest.get('duration_min', 0))}, "
+            f"{esc(longest.get('dominant_source','?'))} / "
+            f"<a href='/today?date={esc(date_val)}&mode=project'>{esc(longest.get('dominant_project','?'))}</a>)"
+        )
+    if peaks:
+        peak_str = " · ".join(f"{esc(p['label'])}={p['count']}" for p in peaks[:3])
+        facts.append(f"📈 峰值 {peak_str}")
+    if quality:
+        bits = []
+        if quality.get("sensitive"):
+            bits.append(f"sensitive {quality['sensitive']}")
+        if quality.get("missing_project"):
+            bits.append(f"missing project {quality['missing_project']}")
+        if bits:
+            facts.append("🔍 " + " · ".join(bits))
+    if not facts:
+        return ""
+    return '<div class="dr-facts">' + "".join(f"<div class='dr-fact'>{f}</div>" for f in facts) + "</div>"
+
+
+def _render_stats_strip_compact(header: dict, channels: dict[str, str | None]) -> str:
+    """Compact horizontal stats strip for the home page daily-report card."""
+    time_span = _safe_load_json(channels.get("time_span")) or {}
+    switches = _safe_load_json(channels.get("context_switches")) or {}
+    first, last = time_span.get("first") or "?", time_span.get("last") or "?"
+    chips = [
+        (str(header["total_events"]), "events"),
+        (_format_duration_short(header["active_minutes"]), "active"),
+        (f"{first}–{last}", "span"),
+        (str(switches.get("count", 0)), "switches"),
+    ]
+    return (
+        '<div class="dr-stats-compact">'
+        + "".join(
+            f'<div class="dr-stat"><span class="dr-stat-num">{esc(v)}</span><span class="dr-stat-lbl">{esc(lbl)}</span></div>'
+            for v, lbl in chips
+        )
+        + '</div>'
+    )
+
+
+def _render_stats_strip(header: dict, channels: dict[str, str | None]) -> str:
+    time_span = _safe_load_json(channels.get("time_span")) or {}
+    switches = _safe_load_json(channels.get("context_switches")) or {}
+    first, last = time_span.get("first") or "?", time_span.get("last") or "?"
+    chips = [
+        ("dr-stat-num", str(header["total_events"]), "events"),
+        ("dr-stat-num", _format_duration_short(header["active_minutes"]), "active"),
+        ("dr-stat-num", f"{first}–{last}", "span"),
+        ("dr-stat-num", str(switches.get("count", 0)), "switches"),
+    ]
+    return "".join(
+        f'<div class="dr-stat"><span class="{c}">{esc(v)}</span><span class="dr-stat-lbl">{esc(lbl)}</span></div>'
+        for c, v, lbl in chips
+    )
+
+
+def _render_raw_channels_block(channels: dict[str, str | None]) -> str:
+    rows = []
+    for ch, val in sorted(channels.items()):
+        if val is None:
+            continue
+        try:
+            pretty = json.dumps(json.loads(val), ensure_ascii=False, indent=2, sort_keys=True)
+        except (json.JSONDecodeError, TypeError):
+            pretty = str(val)
+        rows.append(
+            f"<details class='dr-raw-row'><summary>{esc(ch)}</summary>"
+            f"<pre>{esc(pretty)}</pre></details>"
+        )
+    return (
+        "<details class='dr-raw-wrap'><summary>原始 channel JSON</summary>"
+        + "".join(rows)
+        + "</details>"
+    )
+
+
+def _format_chars_short(n: int) -> str:
+    if n < 1000:
+        return f"{n} 字"
+    if n < 10000:
+        return f"{n / 1000:.1f}K 字"
+    return f"{n // 1000}K 字"
+
+
+def _render_project_card(date_val: str, row: dict, channels: dict[str, str | None],
+                          *, unit: str = "count", open_by_default: bool) -> str:
+    """One project card for the home page. Collapsed-by-default shows a single
+    line (name + share + status + summary); expanded shows what_was_done,
+    next steps, continuity, top titles, mix."""
+    summary = _safe_load_json(channels.get("ai_summary")) or {}
+    continuity = _safe_load_json(channels.get("ai_continuity")) or {}
+    top_titles = _safe_load_json(channels.get("top_titles")) or []
+    source_mix = _safe_load_json(channels.get("source_mix")) or {}
+    time_span = _safe_load_json(channels.get("time_span")) or {}
+
+    project = row["project"]
+    event_count = row["event_count"]
+    active_min = row["active_minutes"]
+    share_pct = row["share"] * 100
+    chars = int(row.get("chars") or 0)
+    summary_text = summary.get("summary") if isinstance(summary, dict) else ""
+
+    # Fact line shows both quantities; the active unit just controls the bar.
+    fact_line = (
+        f"{event_count} events · {_format_duration_short(active_min)}"
+        + (f" · {_format_chars_short(chars)}" if chars else "")
+    )
+
+    head_html = (
+        '<summary class="pc-summary-row">'
+        f'<span class="pc-project-name" title="{esc(project)}">{esc(project)}</span>'
+        f'<span class="pc-share-pct">{share_pct:.0f}%</span>'
+        f'<div class="pc-share-bar"><div class="pc-share-fill" style="width:{share_pct:.1f}%"></div></div>'
+        f'<span class="pc-events">{fact_line}</span>'
+        '<span class="pc-chevron">◂</span>'
+        '</summary>'
+    )
+
+    # Expanded body
+    body_parts = []
+    if summary_text:
+        body_parts.append(f'<div class="pc-summary-text">{esc(summary_text)}</div>')
+    if isinstance(summary, dict):
+        what_was_done = summary.get("what_was_done") or []
+        next_steps = summary.get("next_steps") or []
+        if what_was_done:
+            body_parts.append(
+                "<div class='pc-section-label'>✅ 做了什么</div>"
+                "<ul class='pc-bullets'>"
+                + "".join(f"<li>{esc(w)}</li>" for w in what_was_done)
+                + "</ul>"
+            )
+        if next_steps:
+            body_parts.append(
+                "<div class='pc-section-label'>➡ 后续</div>"
+                "<ul class='pc-bullets pc-next'>"
+                + "".join(f"<li>{esc(n)}</li>" for n in next_steps)
+                + "</ul>"
+            )
+    if isinstance(continuity, dict) and continuity:
+        body_parts.append(
+            '<div class="pc-continuity">'
+            f'<span class="pc-cont-label">vs 上次活跃</span> '
+            f'{_momentum_chip(continuity.get("momentum"))} '
+            f'<span class="pc-cont-text">{esc(continuity.get("relation_to_previous") or "")}</span>'
+            '</div>'
+        )
+    if top_titles:
+        body_parts.append(
+            "<div class='pc-section-label'>🔖 代表事件</div>"
+            "<ul class='pc-titles'>"
+            + "".join(
+                f"<li><span class='tt-time'>{esc(t.get('time','--:--'))}</span> {esc(t.get('title',''))}</li>"
+                for t in top_titles[:5]
+            )
+            + "</ul>"
+        )
+    meta_bits = []
+    if time_span:
+        meta_bits.append(f"⏱ {esc(time_span.get('first','?'))}–{esc(time_span.get('last','?'))}")
+    if source_mix:
+        mix_str = " · ".join(f"{esc(k)}({v})" for k, v in sorted(source_mix.items(), key=lambda kv: -kv[1])[:5])
+        meta_bits.append(f"🎛 {mix_str}")
+    if meta_bits:
+        body_parts.append(f'<div class="pc-meta muted">{" &nbsp; ".join(meta_bits)}</div>')
+    # Action links
+    body_parts.append(
+        '<div class="pc-actions">'
+        f'<a href="/events?project={esc(project)}&start_from={esc(date_val)}&start_to={esc(date_val)}">看该项目的原始事件 →</a>'
+        '</div>'
+    )
+
+    body_html = f'<div class="pc-body">{"".join(body_parts)}</div>'
+    open_attr = " open" if open_by_default else ""
+    return f'<details class="project-card"{open_attr}>{head_html}{body_html}</details>'
+
+
+def project_cards_section(
+    con, date: str, *, day_events: list[dict] | None = None,
+    unit: str = "count", top_n_open: int = 3,
+) -> str:
+    """Render the per-project cards for one date.
+
+    When `unit='chars'`, the share bars and ordering reweight by total char
+    count per project (sum of title+summary lengths) instead of event count.
+    Each card still shows raw event_count + active_minutes as facts; the
+    share % is the unit-weighted one."""
+    rows = con.execute(
+        "SELECT project, event_count, active_minutes, share, updated_at"
+        " FROM day_project_report WHERE date = ?",
+        (date,),
+    ).fetchall()
+    if not rows:
+        return ""
+    rows = [dict(r) for r in rows]
+
+    # If chars unit, recompute char_count + share per project from day_events.
+    if unit == "chars" and day_events:
+        from collections import Counter
+        char_per_project: Counter = Counter()
+        for ev in day_events:
+            p = (ev.get("project") or ev.get("project_guess") or "misc")
+            char_per_project[p] += int(ev.get("char_count") or 0)
+        total_chars = sum(char_per_project.values()) or 1
+        for r in rows:
+            r["chars"] = char_per_project.get(r["project"], 0)
+            r["share"] = r["chars"] / total_chars
+    rows.sort(key=lambda r: -(r.get("chars", r.get("event_count", 0)) if unit == "chars" else r.get("event_count", 0)))
+
+    cards = []
+    for i, prow in enumerate(rows):
+        channel_rows = con.execute(
+            "SELECT channel, value_json FROM day_project_channel"
+            " WHERE date = ? AND project = ?",
+            (date, prow["project"]),
+        ).fetchall()
+        channels = {r["channel"]: r["value_json"] for r in channel_rows}
+        cards.append(_render_project_card(date, prow, channels, unit=unit, open_by_default=(i < top_n_open)))
+    sub = "按字数排序" if unit == "chars" else "按条目排序"
+    return (
+        '<section class="project-cards-section">'
+        f'<h2 class="section-title">📁 项目分项 · {len(rows)} 个 <span class="muted small">· {sub}</span></h2>'
+        f'<div class="project-cards">{"".join(cards)}</div>'
+        '</section>'
+    )
+
+
+def _render_day_card(date_val: str, header: dict, channels: dict[str, str | None]) -> str:
+    """Full day card for the /events?table=day database view."""
+    overview = _safe_load_json(channels.get("ai_overview"))
+    continuity = _safe_load_json(channels.get("ai_continuity_day"))
+    return f"""
+<div class="day-report-card">
+  <div class="dr-head">
+    <div class="dr-date">{esc(date_val)}</div>
+    <div class="dr-stats">{_render_stats_strip(header, channels)}</div>
+    <div class="dr-actions">
+      <a href="/today?date={esc(date_val)}">在报告页打开 →</a>
+      <a href="/events?start_from={esc(date_val)}&start_to={esc(date_val)}">看原始事件 →</a>
+    </div>
+  </div>
+  {_render_ai_overview_block(overview)}
+  {_render_continuity_block(continuity)}
+  {_render_facts_block(date_val, channels)}
+  {_render_raw_channels_block(channels)}
+</div>
+"""
+
+
+def day_report_table_page(db_path: Path, qs: dict[str, list[str]]) -> str:
+    """Human-friendly view: one card per day with AI summary + key stats up
+    top, raw channel JSON folded away at the bottom."""
+    con = connect(db_path)
+    init_db(con)
+    selected_date = qs.get("date", [None])[0] or None
+    where_parts, params = [], []
+    if selected_date:
+        where_parts.append("date = ?")
+        params.append(selected_date)
+    where = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+    rows = con.execute(
+        f"""
+        SELECT date, events_hash, total_events, active_minutes, updated_at
+        FROM day_report {where}
+        ORDER BY date DESC LIMIT 60
+        """,
+        params,
+    ).fetchall()
+
+    # Pre-load all channels per date
+    cards = []
+    total_cost = 0.0
+    total_tokens = 0
+    for row in rows:
+        date_val = row["date"]
+        channel_rows = con.execute(
+            "SELECT channel, value_json, cost_usd, tokens_in, tokens_out"
+            " FROM day_channel WHERE date = ?",
+            (date_val,),
+        ).fetchall()
+        channels = {r["channel"]: r["value_json"] for r in channel_rows}
+        day_cost = sum((r["cost_usd"] or 0) for r in channel_rows)
+        day_tokens = sum((r["tokens_in"] or 0) + (r["tokens_out"] or 0) for r in channel_rows)
+        total_cost += day_cost
+        total_tokens += day_tokens
+        cards.append(_render_day_card(date_val, dict(row), channels))
+
+    cards_html = "\n".join(cards) or '<div class="card label">暂无 day_report 行</div>'
+    # Calendar-style date picker (same widget as the home page header).
+    all_dates = [
+        r["date"] for r in
+        con.execute("SELECT date FROM day_report ORDER BY date DESC").fetchall()
+    ]
+    cal_widget = calendar_control(
+        "/events", selected_date, all_dates,
+        hidden={"table": "day"}, allow_all=True, label_text="日期",
+    )
+    filter_strip = (
+        '<div class="dr-filter-strip">'
+        f'{cal_widget}'
+        f'<span class="muted small">共 {len(rows)} 天 · AI 总花费 ${total_cost:.4f} · {total_tokens} tokens</span>'
+        '</div>'
+    )
+
+    content = (
+        table_switcher_html("day", qs)
+        + filter_strip
+        + f'<section class="day-report-cards">{cards_html}</section>'
+    )
+    return layout(
+        "DayTrace · 日报告",
+        f"{len(rows)} 天 · ${total_cost:.4f}",
+        "events", content,
+        body_class="day-report-page",
+    )
+
+
+# ----- day_project_report: filterable+sortable table ------------------
+
+PROJECT_TABLE_ORDERS = {
+    "date_desc":   ("date DESC, event_count DESC", "Date ↓"),
+    "date_asc":    ("date ASC, event_count DESC",  "Date ↑"),
+    "events_desc": ("event_count DESC, date DESC", "Events ↓"),
+    "events_asc":  ("event_count ASC, date DESC",  "Events ↑"),
+    "active_desc": ("active_minutes DESC, date DESC", "Active ↓"),
+    "active_asc":  ("active_minutes ASC, date DESC",  "Active ↑"),
+}
+
+
+def _render_project_row(row: dict, channels: dict[str, str | None]) -> str:
+    summary = _safe_load_json(channels.get("ai_summary")) or {}
+    continuity = _safe_load_json(channels.get("ai_continuity")) or {}
+    source_mix = _safe_load_json(channels.get("source_mix")) or {}
+    time_span = _safe_load_json(channels.get("time_span")) or {}
+    top_titles = _safe_load_json(channels.get("top_titles")) or []
+
+    project_link = (
+        f'<a class="project-chip" href="/events?project={esc(row["project"])}'
+        f'&start_from={esc(row["date"])}&start_to={esc(row["date"])}" '
+        f'title="点击看该项目的事件">{esc(row["project"])}</a>'
+    )
+
+    share_pct = row["share"] * 100
+    share_cell = (
+        f'<div class="share-cell">'
+        f'<div class="share-bar"><div class="share-fill" style="width:{share_pct:.1f}%"></div></div>'
+        f'<span class="share-pct">{share_pct:.0f}%</span></div>'
+    )
+
+    src_mix_str = ", ".join(f"{esc(k)}({v})" for k, v in sorted(source_mix.items(), key=lambda kv: -kv[1])[:3])
+    span_str = (
+        f"{esc(time_span.get('first','?'))}–{esc(time_span.get('last','?'))}"
+        if time_span else "—"
+    )
+
+    summary_text = summary.get("summary") if isinstance(summary, dict) else ""
+    what_was_done = summary.get("what_was_done") if isinstance(summary, dict) else None
+    status = summary.get("status") if isinstance(summary, dict) else None
+    next_steps = summary.get("next_steps") if isinstance(summary, dict) else None
+
+    ai_cell_parts = [f'<div class="ai-summary-text">{esc(summary_text or "—")}</div>']
+    if what_was_done:
+        ai_cell_parts.append(
+            "<ul class='ai-bullets'>"
+            + "".join(f"<li>{esc(w)}</li>" for w in what_was_done[:4])
+            + "</ul>"
+        )
+    if next_steps:
+        ai_cell_parts.append(
+            "<div class='ai-next-label'>next:</div>"
+            "<ul class='ai-bullets ai-next'>"
+            + "".join(f"<li>{esc(n)}</li>" for n in next_steps[:3])
+            + "</ul>"
+        )
+    ai_cell = "".join(ai_cell_parts)
+
+    cont_html = ""
+    if isinstance(continuity, dict) and continuity:
+        cont_html = (
+            f'{_momentum_chip(continuity.get("momentum"))}'
+            f'<div class="cont-text">{esc(continuity.get("relation_to_previous") or "")}</div>'
+        )
+
+    titles_cell = ""
+    if top_titles:
+        titles_cell = (
+            "<ul class='top-titles-list'>"
+            + "".join(
+                f"<li><span class='tt-time'>{esc(t.get('time','--:--'))}</span> {esc(t.get('title',''))}</li>"
+                for t in top_titles[:4]
+            )
+            + "</ul>"
+        )
+
+    return (
+        f'<tr>'
+        f'<td class="col-date"><a href="/events?table=day&date={esc(row["date"])}">{esc(row["date"])}</a></td>'
+        f'<td class="col-project">{project_link}</td>'
+        f'<td class="col-num">{row["event_count"]}</td>'
+        f'<td class="col-num">{_format_duration_short(row["active_minutes"])}</td>'
+        f'<td class="col-share">{share_cell}</td>'
+        f'<td class="col-status">{_status_chip(status)}</td>'
+        f'<td class="col-ai">{ai_cell}</td>'
+        f'<td class="col-cont">{cont_html}</td>'
+        f'<td class="col-titles">{titles_cell}</td>'
+        f'<td class="col-meta muted small">{esc(span_str)}<br>{esc(src_mix_str)}</td>'
+        f"</tr>"
+    )
+
+
+def day_project_report_table_page(db_path: Path, qs: dict[str, list[str]]) -> str:
+    """Filterable, sortable per-(date, project) view. Each row shows the AI
+    summary inline so a glance across rows reads as a project journal."""
+    con = connect(db_path)
+    init_db(con)
+    selected_date = qs.get("date", [None])[0] or None
+    selected_project = qs.get("project", [None])[0] or None
+    selected_status = qs.get("status", [None])[0] or None
+    order_key = qs.get("order", ["date_desc"])[0]
+    if order_key not in PROJECT_TABLE_ORDERS:
+        order_key = "date_desc"
+
+    where_parts, params = [], []
+    if selected_date:
+        where_parts.append("date = ?")
+        params.append(selected_date)
+    if selected_project:
+        where_parts.append("project = ?")
+        params.append(selected_project)
+    where = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+    order_clause, _ = PROJECT_TABLE_ORDERS[order_key]
+    rows = con.execute(
+        f"""
+        SELECT date, project, event_count, active_minutes, share, updated_at
+        FROM day_project_report {where}
+        ORDER BY {order_clause}
+        LIMIT 300
+        """,
+        params,
+    ).fetchall()
+
+    rendered: list[str] = []
+    status_set: set[str] = set()
+    for row in rows:
+        channel_rows = con.execute(
+            "SELECT channel, value_json FROM day_project_channel"
+            " WHERE date = ? AND project = ?",
+            (row["date"], row["project"]),
+        ).fetchall()
+        channels = {r["channel"]: r["value_json"] for r in channel_rows}
+        summary = _safe_load_json(channels.get("ai_summary")) or {}
+        if isinstance(summary, dict) and summary.get("status"):
+            status_set.add(summary["status"])
+        if selected_status and summary.get("status") != selected_status:
+            continue
+        rendered.append(_render_project_row(dict(row), channels))
+
+    # Filter controls
+    all_dates = [
+        r["date"] for r in
+        con.execute("SELECT DISTINCT date FROM day_project_report ORDER BY date DESC").fetchall()
+    ]
+    all_projects = [
+        r["project"] for r in
+        con.execute(
+            "SELECT DISTINCT project FROM day_project_report ORDER BY project"
+        ).fetchall()
+    ]
+    statuses = sorted(status_set) or ["in_progress", "done", "blocked", "explored"]
+
+    def opts(values, selected):
+        return "".join(
+            f'<option value="{esc(v)}"{" selected" if v == selected else ""}>{esc(v)}</option>'
+            for v in values
+        )
+
+    sort_opts = "".join(
+        f'<option value="{k}"{" selected" if k == order_key else ""}>{esc(label)}</option>'
+        for k, (_, label) in PROJECT_TABLE_ORDERS.items()
+    )
+
+    # Calendar-style date picker; the rest stay as compact dropdowns since
+    # they enumerate small fixed sets (project, status, sort).
+    cal_widget = calendar_control(
+        "/events", selected_date, all_dates,
+        hidden={
+            "table": "day_project",
+            "project": selected_project,
+            "status": selected_status,
+            "order": order_key if order_key != "date_desc" else "",
+        },
+        allow_all=True, label_text="日期",
+    )
+    filter_strip = (
+        '<div class="dr-filter-strip">'
+        f'{cal_widget}'
+        '<form method="get" action="/events" class="dr-filter-inline">'
+        '<input type="hidden" name="table" value="day_project">'
+        f'<input type="hidden" name="date" value="{esc(selected_date or "")}">'
+        f'<label>📁 项目 <select name="project" onchange="this.form.submit()">'
+        f'<option value="">全部</option>{opts(all_projects, selected_project)}</select></label> '
+        f'<label>🏷 状态 <select name="status" onchange="this.form.submit()">'
+        f'<option value="">全部</option>{opts(statuses, selected_status)}</select></label> '
+        f'<label>↕ 排序 <select name="order" onchange="this.form.submit()">{sort_opts}</select></label> '
+        f'<a href="/events?table=day_project" class="dr-reset">清空筛选</a>'
+        f'<span class="muted small dr-rowcount">{len(rendered)} rows</span>'
+        '</form>'
+        '</div>'
+    )
+
+    head = (
+        "<thead><tr>"
+        "<th class='col-date'>Date</th>"
+        "<th class='col-project'>Project</th>"
+        "<th class='col-num'>Events</th>"
+        "<th class='col-num'>Active</th>"
+        "<th class='col-share'>Share</th>"
+        "<th class='col-status'>Status</th>"
+        "<th class='col-ai'>AI summary · what was done · next</th>"
+        "<th class='col-cont'>vs prev</th>"
+        "<th class='col-titles'>Top titles</th>"
+        "<th class='col-meta'>Span · sources</th>"
+        "</tr></thead>"
+    )
+    body = "".join(rendered) or '<tr><td colspan="10" class="label">没有匹配的行</td></tr>'
+    table_html = f'<div class="table-wrap dpr-table"><table>{head}<tbody>{body}</tbody></table></div>'
+
+    content = table_switcher_html("day_project", qs) + filter_strip + table_html
+    return layout(
+        "DayTrace · 项目日报告",
+        f"{len(rendered)} rows",
+        "events", content,
+        body_class="day-project-report-page",
+    )
+
 
 def events_page(db_path: Path, qs: dict[str, list[str]]):
     con = connect(db_path)
@@ -643,8 +2276,8 @@ def events_page(db_path: Path, qs: dict[str, list[str]]):
     if source and source not in VISIBLE_EVENT_SOURCES:
         source = None
     project = qs.get("project", [None])[0] or None
-    device_id = qs.get("device_id", [None])[0] or None
     location_id = qs.get("location_id", [None])[0] or None
+    activity_filter = qs.get("activity", [None])[0] or None
     search = qs.get("search", [None])[0] or None
     raw_limit = qs.get("limit", ["500"])[0]
     event_limit = parse_event_limit(raw_limit)
@@ -662,8 +2295,8 @@ def events_page(db_path: Path, qs: dict[str, list[str]]):
     filters = {
         "source": source,
         "project": project,
-        "device_id": device_id,
         "location_id": location_id,
+        "activity": activity_filter,
         "search": search,
         "start_from": display_start_from,
         "start_to": display_start_to,
@@ -681,22 +2314,37 @@ def events_page(db_path: Path, qs: dict[str, list[str]]):
         date=None,
         source=source,
         project=project,
-        device_id=device_id,
         location_id=location_id,
         search=search,
         source_in=None if source else VISIBLE_EVENT_SOURCES,
         start_from=effective_start_from,
         start_to=effective_start_to,
         order=order,
-        limit=event_limit,
+        # Filter by activity in Python after enrichment — query_events
+        # doesn't know about the side table.
+        limit=None if activity_filter else event_limit,
     )
+    # Enrich with AI activity labels.
+    from daytrace.db import load_activity_labels_for_event_ids
+    labels = load_activity_labels_for_event_ids(con, [e["id"] for e in events])
+    for ev in events:
+        ev["activity"] = labels.get(ev["id"], "未分类")
+    if activity_filter:
+        events = [e for e in events if e.get("activity") == activity_filter]
+        if event_limit:
+            events = events[:event_limit]
     options: dict[str, Any] = query_filter_options(con, option_filters)
     options["date_counts"] = available_event_date_counts(con, VISIBLE_EVENT_SOURCES)
     options["source"] = [{"value": "", "label": "All"}] + [
         {"value": source_value, "label": SOURCE_LABELS[source_value]}
         for source_value in VISIBLE_EVENT_SOURCES
     ]
-    content = events_table(events, filters, options)
+    # Build the activity dropdown options from currently visible label set.
+    activity_values = sorted({e["activity"] for e in events if e.get("activity")})
+    options["activity"] = [{"value": "", "label": "All"}] + [
+        {"value": a, "label": a} for a in activity_values
+    ]
+    content = table_switcher_html("events", qs) + events_table(events, filters, options)
     return layout("DayTrace · 数据库", f"{len(events)} events", "events", content)
 
 
@@ -712,17 +2360,31 @@ class Handler(BaseHTTPRequestHandler):
         date = qs.get("date", [None])[0] or None
         try:
             if parsed.path == "/":
+                redirect_params = {}
+                if date:
+                    redirect_params["date"] = date
+                mode = qs.get("mode", [None])[0] or None
+                if mode and mode != "source":
+                    redirect_params["mode"] = mode
                 self.send_response(302)
-                self.send_header("Location", "/today" + (("?" + urlencode({"date": date})) if date else ""))
+                self.send_header("Location", "/today" + (("?" + urlencode(redirect_params)) if redirect_params else ""))
                 self.end_headers()
             elif parsed.path == "/today":
-                html_response(self, today_page(self.db_path, date))
+                mode = qs.get("mode", [None])[0] or None
+                unit = qs.get("unit", [None])[0] or None
+                html_response(self, today_page(self.db_path, date, mode=mode, unit=unit))
             elif parsed.path == "/sources":
                 self.send_response(302)
                 self.send_header("Location", "/events")
                 self.end_headers()
             elif parsed.path == "/events":
-                html_response(self, events_page(self.db_path, qs))
+                table_choice = qs.get("table", ["events"])[0] or "events"
+                if table_choice == "day":
+                    html_response(self, day_report_table_page(self.db_path, qs))
+                elif table_choice == "day_project":
+                    html_response(self, day_project_report_table_page(self.db_path, qs))
+                else:
+                    html_response(self, events_page(self.db_path, qs))
             elif parsed.path == "/api/summary":
                 con = connect(self.db_path)
                 json_response(self, query_summary(con, date))

@@ -359,8 +359,7 @@ def collect_hermes_input_events(
                     title=content.splitlines()[0][:96],
                     summary=content,
                     project_guess=project,
-                    confidence=confidence,
-                    sensitivity="private",
+                    sensitivity="normal",
                     evidence={
                         "session_id": session_id,
                         "path": str(path),
@@ -429,8 +428,7 @@ def collect_hermes_final_events(
                     or "Hermes result summary",
                     summary=content[:700],
                     project_guess=project,
-                    confidence=0.72,
-                    sensitivity="private",
+                    sensitivity="normal",
                     evidence={
                         "session_id": session_id,
                         "path": str(path),

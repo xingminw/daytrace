@@ -12,7 +12,6 @@ def sample_event(**overrides):
         title="Initial commit",
         summary="Created project skeleton",
         project_guess="daytrace",
-        confidence=0.9,
         sensitivity="normal",
         evidence={"repo": "daytrace", "hash": "abc123"},
         raw_ref=None,
@@ -28,13 +27,12 @@ def test_trace_event_roundtrip_dict():
     assert restored.evidence["repo"] == "daytrace"
 
 
-def test_trace_event_rejects_bad_confidence():
-    try:
-        sample_event(confidence=1.5)
-    except ValueError as exc:
-        assert "confidence" in str(exc)
-    else:
-        raise AssertionError("expected bad confidence to fail")
+def test_trace_event_from_dict_silently_drops_legacy_confidence():
+    """The confidence field was removed in v5 — TraceEvent.from_dict must
+    keep ingesting legacy JSONL payloads that still carry it."""
+    event = sample_event()
+    restored = TraceEvent.from_dict({**event.to_dict(), "confidence": 0.7})
+    assert restored == event
 
 
 def test_jsonl_write_read_append(tmp_path):

@@ -55,7 +55,10 @@ def collect_git_events(
                     f"--since={since}",
                     f"--until={until}",
                     "--pretty=format:%H%x09%ad%x09%s",
-                    "--date=iso",
+                    # iso-strict → "2026-05-13T17:22:25-04:00" with T
+                    # separator. Plain "iso" uses a space which breaks our
+                    # lexicographic start_from/start_to filtering.
+                    "--date=iso-strict",
                     "--max-count=50",
                 ],
                 capture_output=True,
@@ -79,7 +82,6 @@ def collect_git_events(
                         title=f"{project}: {subject}",
                         summary=f"Commit {sha[:7]} in {repo}",
                         project_guess=project,
-                        confidence=0.95,
                         sensitivity="normal",
                         evidence={"repo": str(repo), "sha": sha, "subject": subject},
                         raw_ref=str(repo),
@@ -105,7 +107,6 @@ def collect_git_events(
                         title=f"{project}: {len(lines)} uncommitted changes",
                         summary="; ".join(lines[:12]),
                         project_guess=project,
-                        confidence=0.85,
                         sensitivity="normal",
                         evidence={"repo": str(repo), "status_lines": lines[:50]},
                         raw_ref=str(repo),

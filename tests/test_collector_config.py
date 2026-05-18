@@ -20,7 +20,6 @@ def make_event():
         title="t",
         summary="s",
         project_guess="daytrace",
-        confidence=0.9,
         sensitivity="private",
         evidence={"x": 1},
     )

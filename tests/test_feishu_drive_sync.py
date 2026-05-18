@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 
@@ -161,6 +162,83 @@ def test_verify_uploaded_device_date_rejects_extra_remote_file(tmp_path):
             device="omen",
             day="2026-05-14",
         )
+
+
+def test_upload_date_prunes_empty_files_before_push(tmp_path, monkeypatch):
+    """0-byte files would trigger Feishu Drive 1061002 params error; the
+    upload step must drop them from the staging tree (and from the verified
+    expected-file set) while leaving manifest telemetry intact."""
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _sys.path.insert(0, str(_Path(__file__).resolve().parents[1]))
+    import scripts.feishu_drive_sync as upload_mod
+
+    config_path = tmp_path / "device.yaml"
+    config_path.write_text(
+        "device:\n  id: omen\n  collector_id: omen-collector\n", encoding="utf-8"
+    )
+
+    pushed: dict = {}
+
+    def fake_collect(_cfg_path, day, _lookback, out_dir):
+        date_dir = out_dir / "omen" / day
+        date_dir.mkdir(parents=True)
+        (date_dir / "git.jsonl").write_text('{"ok": true}\n', encoding="utf-8")
+        (date_dir / "codex.jsonl").write_text("", encoding="utf-8")  # empty
+        (date_dir / "hermes.jsonl").write_text("", encoding="utf-8")  # empty
+        (date_dir / "manifest.json").write_text("{}\n", encoding="utf-8")
+        return {"total_events": 1, "files": []}
+
+    class StubCli:
+        def __init__(self, *a, **kw):
+            pass
+
+        def push_dir(self, local_dir, folder_token, *, if_exists="skip"):
+            pushed["files"] = sorted(
+                str(p.relative_to(local_dir))
+                for p in _Path(local_dir).rglob("*")
+                if p.is_file()
+            )
+            return {"data": {"summary": {"uploaded": len(pushed["files"])}}}
+
+    def fake_verify(*, cli, inbox_token, staging_root, device, day):
+        date_dir = staging_root / device / day
+        expected = sorted(
+            str(p.relative_to(date_dir)) for p in date_dir.rglob("*") if p.is_file()
+        )
+        return {"status": "verified", "expected_files": expected, "remote_files": expected}
+
+    monkeypatch.setattr(upload_mod, "collect_configured", fake_collect)
+    monkeypatch.setattr(upload_mod, "LarkCli", StubCli)
+    monkeypatch.setattr(upload_mod, "require_inbox_token", lambda v: "tok")
+    monkeypatch.setattr(upload_mod, "verify_uploaded_device_date", fake_verify)
+
+    import argparse as _argparse
+
+    args = _argparse.Namespace(
+        date="2026-05-14",
+        config=str(config_path),
+        work_dir=str(tmp_path / "work"),
+        lookback_days=1,
+        if_exists="overwrite",
+        lark_cli="lark-cli",
+        as_identity="user",
+        dry_run=False,
+        inbox_token="tok",
+    )
+    upload_mod.upload_date(args)
+
+    # Empty files must not be pushed and must be removed from staging
+    assert "omen/2026-05-14/codex.jsonl" not in pushed["files"]
+    assert "omen/2026-05-14/hermes.jsonl" not in pushed["files"]
+    assert "omen/2026-05-14/git.jsonl" in pushed["files"]
+    assert "omen/2026-05-14/manifest.json" in pushed["files"]
+
+    summary = json.loads(
+        (tmp_path / "work" / "upload" / "omen" / "2026-05-14" / "upload-summary.json").read_text()
+    )
+    assert sorted(summary["skipped_empty_files"]) == ["codex.jsonl", "hermes.jsonl"]
 
 
 def test_collect_remote_files_rejects_duplicate_relative_paths():

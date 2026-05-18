@@ -122,7 +122,6 @@ def collect_samples(
                 title=f"{app}: {title or 'frontmost window'}",
                 summary=summary,
                 project_guess=project,
-                confidence=0.55 if project else 0.35,
                 sensitivity="private" if shot else "normal",
                 evidence={
                     "app": app,

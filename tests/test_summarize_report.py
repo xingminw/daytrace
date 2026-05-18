@@ -6,7 +6,7 @@ from daytrace.summarize import (
 )
 
 
-def event(id, source, kind, title, project="DayTrace", confidence=0.8):
+def event(id, source, kind, title, project="DayTrace"):
     return TraceEvent(
         id=id,
         source=source,
@@ -16,7 +16,6 @@ def event(id, source, kind, title, project="DayTrace", confidence=0.8):
         title=title,
         summary=title + " summary",
         project_guess=project,
-        confidence=confidence,
         sensitivity="normal",
         evidence={"path": "x"},
     )
@@ -34,14 +33,13 @@ def test_aggregate_groups_by_source_and_project():
                 "app_focus_sample",
                 "Feishu",
                 project=None,
-                confidence=0.2,
             ),
         ],
     )
     assert daily.date == "2026-05-13"
     assert daily.source_counts["git"] == 1
     assert daily.project_counts["DayTrace"] == 2
-    assert daily.low_confidence_count == 1
+    assert daily.unattributed_count == 1
 
 
 def test_markdown_report_contains_key_sections():
@@ -49,7 +47,7 @@ def test_markdown_report_contains_key_sections():
     md = render_markdown_report(daily)
     assert "# DayTrace · 2026-05-13" in md
     assert "## 项目进展" in md
-    assert "## 证据与低置信度项" in md
+    assert "## 未归因事件" in md
     assert "commit A" in md
 
 

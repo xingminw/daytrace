@@ -23,6 +23,16 @@ outputs/
 *.db
 *.jsonl
 
+# Local Feishu Drive sync state (per-machine ledger, not source of truth)
+.daytrace/
+
+# Claude Code / agent local state (settings, worktrees, launch.json, etc.)
+.claude/
+
+# Inbox staging (per-machine; contents already covered by *.jsonl above
+# but the directory tree itself shouldn't be tracked either)
+inbox/
+
 # Local screenshots / media captures
 *.jpg
 *.jpeg

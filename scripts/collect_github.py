@@ -133,7 +133,6 @@ def collect_github_events(
             title=f"GitHub account: {login}",
             summary=f"{user.get('name') or login}; public_repos={user.get('public_repos')}; location={user.get('location') or 'unknown'}",
             project_guess=None,
-            confidence=0.98,
             sensitivity="private",
             evidence={
                 "login": login,
@@ -181,7 +180,6 @@ def collect_github_events(
                 title=f"Repo updated: {full}",
                 summary=f"{full} updated on GitHub; language={repo.get('language')}; private={repo.get('private')}; default_branch={repo.get('default_branch')}",
                 project_guess=project,
-                confidence=0.9,
                 sensitivity="private" if repo.get("private") else "normal",
                 evidence={
                     "full_name": full,
@@ -234,7 +232,6 @@ def collect_github_events(
                     title=f"Remote commit: {full}: {msg[:90]}",
                     summary=commit.get("message") or msg,
                     project_guess=project_from_repo(full),
-                    confidence=0.97,
                     sensitivity="private" if repo.get("private") else "normal",
                     evidence={
                         "repo": full,
@@ -278,7 +275,6 @@ def collect_github_events(
                     title=f"GitHub {query_type}: {item.get('title', '')[:100]}",
                     summary=item.get("body") or item.get("title") or "",
                     project_guess=project_from_repo(full),
-                    confidence=0.86,
                     sensitivity="private",
                     evidence={
                         "repo": full,

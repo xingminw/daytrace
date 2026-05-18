@@ -14,7 +14,15 @@ class DailyTrace:
     source_counts: dict[str, int]
     kind_counts: dict[str, int]
     project_counts: dict[str, int]
-    low_confidence_count: int
+    # Events whose project couldn't be attributed by collectors. The old
+    # name "low_confidence_count" was retained as an alias only for the
+    # one external script (generate_daily_report.py); new code should use
+    # `unattributed_count`.
+    unattributed_count: int
+
+    @property
+    def low_confidence_count(self) -> int:  # backward-compat alias
+        return self.unattributed_count
 
 
 def aggregate_events(date: str, events: Iterable[TraceEvent]) -> DailyTrace:
@@ -26,10 +34,8 @@ def aggregate_events(date: str, events: Iterable[TraceEvent]) -> DailyTrace:
         events=event_list,
         source_counts=dict(Counter(e.source for e in event_list)),
         kind_counts=dict(Counter(e.kind for e in event_list)),
-        project_counts=dict(Counter((e.project_guess or "未归因") for e in event_list)),
-        low_confidence_count=sum(
-            1 for e in event_list if e.confidence < 0.5 or not e.project_guess
-        ),
+        project_counts=dict(Counter((e.project_guess or "misc") for e in event_list)),
+        unattributed_count=sum(1 for e in event_list if not e.project_guess),
     )
 
 
@@ -65,7 +71,7 @@ def render_markdown_report(daily: DailyTrace) -> str:
     lines.append("")
     by_project: dict[str, list[TraceEvent]] = defaultdict(list)
     for event in daily.events:
-        by_project[event.project_guess or "未归因"].append(event)
+        by_project[event.project_guess or "misc"].append(event)
     for project, events in _top({k: len(v) for k, v in by_project.items()}, 10):
         lines.append(f"### {project}")
         for event in by_project[project][:8]:
@@ -93,13 +99,13 @@ def render_markdown_report(daily: DailyTrace) -> str:
             f"- ……另有 {len(ai_system_events) - 20} 条 AI/系统活动事件已折叠。"
         )
     lines.append("")
-    lines.append("## 证据与低置信度项")
+    lines.append("## 未归因事件")
     lines.append("")
-    lines.append(f"低置信度/未归因事件：{daily.low_confidence_count} 条。")
+    lines.append(f"misc 事件：{daily.unattributed_count} 条。")
     for event in daily.events:
-        if event.confidence < 0.5 or not event.project_guess:
+        if not event.project_guess:
             lines.append(
-                f"- {event.start} · {event.source}/{event.kind}: {event.title}（confidence={event.confidence:.2f}）"
+                f"- {event.start} · {event.source}/{event.kind}: {event.title}"
             )
     lines.append("")
     lines.append("## 可修正项")
@@ -123,7 +129,7 @@ def render_feishu_summary(daily: DailyTrace, report_path: str | None = None) -> 
         f"# DayTrace · {daily.date}",
         f"已生成第一版 Prototype 日报：{len(daily.events)} 条事件，来源：{top_sources}。",
         f"主要项目/归因：{top_projects}。",
-        f"低置信度/待修正：{daily.low_confidence_count} 条。",
+        f"未归因事件：{daily.unattributed_count} 条。",
     ]
     if report_path:
         lines.append(f"完整报告：`{report_path}`")

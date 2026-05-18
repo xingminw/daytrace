@@ -12,7 +12,6 @@ def event(id="e1", source="git", project="daytrace"):
         title="test event",
         summary="summary",
         project_guess=project,
-        confidence=0.9,
         sensitivity="normal",
         evidence={"x": 1},
     )

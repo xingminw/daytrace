@@ -37,7 +37,6 @@ def test_import_inbox_imports_v1_batch_records_ledger_and_archives(tmp_path):
                 "title": "记了一条手机笔记",
                 "content": "从 iPhone branch 上传的测试事件",
                 "url": "https://example.com/note",
-                "confidence": 0.88,
                 "privacy": "private_summary_only",
                 "payload": {"note_id": "n1"},
             }
@@ -51,6 +50,8 @@ def test_import_inbox_imports_v1_batch_records_ledger_and_archives(tmp_path):
         "files_skipped": 0,
         "files_failed": 0,
         "events_inserted": 1,
+        "events_deduped_in_batch": 0,
+        "events_deduped_vs_db": 0,
     }
     assert not batch.exists()
     assert (archive / "iphone" / "2026-05-14" / "batch-1.jsonl").exists()
@@ -97,7 +98,6 @@ def test_import_inbox_is_idempotent_by_file_hash_and_event_id(tmp_path):
             "category": "unknown",
             "title": "health",
             "content": "ok",
-            "confidence": 1.0,
             "privacy": "normal",
             "payload": {},
         }
@@ -188,6 +188,8 @@ def test_import_inbox_hub_imports_multiple_mock_branch_devices(tmp_path):
         "files_skipped": 0,
         "files_failed": 1,
         "events_inserted": 4,
+        "events_deduped_in_batch": 0,
+        "events_deduped_vs_db": 0,
     }
     assert not list(inbox.rglob("*.jsonl"))
     assert (archive / "macbook-air" / "2026-05-14" / "codex.jsonl").exists()
@@ -209,6 +211,8 @@ def test_import_inbox_hub_imports_multiple_mock_branch_devices(tmp_path):
         "files_skipped": 1,
         "files_failed": 0,
         "events_inserted": 0,
+        "events_deduped_in_batch": 0,
+        "events_deduped_vs_db": 0,
     }
     assert not list(inbox.rglob("*.jsonl"))
     assert (archive / "lab-mac" / "2026-05-15" / "redelivered-codex.jsonl").exists()
@@ -332,3 +336,54 @@ def test_import_inbox_rejects_archive_inside_inbox(tmp_path):
         assert "archive must not be inside inbox" in str(exc)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_import_inbox_dedupes_by_content_fingerprint_within_and_across_batches(tmp_path):
+    """Codex/Hermes collectors fold session_id+ts+text into ids, so re-running
+    a collector can produce different event ids for the same user prompt.
+    import_inbox must collapse those: in-batch via fingerprint dedup, and
+    cross-batch via a DB lookup on (source, start, title, summary)."""
+    db_path = tmp_path / "daytrace.sqlite"
+    inbox = tmp_path / "inbox"
+    archive = tmp_path / "archive"
+    failed = tmp_path / "failed"
+
+    def codex_event(event_id):
+        return {
+            "schema_version": "daytrace.event.v1",
+            "event_id": event_id,
+            "occurred_at": "2026-05-15T16:04:26",
+            "source": "codex",
+            "kind": "user_input",
+            "device": "omen-wsl",
+            "location": "unknown",
+            "title": "你现在能连上我的飞书吗",
+            "content": "你现在能连上我的飞书吗",
+            "privacy": "normal",
+            "payload": {},
+        }
+
+    # First batch: three rows with the same content but distinct ids
+    # (simulates the same prompt landing in two different rollout files).
+    write_jsonl(
+        inbox / "omen-wsl" / "2026-05-15" / "codex.jsonl",
+        [codex_event("codex-input-aaa"), codex_event("codex-input-bbb"), codex_event("codex-input-ccc")],
+    )
+    first = import_inbox(inbox, db_path, archive=archive, failed=failed)
+    assert first["events_inserted"] == 1
+    assert first["events_deduped_in_batch"] == 2
+    assert first["events_deduped_vs_db"] == 0
+
+    # Second batch (re-collected): yet another fresh id for the same prompt.
+    write_jsonl(
+        inbox / "omen-wsl" / "2026-05-15" / "codex-recollect.jsonl",
+        [codex_event("codex-input-ddd")],
+    )
+    second = import_inbox(inbox, db_path, archive=archive, failed=failed)
+    assert second["events_inserted"] == 0
+    assert second["events_deduped_vs_db"] == 1
+
+    con = connect(db_path)
+    rows = query_events(con, source="codex", limit=None)
+    assert len(rows) == 1
+    assert rows[0]["title"] == "你现在能连上我的飞书吗"

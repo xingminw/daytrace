@@ -45,6 +45,19 @@ def upload_date(args: argparse.Namespace) -> None:
         args.lookback_days,
         staging_root,
     )
+    # Feishu Drive API rejects 0-byte uploads (1061002 params error). Empty
+    # jsonl files happen naturally on quiet days (e.g. no codex/hermes activity)
+    # and would otherwise fail the whole upload. Prune them from the staging
+    # tree before push so verify's expected-file set stays consistent with what
+    # we actually send. The manifest still records event_count=0 as telemetry.
+    skipped_empty: list[str] = []
+    date_dir = staging_root / device / day
+    if date_dir.is_dir():
+        for path in sorted(date_dir.rglob("*")):
+            if path.is_file() and path.stat().st_size == 0:
+                rel = str(path.relative_to(date_dir))
+                path.unlink()
+                skipped_empty.append(rel)
     cli = LarkCli(executable=args.lark_cli, identity=args.as_identity, dry_run=args.dry_run)
     inbox_token = require_inbox_token(args.inbox_token)
     push_result = cli.push_dir(staging_root, inbox_token, if_exists=args.if_exists)
@@ -69,6 +82,7 @@ def upload_date(args: argparse.Namespace) -> None:
         "target_path": f"inbox/{device}/{day}/",
         "local_staging_root": str(staging_root),
         "manifest": manifest,
+        "skipped_empty_files": skipped_empty,
         "verification": verify_result,
         "lark_result": push_result.get("data", push_result),
     }

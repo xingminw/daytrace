@@ -127,8 +127,7 @@ def collect_history(day: str, codex_home: Path, limit: int) -> list[TraceEvent]:
                 title=(raw_text.splitlines()[0][:96] or "Codex user input"),
                 summary=raw_text,
                 project_guess=project,
-                confidence=0.98,
-                sensitivity="private",
+                sensitivity="normal",
                 evidence={
                     "session_id": session_id,
                     "channel": channel,
@@ -184,8 +183,7 @@ def collect_thread_summaries(
                 title=str(thread.get("title") or first).splitlines()[0][:120],
                 summary=first,
                 project_guess=project,
-                confidence=0.9,
-                sensitivity="private",
+                sensitivity="normal",
                 evidence={
                     "thread_id": tid,
                     "source": thread.get("source"),
@@ -268,8 +266,7 @@ def collect_rollout_user_messages(
                     title=(raw_text.splitlines()[0][:96] or "Codex App user input"),
                     summary=raw_text,
                     project_guess=guess_project(cwd, raw_text),
-                    confidence=0.98,
-                    sensitivity="private",
+                    sensitivity="normal",
                     evidence={
                         "session_id": tid,
                         "channel": thread.get("source") or "codex_app",

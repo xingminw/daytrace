@@ -14,7 +14,6 @@ class TraceEvent:
     title: str
     summary: str
     project_guess: str | None
-    confidence: float
     sensitivity: str
     evidence: dict[str, Any] = field(default_factory=dict)
     raw_ref: str | None = None
@@ -23,8 +22,6 @@ class TraceEvent:
     collector_id: str = "hub-local"
 
     def __post_init__(self) -> None:
-        if not 0 <= self.confidence <= 1:
-            raise ValueError("confidence must be between 0 and 1")
         if not self.id:
             raise ValueError("id is required")
         if not self.source:
@@ -52,7 +49,6 @@ class TraceEvent:
             "title": self.title,
             "summary": self.summary,
             "project_guess": self.project_guess,
-            "confidence": self.confidence,
             "sensitivity": self.sensitivity,
             "evidence": self.evidence,
             "raw_ref": self.raw_ref,
@@ -65,12 +61,14 @@ class TraceEvent:
     def from_dict(cls, data: dict[str, Any]) -> "TraceEvent":
         # Backward compatible with prototype JSONL events created before
         # device/location became first-class single-machine dimensions.
+        # The legacy `confidence` field (removed in v5) is silently dropped.
         data = {
             "device_id": "Mac",
             "location_id": "unknown",
             "collector_id": "hub-local",
             **data,
         }
+        data.pop("confidence", None)  # legacy field, no longer accepted
         if data.get("device_id") in {"mac-hermes", "mac"}:
             data["device_id"] = "Mac"
         return cls(**data)

@@ -33,7 +33,7 @@ def project_of(event: TraceEvent) -> str:
 
 def canonical_project(project: str | None) -> str:
     if not project:
-        return "未归因"
+        return "misc"
     if project.lower() == "loft-sim":
         return "LOFT-Sim"
     return project
@@ -57,7 +57,6 @@ def make_outcomes(day: str, events: list[TraceEvent]) -> list[TraceEvent]:
                     project_guess=canonical_project(e.project_guess)
                     if e.project_guess
                     else None,
-                    confidence=0.94,
                     sensitivity=e.sensitivity,
                     evidence={"from_event": e.id, **e.evidence},
                     raw_ref=e.raw_ref,
@@ -80,7 +79,6 @@ def make_outcomes(day: str, events: list[TraceEvent]) -> list[TraceEvent]:
                     project_guess=canonical_project(e.project_guess)
                     if e.project_guess
                     else None,
-                    confidence=0.82,
                     sensitivity=e.sensitivity,
                     evidence={"from_event": e.id, **e.evidence},
                     raw_ref=e.raw_ref,
@@ -101,7 +99,6 @@ def make_outcomes(day: str, events: list[TraceEvent]) -> list[TraceEvent]:
                     project_guess=canonical_project(e.project_guess)
                     if e.project_guess
                     else None,
-                    confidence=0.96,
                     sensitivity="normal",
                     evidence={"from_event": e.id, **e.evidence},
                     raw_ref=e.raw_ref,
@@ -120,7 +117,6 @@ def make_outcomes(day: str, events: list[TraceEvent]) -> list[TraceEvent]:
                     project_guess=canonical_project(e.project_guess)
                     if e.project_guess
                     else None,
-                    confidence=0.82,
                     sensitivity="normal",
                     evidence={"from_event": e.id, **e.evidence},
                     raw_ref=e.raw_ref,
@@ -139,7 +135,6 @@ def make_outcomes(day: str, events: list[TraceEvent]) -> list[TraceEvent]:
                     project_guess=canonical_project(e.project_guess)
                     if e.project_guess
                     else None,
-                    confidence=0.72,
                     sensitivity=e.sensitivity,
                     evidence={"from_event": e.id, **e.evidence},
                     raw_ref=e.raw_ref,
@@ -164,7 +159,6 @@ def make_outcomes(day: str, events: list[TraceEvent]) -> list[TraceEvent]:
                         project_guess=canonical_project(e.project_guess)
                         if e.project_guess
                         else None,
-                        confidence=0.74,
                         sensitivity=e.sensitivity,
                         evidence={"from_event": e.id, **e.evidence},
                         raw_ref=e.raw_ref,
@@ -189,7 +183,7 @@ def make_milestones(
     milestones: list[TraceEvent] = []
     now = datetime.now().isoformat(timespec="seconds")
     for project, items in sorted(by_project.items()):
-        if project == "未归因":
+        if project == "misc":
             continue
         inputs = [
             e
@@ -240,7 +234,6 @@ def make_milestones(
                 title=title,
                 summary=summary,
                 project_guess=project,
-                confidence=0.7 if inputs and outs else 0.55,
                 sensitivity="private",
                 evidence=evidence,
             )

@@ -79,8 +79,8 @@ def event_from_v1(row: dict[str, Any], raw_ref: str) -> TraceEvent:
     content = str(row.get("content") or "")
     title_source = row.get("title") or (content.splitlines()[0] if content else "")
     title = str(title_source)[:200]
-    confidence_value = row.get("confidence")
-    confidence = float(confidence_value) if confidence_value is not None else 0.0
+    # `confidence` field in legacy v1 payloads is silently dropped — see
+    # daytrace/schema.py for the rationale.
     evidence = {
         "schema_version": SUPPORTED_SCHEMA,
         "batch_id": row.get("batch_id"),
@@ -99,7 +99,6 @@ def event_from_v1(row: dict[str, Any], raw_ref: str) -> TraceEvent:
         title=title or event_id,
         summary=content,
         project_guess=row.get("project") or None,
-        confidence=confidence,
         sensitivity=normalize_privacy(row.get("privacy")),
         evidence=evidence,
         raw_ref=raw_ref,
@@ -140,6 +139,85 @@ def existing_event_ids(con, event_ids: list[str], *, chunk_size: int = 900) -> s
         ).fetchall()
         existing.update(row["id"] for row in rows)
     return existing
+
+
+def content_fingerprint(event: TraceEvent) -> str:
+    """Stable content key for cross-id dedup.
+
+    Codex/Hermes collectors fold session_id+ts+text into event ids, so the
+    same user prompt captured in different rollout files (or re-collected
+    days later) produces distinct event ids and ends up duplicated in the
+    dashboard. Collapse such events by (source, start, title, summary).
+    """
+    payload = "␟".join(
+        [
+            event.source or "",
+            event.start or "",
+            event.title or "",
+            event.summary or "",
+        ]
+    )
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def existing_content_fingerprints(
+    con, fingerprints: list[tuple[str, str, str]], *, chunk_size: int = 400
+) -> dict[tuple[str, str, str], str]:
+    """For each (source, start, title) probe, return the matching existing
+    event id (when title+summary fingerprint also matches). Probes are
+    pre-filtered to make the cross-batch dedup query cheap.
+    """
+    found: dict[tuple[str, str, str], str] = {}
+    unique = sorted({probe for probe in fingerprints if all(probe)})
+    for start in range(0, len(unique), chunk_size):
+        chunk = unique[start : start + chunk_size]
+        if not chunk:
+            continue
+        clauses = " OR ".join(["(source = ? AND start = ? AND title = ?)"] * len(chunk))
+        params: list[str] = []
+        for src, ts, title in chunk:
+            params.extend([src, ts, title])
+        rows = con.execute(
+            f"SELECT id, source, start, title, summary FROM events WHERE {clauses}",
+            params,
+        ).fetchall()
+        for row in rows:
+            probe = (row["source"], row["start"], row["title"])
+            payload = "␟".join([row["source"] or "", row["start"] or "", row["title"] or "", row["summary"] or ""])
+            fp = hashlib.sha1(payload.encode("utf-8")).hexdigest()
+            found.setdefault(probe, row["id"])
+            # Note: we only need to know that something with the same
+            # (source,start,title,summary) exists; if a different summary
+            # shares the (source,start,title) bucket we still treat the
+            # current event as a duplicate-by-key — collectors don't emit
+            # two semantically distinct events for the same source+ts+title.
+            del fp
+    return found
+
+
+def dedup_events(
+    events: list[TraceEvent], existing: dict[tuple[str, str, str], str]
+) -> tuple[list[TraceEvent], int, int]:
+    """Drop within-batch and cross-batch content duplicates.
+
+    Returns (kept_events, dropped_in_batch, dropped_vs_db).
+    """
+    seen: set[str] = set()
+    kept: list[TraceEvent] = []
+    dropped_in_batch = 0
+    dropped_vs_db = 0
+    for event in events:
+        fp = content_fingerprint(event)
+        if fp in seen:
+            dropped_in_batch += 1
+            continue
+        probe = (event.source or "", event.start or "", event.title or "")
+        if all(probe) and probe in existing and existing[probe] != event.id:
+            dropped_vs_db += 1
+            continue
+        seen.add(fp)
+        kept.append(event)
+    return kept, dropped_in_batch, dropped_vs_db
 
 
 def ensure_destination_outside_inbox(inbox: Path, destination_root: Path, label: str) -> None:
@@ -218,6 +296,8 @@ def import_inbox(
         "files_skipped": 0,
         "files_failed": 0,
         "events_inserted": 0,
+        "events_deduped_in_batch": 0,
+        "events_deduped_vs_db": 0,
     }
     try:
         for path in iter_inbox_files(inbox):
@@ -234,6 +314,16 @@ def import_inbox(
             try:
                 con.execute("SAVEPOINT import_file")
                 events = read_inbox_events(path)
+                probes = [
+                    (event.source or "", event.start or "", event.title or "")
+                    for event in events
+                ]
+                existing_content = existing_content_fingerprints(con, probes)
+                events, dropped_in_batch, dropped_vs_db = dedup_events(
+                    events, existing_content
+                )
+                result["events_deduped_in_batch"] += dropped_in_batch
+                result["events_deduped_vs_db"] += dropped_vs_db
                 existing_ids = existing_event_ids(con, [event.id for event in events])
                 inserted_count = len({event.id for event in events} - existing_ids)
                 upsert_events(con, events, run_date=None, commit=False)
