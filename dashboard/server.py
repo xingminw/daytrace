@@ -1989,7 +1989,7 @@ TABLE_VIEWS: dict[str, dict] = {
             {"name": "tags",            "zh": "标签",       "en": "Tags",        "width": 140},
             {"name": "due_date",        "zh": "截止",       "en": "Due",         "width": 110},
             {"name": "subtitle",        "zh": "副标题",     "en": "Subtitle",    "width": 160},
-            {"name": "synced_at",       "zh": "同步时间",   "en": "Synced",      "width": 150, "muted": True},
+            {"name": "last_synced_at",  "zh": "同步时间",   "en": "Synced",      "width": 150, "muted": True},
         ],
     },
     # ── Advanced (generic, debug-y) ─────────────────────────────────────
@@ -2693,13 +2693,18 @@ def generic_table_page(db_path: Path, table_key: str, qs: dict[str, list[str]]) 
 
     sql_table = cfg.get("sql_table", table_key)
     cols = cfg.get("cols")
+    # Discover the real schema so config typos don't crash the page —
+    # we filter declared cols against actual table columns and skip any
+    # that don't exist. Also drives the cols=None auto-mode.
+    info_rows = con.execute(f"PRAGMA table_info({sql_table})").fetchall()
+    real_cols = {r["name"] for r in info_rows}
     if cols is None:
-        # Auto-discover via PRAGMA — no width/label customization.
-        info = con.execute(f"PRAGMA table_info({sql_table})").fetchall()
         cols = [
             {"name": r["name"], "zh": r["name"], "en": r["name"], "width": 140}
-            for r in info
+            for r in info_rows
         ]
+    else:
+        cols = [c for c in cols if c["name"] in real_cols]
 
     # Build SELECT clause from declared columns. Avoid `SELECT *` so removing
     # a config column is enough to hide it without DB-side changes.
