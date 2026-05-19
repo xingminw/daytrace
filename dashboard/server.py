@@ -260,8 +260,10 @@ STYLE = """
 * { box-sizing: border-box; }
 body { margin:0; font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background:radial-gradient(circle at top left,#fff7df 0,#f8f5ee 35%,#f4efe5 100%); color:var(--ink); }
 body.events-page { height:100vh; overflow:hidden; }
-header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(255,250,240,.94); position:sticky; top:0; backdrop-filter: blur(10px); z-index:5; display:grid; grid-template-columns:auto auto 1fr auto auto; gap:12px; align-items:center; min-height:50px; }
+header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(255,250,240,.94); position:sticky; top:0; backdrop-filter: blur(10px); z-index:5; display:grid; grid-template-columns:auto auto 1fr auto; gap:12px; align-items:center; min-height:50px; }
 .header-spacer { /* 1fr eater so right-rail right-aligns */ }
+/* Right-rail nav: page toggle + db btn + lang toggle, kept on one row. */
+.page-nav { display:inline-flex; align-items:center; gap:8px; flex-wrap:nowrap; }
 .page-toggle { display:inline-flex; gap:0; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
 .page-toggle-pill { font-size:13px; font-weight:700; padding:5px 16px; border-radius:999px; color:#3b352e; cursor:pointer; transition:background .12s, color .12s; text-decoration:none; }
 .page-toggle-pill:hover { background:rgba(0,0,0,.04); }
@@ -887,10 +889,14 @@ def layout(title: str, subtitle: str, active: str, content: str, date_control: s
         f'href="#" data-lang="en">EN</a>'
         '</div>'
     )
+    # Wrap the right-rail children in a single nav container so the header
+    # grid (5 columns) doesn't push any of them onto a second row.
     nav = (
+        '<nav class="page-nav">'
         f'<div class="page-toggle">{toggle}</div>'
         f'{db_btn}'
         f'{lang_switcher}'
+        '</nav>'
     )
     if body_class is None:
         body_class = f'{active}-page'
