@@ -101,21 +101,18 @@ data/              runtime (gitignored): sqlite, reports, logs
 
 ## Documentation
 
-Architecture, vision, and one-off setup guides:
+Three docs, each written against the actual code:
 
-- **[Product Brief](docs/product-brief.md)** — what DayTrace is and isn't
-- **[Information Design](docs/information-design.md)** — event schema + core objects
-- **[Agent Architecture](docs/agent-architecture.md)** — agent / collector / AI separation
-- **[Experience Design](docs/experience-design.md)** — UX principles
-- **[Data Sources & Permissions](docs/data-sources-and-permissions.md)** — trust model
-- **[Engineering Spec](docs/engineering-spec.md)** — v0 tech goals
-- **[Multi-Device Sync](docs/multi-device-sync.md)** — SSH-direct hub model
-- **[Feishu Machine Onboarding](docs/feishu-machine-onboarding.md)** — how to add a new machine
-- **[Delivery Setup](docs/delivery-setup.md)** — cron, Tailscale Serve, Feishu Docs, Gmail (current)
-- **[Output Examples](docs/output-examples.md)** — what reports look like
+- **[Architecture](docs/architecture.md)** — pipeline, module map,
+  channel registry, multi-device hub model
+- **[Setup](docs/setup.md)** — install, configuration files, secrets,
+  scheduled tasks (launchd / Tailscale / Feishu Docs / Gmail)
+- **[Data Model](docs/data-model.md)** — every SQLite table, the
+  `events_hash`-based cache, schema migrations
 
-Earlier design drafts and point-in-time notes are kept under
-[`docs/archive/`](docs/archive/) for context.
+Earlier design drafts and point-in-time notes are preserved under
+[`docs/archive/`](docs/archive/) for context — they describe earlier
+thinking, not the current implementation.
 
 ## License
 
