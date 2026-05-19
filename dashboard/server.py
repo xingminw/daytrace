@@ -80,6 +80,19 @@ body.events-page form { height:100%; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .tasks-card .tasks-title-cell { word-break: break-word; white-space: normal; }
+/* Full mode (single-table view via the 全部/任务/审稿 toggle): the table
+   spans the page so cap the title column instead of letting it eat all
+   the slack, and breathe more room into the data columns. The <col>
+   widths in the colgroup are the *compact* defaults; we override them
+   here for the wider layout. */
+.tasks-grid[data-display-mode="full"] .tasks-card table.mini-table { table-layout: fixed; }
+.tasks-grid[data-display-mode="full"] .tasks-card .tasks-title-cell { max-width: 520px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="priority"] { width: 60px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="status"]   { width: 80px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="hours"]    { width: 76px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="events"]   { width: 70px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="last"]     { width: 120px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="due"]      { width: 130px; }
 /* Weekly view-switcher card: only the active view's pane is visible.
    Toggling .weekly-viz[data-view] flips visibility with no reload (no scroll jump). */
 .weekly-viz .wv-pane { display:none; }
@@ -3985,15 +3998,16 @@ def _tasks_panel_one(
     # Columns marked col-events / col-last are hidden in compact (2-col) mode
     # via CSS, then shown when the user picks a single table.
     if table_key == "tasks":
+        # data-col tokens drive the full-mode width overrides in CSS.
         colgroup = (
             '<colgroup>'
-            '<col style="width:36px">'                            # P
-            '<col style="width:64px">'                            # 状态
-            '<col>'                                                # 任务 (auto)
-            '<col style="width:54px">'                            # 时长
-            '<col class="col-events" style="width:48px">'         # 事件
-            '<col class="col-last"   style="width:92px">'         # 最近活动
-            '<col style="width:104px">'                           # 截止
+            '<col data-col="priority" style="width:48px">'                       # P (was 36 — chip "P..." truncated)
+            '<col data-col="status"   style="width:64px">'                       # 状态
+            '<col data-col="title">'                                              # 任务 (auto in compact, capped in full)
+            '<col data-col="hours"    style="width:54px">'                       # 时长
+            '<col data-col="events"   class="col-events" style="width:48px">'    # 事件
+            '<col data-col="last"     class="col-last"   style="width:92px">'    # 最近活动
+            '<col data-col="due"      style="width:104px">'                      # 截止
             '</colgroup>'
         )
         thead_html = (
@@ -4010,12 +4024,12 @@ def _tasks_panel_one(
     else:
         colgroup = (
             '<colgroup>'
-            '<col style="width:64px">'                            # 状态
-            '<col>'                                                # 题目 (auto)
-            '<col style="width:54px">'                            # 时长
-            '<col class="col-events" style="width:48px">'         # 事件
-            '<col class="col-last"   style="width:92px">'         # 最近活动
-            '<col style="width:104px">'                           # 截止
+            '<col data-col="status"   style="width:64px">'                       # 状态
+            '<col data-col="title">'                                              # 题目 (auto in compact, capped in full)
+            '<col data-col="hours"    style="width:54px">'                       # 时长
+            '<col data-col="events"   class="col-events" style="width:48px">'    # 事件
+            '<col data-col="last"     class="col-last"   style="width:92px">'    # 最近活动
+            '<col data-col="due"      style="width:104px">'                      # 截止
             '</colgroup>'
         )
         thead_html = (
