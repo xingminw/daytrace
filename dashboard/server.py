@@ -859,8 +859,13 @@ def html_response(handler: BaseHTTPRequestHandler, body: str, status=200):
     handler.wfile.write(data)
 
 
-def layout(title: str, subtitle: str, active: str, content: str, date_control: str = "", body_class: str | None = None, lang: str = "zh") -> str:
-    # Right-rail: 日报/周报 toggle pill + 数据库 (new tab) button + language switcher.
+def layout(title: str, subtitle: str, active: str, content: str, date_control: str = "", body_class: str | None = None, lang: str | None = None) -> str:
+    # lang defaults to the per-request ContextVar (set in do_GET from the
+    # daytrace_lang cookie). Pass lang= explicitly only when rendering
+    # outside an HTTP request (e.g. tests).
+    if lang is None:
+        lang = _CURRENT_LANG.get()
+    # Right-rail: daily/weekly toggle pill + database (new tab) button + language switcher.
     toggle = "".join(
         f'<a class="page-toggle-pill{" active" if active == key else ""}" href="{href}">{esc(T(label_key, lang))}</a>'
         for key, label_key, href in [
