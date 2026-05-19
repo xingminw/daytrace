@@ -279,7 +279,8 @@ def test_ai_path_uses_mocked_deepseek_and_records_cost(tmp_path, monkeypatch):
 
     payload = load_day_report(con, "2026-05-15")
     # All four AI day channels populated with mocked content
-    assert payload["day"]["channels"]["ai_overview"]["headline"] == "推进 A, 顺手清杂项"
+    # v14: mocked plain-string AI output is auto-wrapped bilingually
+    assert payload["day"]["channels"]["ai_overview"]["headline"] == {"zh": "推进 A, 顺手清杂项", "en": ""}
     assert payload["day"]["channels"]["ai_project_summary_batch"]["by_project"]["A"]["status"] == "in_progress"
 
     # Per-project slices read the batch correctly

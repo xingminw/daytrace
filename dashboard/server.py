@@ -161,6 +161,29 @@ def T(key: str, lang: str | None = None, **fmt) -> str:
     return val.format(**fmt) if fmt else val
 
 
+def L(value, lang: str | None = None) -> str:
+    """Pick the best available language from an AI bilingual value.
+
+    The AI payloads are now {"zh": "...", "en": "..."} dicts in every
+    text field (v14). Legacy v6-v13 cache rows pass through the
+    `_bilingual_str` normalizer first, which wraps plain strings as
+    {"zh": str, "en": ""}. This helper pulls the right side out for
+    the current request language, falling back to whatever non-empty
+    value is available."""
+    if lang is None:
+        lang = _CURRENT_LANG.get()
+    if isinstance(value, dict):
+        v = (value.get(lang) or "").strip()
+        if v:
+            return v
+        # Fallback to the other language
+        other = "en" if lang == "zh" else "zh"
+        return (value.get(other) or "").strip()
+    if isinstance(value, str):
+        return value
+    return ""
+
+
 def _lang_from_request(handler) -> str:
     """Parse the daytrace_lang cookie from a BaseHTTPRequestHandler.
     Defaults to 'zh'. Acceptable values: 'zh' / 'en'."""
@@ -1740,14 +1763,14 @@ def _render_overview_section(overview_payload: dict | None) -> str:
     if not overview_payload:
         return (
             _SECTION_SEP
-            + '<div class="dr-narrative muted">(AI 速读未生成)</div>'
+            + f'<div class="dr-narrative muted">{esc(T("no_ai_overview"))}</div>'
         )
-    headline = overview_payload.get("headline") or ""
+    headline = L(overview_payload.get("headline"))
     ov = overview_payload.get("overview")
     if isinstance(ov, dict):
-        narrative = ov.get("narrative") or ""
+        narrative = L(ov.get("narrative"))
     else:
-        narrative = overview_payload.get("narrative") or ""
+        narrative = L(overview_payload.get("narrative"))
     parts = [_SECTION_SEP]
     if headline:
         parts.append(f'<div class="dr-headline">📰 {esc(headline)}</div>')
@@ -1767,10 +1790,10 @@ def _render_trend_section(overview_payload: dict | None, continuity: dict | None
         tr = overview_payload.get("trend")
         if isinstance(tr, dict):
             direction = tr.get("direction") or ""
-            comparison = tr.get("comparison") or ""
+            comparison = L(tr.get("comparison"))
     if not direction and continuity:
         direction = continuity.get("momentum") or ""
-        comparison = continuity.get("relation_to_yesterday") or ""
+        comparison = L(continuity.get("relation_to_yesterday"))
     if not direction and not comparison:
         return ""
     return (
@@ -1824,10 +1847,10 @@ def _render_trend_closer(overview_payload: dict | None, continuity: dict | None)
         tr = overview_payload.get("trend")
         if isinstance(tr, dict):
             direction = tr.get("direction") or ""
-            comparison = tr.get("comparison") or ""
+            comparison = L(tr.get("comparison"))
     if not direction and continuity:
         direction = continuity.get("momentum") or ""
-        comparison = continuity.get("relation_to_yesterday") or ""
+        comparison = L(continuity.get("relation_to_yesterday"))
     if not direction and not comparison:
         return ""
     return (
@@ -1877,12 +1900,12 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
             )
             continue
         any_data = True
-        headline = (val.get("headline") or "").strip()
+        headline = L(val.get("headline"))
         ov = val.get("overview")
         if isinstance(ov, dict):
-            narrative = (ov.get("narrative") or "").strip()
+            narrative = L(ov.get("narrative"))
         else:
-            narrative = (val.get("narrative") or "").strip()
+            narrative = L(val.get("narrative"))
 
         body_html = ""
         if narrative or headline:
@@ -1959,9 +1982,12 @@ def _render_insights_card(overview_payload: dict | None, *, continuity: dict | N
         "suggestions":  ("insights_followup", "tip_followup"),
     }
 
-    def _col(emoji: str, key: str, items: list[str]) -> str:
+    def _col(emoji: str, key: str, items: list) -> str:
         label_key, tip_key = _COL_KEYS[key]
-        cleaned = [_strip_re.sub("", x.lstrip()).strip() for x in items]
+        # items may be list-of-str (legacy v13 cache) or list-of-{zh,en}
+        # (v14). L() handles both.
+        texts = [L(x) for x in items]
+        cleaned = [_strip_re.sub("", t.lstrip()).strip() for t in texts if t]
         body_html = (
             f'<ul>{"".join(f"<li>{esc(x)}</li>" for x in cleaned)}</ul>' if cleaned
             else f'<div class="muted">{esc(T("insights_none"))}</div>'
@@ -3519,9 +3545,15 @@ def _load_week_daily_overviews(con, days: list[str]) -> str:
             v = _json.loads(row[0])
         except Exception:
             continue
-        headline = (v.get("headline") or "").strip()
+        # AI overviews are v14 bilingual dicts. We feed only the Chinese
+        # side into the weekly prompt context — the prompt itself produces
+        # both languages independently. L() handles both v14 dicts and
+        # pre-v14 plain strings.
+        headline = L(v.get("headline"), lang="zh")
         ov = v.get("overview") or {}
-        narrative = (ov.get("narrative") if isinstance(ov, dict) else "") or ""
+        narrative = L(ov.get("narrative") if isinstance(ov, dict) else None, lang="zh")
+        if not narrative:
+            narrative = L(v.get("narrative"), lang="zh")
         highlights = v.get("highlights") or []
         block = [f"## {d} — {headline}"]
         if narrative:
@@ -3529,7 +3561,7 @@ def _load_week_daily_overviews(con, days: list[str]) -> str:
         if highlights:
             block.append("关键任务进展:")
             for h in highlights[:4]:
-                block.append(f"  • {h}")
+                block.append(f"  • {L(h, lang='zh')}")
         lines.append("\n".join(block))
     return "\n\n".join(lines)
 
@@ -3590,23 +3622,33 @@ def _ai_weekly_summary(
         f"{wow_block}"
         f"【项目分布 (top 8, 仅供参考)】\n{top_projects}\n\n"
         f"{daily_overviews_block}"
-        "请输出严格 JSON, shape 跟日报一致:\n"
+        "请输出严格 JSON, 双语 schema (每个文本字段是 {\"zh\":..., \"en\":...}):\n"
         "{\n"
-        '  "headline": "≤30 字, 一句话抓住本周主线 (例: \'评分模型从设计到上线, daytrace UI 收尾\')",\n'
+        '  "headline":   {"zh": "≤30 字, 一句话抓住本周主线",\n'
+        '                 "en": "≤40 chars, 1-sentence weekly headline"},\n'
         '  "overview": {\n'
-        '    "narrative": "**3-5 句, 150-250 字** 的**主题式**总结(不是日记式流水账)。识别本周的 2-4 条主线 (任务/方向), 每条说清楚: 推进到什么程度、卡点在哪、有什么阶段性产出。整体格调:像跟熟人讲\'我这周搞了几件事\'。\\n\\n**禁止**: ‘周一... 周二... 周三...’ 这种逐日叙述 (每日叙事另有专栏); ‘本周主要做了X, Y, Z’这种通报体; bullet; 重复 highlights 的具体动作。\\n\\n**鼓励**: 主线对比 (‘A 已收尾, B 还在调试, C 刚起步’)、强调进展程度 (‘从设计走到上线’) 而不是堆事项。"\n'
+        '    "narrative": {\n'
+        '      "zh": "**3-5 句, 150-250 字** 的**主题式**总结(不是日记式流水账)。识别本周的 2-4 条主线 (任务/方向), 每条说清楚: 推进到什么程度、卡点在哪、有什么阶段性产出。",\n'
+        '      "en": "**3-5 sentences, 220-360 chars**, theme-based (NOT a chronological recap). Identify 2-4 main threads of the week (tasks/directions); for each, say how far it moved, where it stalled, what shipped."\n'
+        '    }\n'
         '  },\n'
         '  "trend": {\n'
         '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
-        '    "comparison": "1 句 (≤60 字) 工作重心/节奏 vs 上周怎么变, 不复述事件量"\n'
+        '    "comparison": {"zh": "1 句 (≤60 字) 工作重心/节奏 vs 上周怎么变",\n'
+        '                   "en": "1 sentence (≤90 chars) on how focus/pace shifted vs last week"}\n'
         '  },\n'
-        '  "highlights":   ["🚀 关键任务进展 — **3-5 条** 本周真正推进的飞书任务+具体动作 (用任务全名)。bullet 风格多样化, 不要每条都是 \'任务名: 动作\' 死板模板。每条 ≤50 字"],\n'
-        '  "work_pattern": ["⏰ 时间安排回顾 — **2-4 条** 本周节奏观察。基于活跃时长 vs 上周、活跃天数、有没有大块专注/碎片化、晚间收工节奏。每条带数字。每条 ≤60 字"],\n'
-        '  "suggestions":  ["🔔 任务跟进提醒 — **2-4 条** 下周该盯的任务 (deadline 临近 / 已停 N 天 / 未提交)。用任务全名 + 具体行动建议。每条 ≤60 字。❌ 不要回顾本周该做啥"]\n'
+        '  "highlights":   [{"zh": "**3-5 条** 本周真正推进的飞书任务+动作 (用任务全名), 每条 ≤50 字",\n'
+        '                    "en": "3-5 task advances this week (full Feishu titles + concrete action), ≤80 chars each"}],\n'
+        '  "work_pattern": [{"zh": "**2-4 条** 本周节奏观察 (活跃时长 vs 上周、活跃天数、有没有大块专注/碎片化、收工节奏), 每条带数字",\n'
+        '                    "en": "2-4 pattern observations comparing this week to last (active hours, day coverage, deep blocks vs fragmentation, end-of-day timing), grounded in numbers"}],\n'
+        '  "suggestions":  [{"zh": "**2-4 条** 下周该盯的任务 (deadline 临近 / 已停 N 天 / 未提交), 用任务全名 + 具体行动",\n'
+        '                    "en": "2-4 tasks to watch next week (closing deadlines / N days idle / uncommitted), full task names + concrete next-step"}]\n'
         "}"
     )
     system = (
-        "你是一位软件工程师的私人**周复盘助手**。读者是这位工程师本人。\n\n"
+        "你是一位软件工程师的私人**周复盘助手** / weekly recap assistant. "
+        "读者是这位工程师本人 / the reader is the engineer themself.\n\n"
+        "**双语输出**: 每个文本字段都是 {\"zh\":..., \"en\":...},两种语言独立生成同一份内容(各自符合语言习惯)。\n\n"
         "**任务视角硬规则**: narrative / highlights / suggestions 必须用"
         "**完整任务标题** (例: ‘DayTrace 应用开发’, 不是 ‘daytrace’)。"
         "上下文里的【每日 AI 速读】是真任务名的来源, **不要**从【项目分布】"
@@ -3631,28 +3673,19 @@ def _ai_weekly_summary(
     )
 
     def _validator(payload):
+        """Weekly validator now mirrors the daily v14 bilingual normalizer.
+        Accepts either plain-string fields (legacy v13 cache) or bilingual
+        {"zh": ..., "en": ...} dicts (v14); shape comes out canonicalized
+        as bilingual dicts so the renderers can L() everything."""
         from daytrace.ai_client import ShapeError
-        if not isinstance(payload, dict):
-            raise ShapeError("expected object")
-        if not isinstance(payload.get("headline"), str):
-            raise ShapeError("headline must be string")
-        ov = payload.get("overview")
-        if isinstance(ov, dict):
-            if not isinstance(ov.get("narrative"), str):
-                raise ShapeError("overview.narrative must be string")
-        elif not isinstance(payload.get("narrative"), str):
-            raise ShapeError("missing 'overview' (or legacy 'narrative')")
-        for k in ("highlights", "work_pattern", "suggestions", "recommendations", "concerns"):
-            if not isinstance(payload.get(k, []), list):
-                raise ShapeError(f"{k} must be list")
-        # Legacy renames so cached values keep working through one cycle.
-        if "recommendations" in payload and "suggestions" not in payload:
-            payload["suggestions"] = payload.pop("recommendations")
-        return payload
+        # Reuse daytrace's daily validator — its _bilingual_str / _bilingual_list
+        # already handle both shapes.
+        from daytrace.ai_report import validate_overview as _validate
+        return _validate(payload)
 
     try:
         resp = ai_client.call_json_validated(
-            system=system, user=user, validator=_validator, max_tokens=2800,
+            system=system, user=user, validator=_validator, max_tokens=4500,
         )
     except Exception as e:
         return {"_error": f"{type(e).__name__}: {e}"}

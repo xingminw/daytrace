@@ -33,8 +33,13 @@ def test_validate_overview_accepts_well_shaped_payload():
         "concerns": ["待跟进 Z"],
     }
     out = validate_overview(payload)
-    assert out["headline"] == "推进 A 项目"
-    assert out["highlights"] == ["实现 X", "修了 Y"]
+    # v14: legacy plain-string inputs get auto-wrapped into bilingual dicts
+    # with the original value in 'zh' and empty 'en' (the renderer's
+    # fallback handles the missing language).
+    assert out["headline"]   == {"zh": "推进 A 项目", "en": ""}
+    assert out["highlights"] == [
+        {"zh": "实现 X", "en": ""}, {"zh": "修了 Y", "en": ""}
+    ]
 
 
 def test_validate_overview_rejects_missing_headline():
@@ -109,7 +114,8 @@ def test_call_json_validated_passes_through_on_good_shape(monkeypatch):
     resp = call_json_validated(
         system="s", user="u", validator=validate_overview, max_tokens=100,
     )
-    assert resp.json["headline"] == "h"
+    # v14 wraps the plain "h" into a bilingual dict
+    assert resp.json["headline"] == {"zh": "h", "en": ""}
     assert resp.tokens_in == 100
     assert len(calls) == 1   # no retry needed
 
@@ -132,7 +138,8 @@ def test_call_json_validated_retries_once_on_bad_shape(monkeypatch):
     # Corrective prompt embedded the validator's reason
     assert "headline" in calls[1]
     # Final value is the second, valid one
-    assert resp.json["headline"] == "h"
+    # v14 wraps the plain "h" into a bilingual dict
+    assert resp.json["headline"] == {"zh": "h", "en": ""}
     # Tokens / cost accumulated from both calls
     assert resp.tokens_in == 100 + 200
     assert resp.tokens_out == 50 + 50

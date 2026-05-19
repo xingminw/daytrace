@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v13"  # v13 = richer/longer prompts (story-like); weekly sees per-day overviews
+AI_VERSION = "v14"  # v14 = bilingual output (zh + en in every field)
 
 
 # ----- Shape validators ------------------------------------------------
@@ -75,39 +75,72 @@ def _require_list_of_str(d: dict, key: str, *, default_empty: bool = False) -> l
 _TREND_DIRECTIONS = {"rising", "steady", "dropping", "new", "paused", "blocked"}
 
 
+def _bilingual_str(v, *, allow_empty=False) -> dict | str | None:
+    """Normalize a value that may be:
+       • a {"zh": "...", "en": "..."} dict   → return as-is (cleaned)
+       • a plain string (legacy v6-v13)       → wrap as {"zh": value}
+       • None or missing                      → return None
+    The renderer always reads via .get(lang) with fallback to other
+    languages, so legacy single-language cache values keep rendering."""
+    if isinstance(v, dict):
+        zh = (v.get("zh") or "").strip()
+        en = (v.get("en") or "").strip()
+        if not zh and not en:
+            return None if not allow_empty else {"zh": "", "en": ""}
+        return {"zh": zh, "en": en}
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return None if not allow_empty else {"zh": "", "en": ""}
+        return {"zh": s, "en": ""}
+    return None
+
+
+def _bilingual_list(items) -> list[dict]:
+    """List-of-strings or list-of-{zh,en} → list of {zh, en} dicts.
+    Drops empties."""
+    if not isinstance(items, list):
+        return []
+    out: list[dict] = []
+    for it in items:
+        b = _bilingual_str(it)
+        if b:
+            out.append(b)
+    return out
+
+
 def validate_overview(payload):
-    """v8 schema (person-focused; 3-column Insights row):
+    """v14 schema (bilingual):
         {
-          "headline":   str ≤30,
-          "overview":   {"narrative": str, "key_moves": [str, ...]},
-          "trend":      {"direction": one_of, "comparison": str},  # → 变化趋势
-          "highlights": [str, ...],                                 # → 关键进展
-          "suggestions":[str, ...]                                  # → 建议
+          "headline":   {"zh": str ≤30, "en": str ≤40},
+          "overview":   {"narrative": {"zh": str, "en": str}},
+          "trend":      {"direction": one_of,
+                         "comparison": {"zh": str, "en": str}},
+          "highlights":   [{"zh": str, "en": str}, ...],
+          "work_pattern": [{"zh": str, "en": str}, ...],
+          "suggestions":  [{"zh": str, "en": str}, ...]
         }
 
-    Backward compat:
-      - v6 top-level `narrative` string is moved into `overview.narrative`.
-      - v7 `recommendations` is renamed to `suggestions`.
-      - v7 `concerns` is dropped (the model is now told to fold warnings
-        into suggestions; cached v7 concerns are merged if suggestions is
-        empty so we don't lose existing data on a re-render).
-    The renderer hides any empty section."""
+    Backward compat: any bare-string field (v6-v13) is auto-wrapped as
+    {"zh": value, "en": ""} so cached single-language payloads render
+    without re-running AI. The renderer's get-with-fallback handles
+    missing language gracefully."""
     from .ai_client import ShapeError
     if not isinstance(payload, dict):
         raise ShapeError(f"top-level must be an object, got {type(payload).__name__}")
 
-    headline = _require_str(payload, "headline")
+    headline = _bilingual_str(payload.get("headline"))
+    if headline is None:
+        raise ShapeError("missing 'headline' (need str or {zh,en})")
 
     raw_overview = payload.get("overview")
     if isinstance(raw_overview, dict):
-        narrative = _require_str(raw_overview, "narrative")
-    elif isinstance(payload.get("narrative"), str):
-        narrative = payload["narrative"].strip()
+        narrative = _bilingual_str(raw_overview.get("narrative"))
     else:
-        raise ShapeError("missing 'overview' (or legacy 'narrative')")
-    # v10 drops key_moves — bullets live in `highlights` (Insights column).
-    # Older v7-v9 payloads may still carry `overview.key_moves`; we silently
-    # discard it so the cached value still renders.
+        # v6 legacy: top-level narrative string
+        narrative = _bilingual_str(payload.get("narrative"))
+    if narrative is None:
+        raise ShapeError("missing 'overview.narrative'")
     overview_obj = {"narrative": narrative}
 
     raw_trend = payload.get("trend")
@@ -115,26 +148,20 @@ def validate_overview(payload):
         direction = (raw_trend.get("direction") or "steady").strip().lower()
         if direction not in _TREND_DIRECTIONS:
             direction = "steady"
-        comparison = (raw_trend.get("comparison") or "").strip()
+        comparison = _bilingual_str(raw_trend.get("comparison"), allow_empty=True) or {"zh": "", "en": ""}
         trend_obj = {"direction": direction, "comparison": comparison}
     else:
         trend_obj = None
 
-    highlights = _require_list_of_str(payload, "highlights", default_empty=True)
-
-    # work_pattern is v12 (Insights column 2: ⏰ 时间安排回顾). Grounded in
-    # today's time data vs the 7-day baseline. Optional / may be empty.
-    work_pattern = _require_list_of_str(payload, "work_pattern", default_empty=True)
-
-    # suggestions is the v8 name; v7 used `recommendations`.
-    if "suggestions" in payload:
-        suggestions = _require_list_of_str(payload, "suggestions", default_empty=True)
-    else:
-        suggestions = _require_list_of_str(payload, "recommendations", default_empty=True)
-    # v7 cached `concerns` — fold into suggestions if model didn't return any
-    # of its own (lets stale cache stay useful through one render cycle).
+    highlights   = _bilingual_list(payload.get("highlights"))
+    work_pattern = _bilingual_list(payload.get("work_pattern"))
+    # v7 used `recommendations`; older v7 cache may have `concerns`.
+    raw_suggestions = payload.get("suggestions")
+    if raw_suggestions is None:
+        raw_suggestions = payload.get("recommendations")
+    suggestions = _bilingual_list(raw_suggestions)
     if not suggestions and isinstance(payload.get("concerns"), list):
-        suggestions = [str(c).strip() for c in payload["concerns"] if isinstance(c, str) and c.strip()]
+        suggestions = _bilingual_list(payload["concerns"])
 
     return {
         "headline":     headline,
@@ -448,7 +475,10 @@ def _stats_summary(con: sqlite3.Connection, date: str) -> str:
 # ---- channel: ai_overview ---------------------------------------------
 
 OVERVIEW_SYSTEM = (
-    "你是一位软件工程师的私人工作复盘助手。读者是这位工程师本人。\n\n"
+    "你是一位软件工程师的私人工作复盘助手 / a personal work-recap assistant. "
+    "读者是这位工程师本人 / the reader is the engineer themself.\n\n"
+    "**双语输出 / Bilingual output**: 每个文本字段输出 {\"zh\": ..., \"en\": ...} "
+    "对象。两种语言独立生成同一份内容(不是简单翻译),各自符合语言习惯。\n\n"
     "输入会按顺序给你:\n"
     "  1. 活跃任务清单 (飞书任务表)\n"
     "  2. 近 N 天基线 (用于和今天对比)\n"
@@ -502,19 +532,39 @@ def _overview_user(
         f"{baseline_block}"
         f"【今日骨架统计】\n{stats_text}\n\n"
         f"【事件清单, 按时间; 前缀 [task:X] 表示已关联到任务 X, [proj:Y] 表示游离项目】\n{events_text}\n\n"
-        "【输出 JSON, 严格按此 shape, 每个字段都要有】\n"
+        "【输出 JSON — 双语 schema】\n"
+        "每个文本字段都用 {\"zh\": \"...\", \"en\": \"...\"} 的双语对象,"
+        "**两种语言要表达同一份内容、同一个判断**,不是一个翻译另一个 ——"
+        "都从原始数据独立生成,保持各自语言的自然表达。"
+        "英文是给国际读者看的,中文是给本人看的,语气都要像跟熟人讲,"
+        "都用具体任务全名/工具名/数字。\n\n"
+        "Shape:\n"
         '{\n'
-        '  "headline": "≤30 字, 一句话抓住今天的主线 (例: \'双线推进 daytrace UI 与评分模型\')",\n'
+        '  "headline": {"zh": "≤30 字, 一句话抓住今天的主线",\n'
+        '               "en": "≤40 chars, one sentence headline"},\n'
         '  "overview": {\n'
-        '    "narrative": "**4-6 句, 150-260 字** 的叙事段落。像跟熟人讲今天发生了啥: 早上怎么进入, 中间在哪儿转弯/卡住/惊喜, 傍晚 / 临收工怎么收尾。具体提到任务全名、用到的工具(Codex / Claude Code / git)、某次提交或讨论。**禁止**: bullet 格式, 通报体, 重复 highlights 的具体产出"\n'
+        '    "narrative": {\n'
+        '      "zh": "**4-6 句, 150-260 字** 的叙事段落。像跟熟人讲今天发生了啥: 早上怎么进入, 中间在哪儿转弯/卡住/惊喜, 傍晚 / 临收工怎么收尾。具体提到任务全名、用到的工具(Codex / Claude Code / git)、某次提交或讨论。**禁止**: bullet 格式, 通报体, 重复 highlights 的具体产出。",\n'
+        '      "en": "**4-6 sentences, 200-360 chars**: a story of the day — how you got into it, where it turned/stuck/surprised, how it wound down. Name the tasks (full Feishu titles), tools (Codex / Claude Code / git), specific commits or discussions. NO bullets, NO status-report tone (\'today I worked on X, Y, Z\'), and do not repeat the highlights bullets."\n'
+        '    }\n'
         '  },\n'
         '  "trend": {\n'
         '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
-        '    "comparison": "1 句 (≤60 字) 工作重心/节奏 vs 昨天怎么变, 不复述事件量"\n'
+        '    "comparison": {"zh": "1 句 (≤60 字) 工作重心/节奏 vs 昨天怎么变",\n'
+        '                   "en": "1 sentence (≤90 chars) on how focus/pace shifted vs yesterday"}\n'
         '  },\n'
-        '  "highlights":   ["🚀 关键任务进展 — **2-4 条** 今天真正推进的飞书任务+动作 (用任务全名)。bullet 风格多样化, 不要每条都是 \'任务名: 动作\' 死板模板 — 可以是 \'任务 X 评分模型 v2 PR 合掉, scoring 终于稳了\' 这种带感觉的描述。每条 ≤50 字"],\n'
-        '  "work_pattern": ["⏰ 时间安排回顾 — **1-4 条** 基于【今日骨架统计 vs 近 N 天均值】的具体观察, 必须 grounded 在数字 (例: \'23:31 收工, 比平时晚 1h\', \'最长专注 155 min, 比均值长 60%\', \'切换 69 次但因为大块专注在中段, 节奏其实不算碎\')。每条可以略带判断/解读, 不只是陈述。每条 ≤60 字。❌ 空话禁止"],\n'
-        '  "suggestions":  ["🔔 任务跟进提醒 — **2-4 条** 前瞻性提醒, 只看任务清单 (未推进 / deadline 临近 / 未提交)。用任务全名 + 具体行动建议 (例: \'X 任务已 3 天没碰, deadline 5/22 越来越近, 明天先抓 30min 起头\')。每条 ≤60 字。❌ 不要回顾今天该做啥"]\n'
+        '  "highlights":   [\n'
+        '    {"zh": "**2-4 条** 今天真正推进的飞书任务+动作 (用任务全名)。bullet 风格多样化, 每条 ≤50 字",\n'
+        '     "en": "2-4 concrete advances on Feishu tasks (full task names), varied bullet phrasing, ≤80 chars each"}\n'
+        '  ],\n'
+        '  "work_pattern": [\n'
+        '    {"zh": "**1-4 条** 基于【今日骨架统计 vs 近 N 天均值】的具体观察, 必须 grounded 在数字 (例: \'23:31 收工, 比平时晚 1h\')。每条 ≤60 字。❌ 空话禁止",\n'
+        '     "en": "1-4 observations comparing today\'s time data vs the N-day baseline, MUST be grounded in numbers (e.g. \'wrapped at 23:31, 1h later than your average\'). ≤100 chars each. NO generic advice"}\n'
+        '  ],\n'
+        '  "suggestions":  [\n'
+        '    {"zh": "**2-4 条** 前瞻性提醒, 只看任务清单 (未推进 / deadline 临近 / 未提交)。用任务全名 + 具体行动建议。每条 ≤60 字。❌ 不回顾今天",\n'
+        '     "en": "2-4 forward-looking task watchpoints (untouched / deadline closing / uncommitted). Full task names + concrete next-step. ≤100 chars each. NO recap of what was done today"}\n'
+        '  ]\n'
         '}'
     )
 
@@ -522,8 +572,9 @@ def _overview_user(
 def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> ChannelResult:
     if not events:
         return ChannelResult(value={
-            "headline": f"{ctx.date} 无事件",
-            "overview": {"narrative": "今天没有记录到事件。"},
+            "headline":  {"zh": f"{ctx.date} 无事件", "en": f"{ctx.date} — no events"},
+            "overview":  {"narrative": {"zh": "今天没有记录到事件。",
+                                         "en": "No events recorded today."}},
             "trend": None,
             "highlights": [], "work_pattern": [], "suggestions": [],
         })
@@ -539,7 +590,7 @@ def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> Ch
         system=OVERVIEW_SYSTEM,
         user=_overview_user(ctx.date, stats_text, events_text, tasks_text, baseline_text),
         validator=validate_overview,
-        max_tokens=3200,
+        max_tokens=5000,  # bilingual output roughly doubles tokens
     )
     return ChannelResult(
         value=resp.json,
