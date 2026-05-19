@@ -1,0 +1,15 @@
+# DayTrace runtime dependencies.
+# All third-party — stdlib (sqlite3, smtplib, urllib, json, ...) is omitted.
+#
+# Install:
+#   python3 -m pip install -r requirements.txt
+#
+# Pinned to known-good major versions; floor only, no upper cap.
+
+PyYAML>=6.0          # config/*.yaml parsing
+matplotlib>=3.7      # report charts (PNG histogram + donut)
+Markdown>=3.4        # email HTML body rendering
+
+# Dev / test (optional):
+#   pytest>=7.0      # tests under tests/
+#   pyflakes>=3.0    # unused-import sweeps

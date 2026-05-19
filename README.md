@@ -1,45 +1,127 @@
 # DayTrace
 
-DayTrace 是一个 local-first 的个人每日轨迹系统。
+A **local-first personal daily trace** — collects your day from your own
+devices (git, IDE, AI chats, documents), aggregates it into a SQLite
+event timeline, lets a language model write a short narrative + insights,
+and delivers the result wherever you want to read it.
 
-它通过你明确授权的数据源，自动整理每天的时间、地点、项目进展、代码提交、文档/文章产出与 AI 协作痕迹，生成一份可信、可回顾、可修正的个人日报。
+> Built for one person (the author) on macOS. Open-source so you can
+> steal the parts you like.
 
-## 核心定位
+```
+collectors      →   SQLite events   →   AI overview   →   dashboard / docs / mail
+─────────────       ──────────────       ───────────       ─────────────────────────
+claude_code         day_report          DeepSeek          /today, /weekly
+codex               day_channel         (narrative,       (live, via Tailscale)
+git                 work_items           highlights,
+docs                event_work_…         work_pattern,    每日 / 每周 Feishu Docs
+hermes (Feishu)                          suggestions,
+ssh from remotes                         trend)           Gmail (HTML body)
+                                                          PNG charts inline
+```
 
-DayTrace 不是企业工时管理工具，也不是为了“证明你工作了多久”。
+## What it actually does
 
-它首先服务个人：帮助你看见自己一天的时间、注意力和创造力流向哪里，以及最终留下了什么产出。
+- **Collects** activity from your machines:
+  - local code (git commits, Claude Code / Codex sessions, file edits)
+  - local & Overleaf documents
+  - Feishu group chats relayed through Hermes
+  - remote Linux/WSL boxes via SSH (one Mac is the hub; everything
+    syncs back here)
+- **Stores** every event as a row in `data/daytrace.sqlite` with a
+  consistent schema (`source`, `start`, `project_guess`, `device_id`,
+  `evidence`, …). One SQLite file is the entire system of record.
+- **Links** events to *real Feishu tasks* (`work_items` table, synced
+  via lark-cli) so the AI can talk in task names instead of generic
+  project labels.
+- **Summarizes** each day with a single DeepSeek call:
+  - a 4-tile dashboard (events / active hours / longest focus / AI cost)
+  - a short narrative ("早上一头扎进 X…")
+  - three Insights columns: 🚀 关键任务进展 / ⏰ 时间安排回顾 / 🔔 任务跟进提醒
+  - a trend chip ("rising / steady / blocked")
+- **Renders** a live dashboard at `http://127.0.0.1:8765/today` and `…/weekly`
+  with stacked-bar histograms, donut distributions, per-task swim lanes,
+  and an audit panel for unmatched projects.
+- **Exports** the weekly report to:
+  - a Feishu **cloud document** (Markdown imported via `lark-cli`, with
+    PNG charts embedded as persistent image blocks)
+  - a **Gmail** message with HTML body + inline charts + a link back
+    to the live dashboard (via Tailscale Serve)
+- **Schedules** the whole thing with three macOS **launchd** jobs:
+  04:30 daily catchup, Monday 06:00 weekly report, plus a 24/7 dashboard
+  daemon.
 
-## 初始目标
+## Quick start
 
-DayTrace 的核心是一个中央个人 Agent：它可以在少量数据下工作，也可以在用户信任后处理海量、多源、高噪音的个人活动数据。
+```bash
+git clone <this repo> daytrace
+cd daytrace
+python3 -m pip install -r requirements.txt
 
-v0 可以先实现少量 connector，但架构上要面向更多数据源：
+# 1. Configure data sources (devices, collectors, work-item tables)
+$EDITOR config/sources.yaml
+$EDITOR config/devices/mac.yaml
+$EDITOR config/work_items.yaml
 
-1. GitHub / 本地 Git：代码提交、活跃 repo、变更摘要。
-2. 文档与写作：本地 Markdown、Overleaf/LaTeX 项目、可导出的文档变更。
-3. 日历：当天会议、时间块、地点线索。
-4. Hermes 会话：当天与 AI 协作推进过的任务。
-5. macOS activity：前台 app、活跃/空闲状态、可选窗口标题。
-6. 未来更多 connector：浏览器、文件系统、位置、邮件、聊天等。
-7. 手动修正：地点、项目归因、排除规则。
+# 2. Optional secrets (DeepSeek + Gmail SMTP for delivery)
+mkdir -p ~/.daytrace && chmod 700 ~/.daytrace
+cat > ~/.daytrace/secrets.env <<'EOF'
+DEEPSEEK_API_KEY=sk-...
+DAYTRACE_GMAIL_USER=your-agent@gmail.com
+DAYTRACE_GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
+DAYTRACE_EMAIL_TO=you@example.com
+EOF
+chmod 600 ~/.daytrace/secrets.env
 
-## 文档
+# 3. First run — collect + regen
+python3 scripts/run_daily.py catchup --config config/devices/mac.yaml
 
-- [Product Brief](docs/product-brief.md)
-- [Information Design](docs/information-design.md)
-- [Agent Architecture](docs/agent-architecture.md)
-- [Experience Design](docs/experience-design.md)
-- [Data Sources & Permissions](docs/data-sources-and-permissions.md)
-- [Engineering Spec](docs/engineering-spec.md)
-- [Output Examples](docs/output-examples.md)
-- [Implementation Plan v0](docs/implementation-plan-v0.md)
-- [Connection Inventory](docs/connection-inventory.md)
-- [Prototype Run 2026-05-13](docs/prototype-run-2026-05-13.md)
-- [Delivery Setup](docs/delivery-setup.md)
-- [Dashboard & Database Prototype](docs/dashboard-database-prototype.md)
-- [Frontend QA 2026-05-13](docs/frontend-qa-2026-05-13.md)
-- [Multi-Device Sync](docs/multi-device-sync.md)
-- [DayTrace Next Plan](docs/daytrace-next-plan.md)
-- [Single-Machine Focus Plan](docs/single-machine-focus-plan.md)
-- [Open Questions](docs/open-questions.md)
+# 4. Start the dashboard
+python3 dashboard/server.py --db data/daytrace.sqlite --host 127.0.0.1 --port 8765
+open http://127.0.0.1:8765/today
+```
+
+For the full scheduled-task + Tailscale + Feishu + email setup, see
+**[docs/delivery-setup.md](docs/delivery-setup.md)**.
+
+## Layout
+
+```
+daytrace/          core library — schema, collectors, AI client,
+                   report rendering (charts + markdown + email)
+dashboard/         HTTP server + page renderers
+scripts/           CLI entry points (collect_*, run_daily, export_report,
+                   cleanup_feishu_reports, daytrace-{daily,weekly}.sh)
+deploy/            launchd plists for macOS
+config/            yaml — devices, sources, work_items, aliases
+tests/             pytest suite (79 tests as of 2026-05-18)
+docs/              design notes, delivery setup, architecture
+data/              runtime (gitignored): sqlite, reports, logs
+```
+
+## Documentation
+
+Architecture, vision, and one-off setup guides:
+
+- **[Product Brief](docs/product-brief.md)** — what DayTrace is and isn't
+- **[Information Design](docs/information-design.md)** — event schema + core objects
+- **[Agent Architecture](docs/agent-architecture.md)** — agent / collector / AI separation
+- **[Experience Design](docs/experience-design.md)** — UX principles
+- **[Data Sources & Permissions](docs/data-sources-and-permissions.md)** — trust model
+- **[Engineering Spec](docs/engineering-spec.md)** — v0 tech goals
+- **[Multi-Device Sync](docs/multi-device-sync.md)** — SSH-direct hub model
+- **[Feishu Machine Onboarding](docs/feishu-machine-onboarding.md)** — how to add a new machine
+- **[Delivery Setup](docs/delivery-setup.md)** — cron, Tailscale Serve, Feishu Docs, Gmail (current)
+- **[Output Examples](docs/output-examples.md)** — what reports look like
+
+Earlier design drafts and point-in-time notes are kept under
+[`docs/archive/`](docs/archive/) for context.
+
+## License
+
+[MIT](LICENSE) — do what you want; if it breaks, you keep both pieces.
+
+DayTrace processes your personal data. By design, it never sends data
+anywhere except the destinations you configure (DeepSeek for AI
+summarization, Feishu Drive for the cloud doc, your own Gmail for
+delivery). No DayTrace cloud, no telemetry.
