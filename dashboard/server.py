@@ -179,6 +179,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     "due_urgent":   {"zh": "急 {n}d",      "en": "due in {n}d"},
     "due_tight":    {"zh": "紧 {n}d",      "en": "due in {n}d"},
 
+    # Section headers
+    "jump_to_day":  {"zh": "跳到每日报告", "en": "Jump to a day"},
+
     # Misc UI bits
     "no_title":        {"zh": "(无标题)", "en": "(no title)"},
     "filter_all":      {"zh": "全部",      "en": "All"},
@@ -2701,6 +2704,17 @@ def _breakdown_card(title: str, rows: list[dict], total: int) -> str:
 
 _WEEK_ZH = ["一", "二", "三", "四", "五", "六", "日"]
 
+
+def _short_weekday(date_str: str) -> str:
+    """Localized short weekday label for a YYYY-MM-DD date.
+    Returns '周一' / 'Mon' / etc. based on the current request language."""
+    try:
+        from datetime import date as _d_local
+        wd_idx = _d_local.fromisoformat(date_str).weekday()  # 0 = Monday
+        return T(f"wd_{wd_idx + 1}")
+    except Exception:
+        return ""
+
 # Same palette the daily report timeline uses; reusing it keeps a "DayTrace"
 # touching the same name colored the same across daily + weekly views.
 _WEEKLY_PALETTE = TIMELINE_PALETTE
@@ -3101,7 +3115,7 @@ def _weekly_swimlane_card(
     rows_html = []
     overall_counts: Counter = Counter()
     for d in days:
-        wd = _WEEK_ZH[_date.fromisoformat(d).weekday()]
+        wd = _short_weekday(d)  # "周一" / "Mon" / etc.
         ticks = per_day_ticks[d]
         ticks_html = "".join(
             f'<span class="tl-swim-tick" '
@@ -3117,7 +3131,7 @@ def _weekly_swimlane_card(
         rows_html.append(
             '<div class="tl-swim-row">'
             f'<div class="tl-swim-label" style="border-left:3px solid #e6dcc6;">'
-            f'<span class="tl-swim-name">周{wd} <span class="muted" style="font-size:11px; font-weight:500;">{esc(d[5:])}</span></span>'
+            f'<span class="tl-swim-name">{wd} <span class="muted" style="font-size:11px; font-weight:500;">{esc(d[5:])}</span></span>'
             f'<span class="tl-swim-count muted" data-row-count="1">×{len(ticks)}</span>'
             '</div>'
             f'<div class="tl-swim-track">{grid_lines}{ticks_html}</div>'
@@ -3297,10 +3311,10 @@ def _main_chart_card(
     for d in days:
         bag = fold(per_day.get(d, {}))
         total = per_day_totals.get(d, 0.0)
-        wd = _WEEK_ZH[_date.fromisoformat(d).weekday()]
+        wd = _short_weekday(d)  # "周一" / "Mon" / etc.
         bar_pct = (total / axis_max) * 100
         segments = []
-        tooltip = f"{d} 周{wd} · {_format_value(total, unit)}\n" + "\n".join(
+        tooltip = f"{d} {wd} · {_format_value(total, unit)}\n" + "\n".join(
             f"  {k}: {_format_value(v, unit)}" for k, v in bag if v > 0
         )
         for k, v in bag:
@@ -3329,7 +3343,7 @@ def _main_chart_card(
         )
         x_labels_html.append(
             f'<div style="flex:1; min-width:0; text-align:center; padding-top:6px;">'
-            f'<div style="font-size:11px; font-weight:600; color:#3b352e;">周{wd}</div>'
+            f'<div style="font-size:11px; font-weight:600; color:#3b352e;">{wd}</div>'
             f'<div style="font-size:10px; color:#bbb; font-variant-numeric:tabular-nums;">{esc(d[5:])}</div>'
             '</div>'
         )
@@ -3521,10 +3535,10 @@ def _hour_heatmap_card(
     # Header row
     header = ['<div></div>']  # corner spacer
     for d in days:
-        wd = _WEEK_ZH[_date.fromisoformat(d).weekday()]
+        wd = _short_weekday(d)  # "周一" / "Mon" / etc.
         header.append(
             f'<div style="text-align:center; font-size:11px; color:var(--muted);">'
-            f'周{wd}<br><span style="font-size:10px; color:#bbb;">{esc(d[5:])}</span></div>'
+            f'{wd}<br><span style="font-size:10px; color:#bbb;">{esc(d[5:])}</span></div>'
         )
     cells_html.append("".join(header))
 
@@ -5140,16 +5154,15 @@ def weekly_page(
     )
 
     # Per-day links — single horizontal row, each opens in a new tab.
-    from datetime import date as _date
     day_chips = "".join(
         f'<a href="/today?date={d}" target="_blank" rel="noopener" '
-        f'class="day-jump">{d[5:]} 周{_WEEK_ZH[_date.fromisoformat(d).weekday()]}</a>'
+        f'class="day-jump">{d[5:]} {_short_weekday(d)}</a>'
         for d in days
     )
     day_links_html = (
         '<section class="card" style="margin-top:12px;">'
         '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">'
-        '<h3 style="margin:0;">跳到每日报告</h3>'
+        f'<h3 style="margin:0;">{esc(T("jump_to_day"))}</h3>'
         f'<div class="day-jumps">{day_chips}</div>'
         '</div>'
         '</section>'
