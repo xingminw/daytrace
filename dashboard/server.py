@@ -5604,8 +5604,8 @@ def weekly_page(
         '<div class="dim-tabs" data-role="wv-switcher">'
         + "".join(
             f'<button type="button" class="dim-tab{" active" if v_id == view else ""}" '
-            f'data-view="{v_id}">{label}</button>'
-            for v_id, label in _WEEKLY_VIEW_OPTS
+            f'data-view="{v_id}">{esc(label)}</button>'
+            for v_id, label in _weekly_view_opts()
         )
         + '</div>'
     )
