@@ -1,5 +1,7 @@
 # DayTrace Setup
 
+> 🌐 [中文版](setup.zh.md)
+
 Installation, configuration, and scheduling — top to bottom.
 
 ## 1. Install
@@ -114,6 +116,11 @@ DEEPSEEK_API_KEY=sk-...
 DAYTRACE_GMAIL_USER=your-agent@gmail.com
 DAYTRACE_GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx   # 16-char app password, NOT login password
 DAYTRACE_EMAIL_TO=you@example.com
+
+# Optional: language for Markdown / email / Feishu Docs exports.
+# Independent of the dashboard's UI language (which is cookie-based).
+# Default 'en'; set to 'zh' for Chinese reports.
+DAYTRACE_REPORT_LANG=en
 ```
 
 The 16-char app password comes from

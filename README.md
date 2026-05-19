@@ -16,6 +16,8 @@ written in your voice, owned entirely on your machine.
 > Built for one person (the author) on macOS. Open-source so you can
 > steal the parts you like.
 
+> 🌐 [中文 README](README.zh.md)
+
 ```
 collectors                SQLite events           AI overview          delivery
 ─────────────             ──────────────         ────────────         ─────────────

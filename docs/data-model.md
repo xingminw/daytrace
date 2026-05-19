@@ -1,5 +1,7 @@
 # DayTrace Data Model
 
+> 🌐 [中文版](data-model.zh.md)
+
 Everything lives in one SQLite file (`data/daytrace.sqlite`, schema
 version 12 as of 2026-05-18). Definitions are in `daytrace/db.py`;
 migrations are in `init_db()`. Bump `SCHEMA_VERSION` when adding a

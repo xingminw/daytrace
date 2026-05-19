@@ -1,5 +1,7 @@
 # DayTrace Architecture
 
+> 🌐 [中文版](architecture.zh.md)
+
 How the pieces actually fit together — module by module, channel by
 channel. Read top to bottom and you'll know where to look when something
 needs changing.
