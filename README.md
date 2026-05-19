@@ -1,69 +1,65 @@
 # DayTrace
 
-A **local-first personal daily trace** — collects your day from your own
-devices (git, IDE, AI chats, documents), aggregates it into a SQLite
-event timeline, lets a language model write a short narrative + insights,
-and delivers the result wherever you want to read it.
+**Master your work data in the age of AI tools.**
+
+Codex, Claude Code, Cursor, DeepSeek — these are how your real work
+happens now. They generate enormous, fragmentary signal about what you
+were doing all day, and almost none of it is captured in any system
+designed for *you*. Calendars miss it. Trackers manufacture it.
+
+DayTrace is a **local-first personal trace system** that quietly
+collects the same signal your AI tools already emit, joins it to your
+local code and documents, and turns it into a daily and weekly
+narrative *you actually want to read* — anchored on your real tasks,
+written in your voice, owned entirely on your machine.
 
 > Built for one person (the author) on macOS. Open-source so you can
 > steal the parts you like.
 
 ```
-collectors      →   SQLite events   →   AI overview   →   dashboard / docs / mail
-─────────────       ──────────────       ───────────       ─────────────────────────
-claude_code         day_report          DeepSeek          /today, /weekly
-codex               day_channel         (narrative,       (live, via Tailscale)
-git                 work_items           highlights,
-docs                event_work_…         work_pattern,    每日 / 每周 Feishu Docs
-hermes (Feishu)                          suggestions,
-ssh from remotes                         trend)           Gmail (HTML body)
-                                                          PNG charts inline
+collectors                SQLite events           AI overview          delivery
+─────────────             ──────────────         ────────────         ─────────────
+claude_code      ┐       events                 narrative            live dashboard
+codex            ├──►    day_report      ──►    highlights    ──►    (via Tailscale)
+git              │       day_channel            work_pattern         Feishu Docs
+docs             │       work_items             suggestions          Gmail (HTML)
+hermes (Feishu)  │       event_work_…           trend                inline charts
+ssh remotes      ┘                              DeepSeek
 ```
 
-## What it actually does
+One SQLite file is the entire system of record. One DeepSeek call per
+day writes the narrative. One Mac is the hub; other machines feed it
+via SSH. No DayTrace cloud, no telemetry, no third party touches your
+data without your config saying so.
 
-- **Collects** activity from your machines:
-  - local code (git commits, Claude Code / Codex sessions, file edits)
-  - local & Overleaf documents
-  - Feishu group chats relayed through Hermes
-  - remote Linux/WSL boxes via SSH (one Mac is the hub; everything
-    syncs back here)
-- **Stores** every event as a row in `data/daytrace.sqlite` with a
-  consistent schema (`source`, `start`, `project_guess`, `device_id`,
-  `evidence`, …). One SQLite file is the entire system of record.
-- **Links** events to *real Feishu tasks* (`work_items` table, synced
-  via lark-cli) so the AI can talk in task names instead of generic
-  project labels.
-- **Summarizes** each day with a single DeepSeek call:
-  - a 4-tile dashboard (events / active hours / longest focus / AI cost)
-  - a short narrative ("早上一头扎进 X…")
-  - three Insights columns: 🚀 关键任务进展 / ⏰ 时间安排回顾 / 🔔 任务跟进提醒
-  - a trend chip ("rising / steady / blocked")
-- **Renders** a live dashboard at `http://127.0.0.1:8765/today` and `…/weekly`
-  with stacked-bar histograms, donut distributions, per-task swim lanes,
-  and an audit panel for unmatched projects.
-- **Exports** the weekly report to:
-  - a Feishu **cloud document** (Markdown imported via `lark-cli`, with
-    PNG charts embedded as persistent image blocks)
-  - a **Gmail** message with HTML body + inline charts + a link back
-    to the live dashboard (via Tailscale Serve)
-- **Schedules** the whole thing with three macOS **launchd** jobs:
-  04:30 daily catchup, Monday 06:00 weekly report, plus a 24/7 dashboard
-  daemon.
+## What you actually see
+
+- **A 4-tile dashboard** — events / active hours / longest focus / AI cost
+- **A short daily narrative** in your voice
+  > *"早上一头扎进 Daily briefing 开发项目, 跟 Codex 来回拉扯飞书工作区结构…
+  > 到了傍晚, 切到 DayTrace, 跟 Claude Code 讨论数据源…"*
+- **3-column Insights** that don't get cute:
+  - 🚀 关键任务进展 — real Feishu tasks moved today, with concrete actions
+  - ⏰ 时间安排回顾 — today vs a 7-day baseline (no generic productivity advice)
+  - 🔔 任务跟进提醒 — deadlines closing in, tasks gone N days without a touch
+- **Charts that match the dashboard** — stacked bars by task, donut totals,
+  embedded inline in the email and in the Feishu cloud document
+- **A per-day weekly timeline** so the week's narrative isn't a flat
+  recap but a sequence you can scan
+- **An audit panel** when the collectors guess wrong on project → task
 
 ## Quick start
 
 ```bash
-git clone <this repo> daytrace
+git clone https://github.com/xingminw/daytrace
 cd daytrace
-python3 -m pip install -r requirements.txt
+make install                          # PyYAML, matplotlib, Markdown
 
-# 1. Configure data sources (devices, collectors, work-item tables)
-$EDITOR config/sources.yaml
-$EDITOR config/devices/mac.yaml
-$EDITOR config/work_items.yaml
+# Configure data sources for this machine
+$EDITOR config/devices/mac.yaml       # enable collectors you want
+$EDITOR config/work_items.yaml        # point at your Feishu Bitables
 
-# 2. Optional secrets (DeepSeek + Gmail SMTP for delivery)
+# DeepSeek + Gmail credentials (optional but recommended)
 mkdir -p ~/.daytrace && chmod 700 ~/.daytrace
 cat > ~/.daytrace/secrets.env <<'EOF'
 DEEPSEEK_API_KEY=sk-...
@@ -73,30 +69,38 @@ DAYTRACE_EMAIL_TO=you@example.com
 EOF
 chmod 600 ~/.daytrace/secrets.env
 
-# 3. First run — collect + regen
-python3 scripts/run_daily.py catchup --config config/devices/mac.yaml
+# Run it
+make daily          # collect + AI overview for yesterday
+make dashboard      # open http://127.0.0.1:8765/today
 
-# 4. Start the dashboard
-python3 dashboard/server.py --db data/daytrace.sqlite --host 127.0.0.1 --port 8765
-open http://127.0.0.1:8765/today
+# Scheduled — three macOS launchd jobs do the rest
+# (see docs/setup.md for install/uninstall + Tailscale Serve)
 ```
 
-For the full scheduled-task + Tailscale + Feishu + email setup, see
-**[docs/delivery-setup.md](docs/delivery-setup.md)**.
+`make help` lists every target.
 
 ## Layout
 
 ```
-daytrace/          core library — schema, collectors, AI client,
-                   report rendering (charts + markdown + email)
-dashboard/         HTTP server + page renderers
-scripts/           CLI entry points (collect_*, run_daily, export_report,
-                   cleanup_feishu_reports, daytrace-{daily,weekly}.sh)
-deploy/            launchd plists for macOS
-config/            yaml — devices, sources, work_items, aliases
-tests/             pytest suite (79 tests as of 2026-05-18)
-docs/              design notes, delivery setup, architecture
-data/              runtime (gitignored): sqlite, reports, logs
+daytrace/          core library
+  schema.py          canonical TraceEvent shape
+  db.py              SQLite schema + queries (18 tables, version 12)
+  channels.py        channel registry + dependency orchestrator
+  stats.py           deterministic stats channels (7 day, 6 day-project)
+  ai_client.py       thin DeepSeek HTTPS client (stdlib only)
+  ai_report.py       5 AI channels — narrative, trend, work_pattern…
+  daily_report.py    façade — regenerate_day_from_db + load_day_report
+  work_items.py      Feishu Bitable sync + event ↔ task linker
+  report_export.py   Markdown body
+  report_charts.py   matplotlib PNG charts (palette matches dashboard)
+  report_delivery.py Feishu Docs import + Gmail SMTP
+dashboard/         HTTP server + page renderers (single-file, no framework)
+scripts/           CLI: collect_*, run_daily, export_report, …
+deploy/            launchd plists (daily 04:30, weekly Mon 06:00, dashboard 24/7)
+config/            yaml — devices, sources, work_items, aliases, remotes
+tests/             pytest suite (79 tests)
+docs/              architecture + setup + data-model
+data/              all runtime — sqlite, inbox staging, logs, rendered reports
 ```
 
 ## Documentation
@@ -104,15 +108,14 @@ data/              runtime (gitignored): sqlite, reports, logs
 Three docs, each written against the actual code:
 
 - **[Architecture](docs/architecture.md)** — pipeline, module map,
-  channel registry, multi-device hub model
-- **[Setup](docs/setup.md)** — install, configuration files, secrets,
-  scheduled tasks (launchd / Tailscale / Feishu Docs / Gmail)
+  channel registry, multi-device hub model, dashboard routes
+- **[Setup](docs/setup.md)** — install, every config file, secrets,
+  scheduled tasks, Tailscale Serve, Feishu Docs + Gmail delivery
 - **[Data Model](docs/data-model.md)** — every SQLite table, the
-  `events_hash`-based cache, schema migrations
+  `events_hash` cache invalidation contract, schema migrations
 
-Earlier design drafts and point-in-time notes are preserved under
-[`docs/archive/`](docs/archive/) for context — they describe earlier
-thinking, not the current implementation.
+Earlier design drafts live under [`docs/archive/`](docs/archive/) for
+context — they describe earlier thinking, not the current implementation.
 
 ## License
 

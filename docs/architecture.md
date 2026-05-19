@@ -7,17 +7,16 @@ needs changing.
 ## Pipeline
 
 ```
-┌─ collectors ─────────────┐   ┌─ orchestrator ──┐   ┌─ delivery ─────────────┐
-│ scripts/collect_*.py     │   │                 │   │                        │
-│ scripts/run_daily.py     │   │ regenerate_day_ │   │ /today, /weekly        │
-│  catchup                 │   │ from_db()       │   │   (dashboard/server.py)│
-│   ├ collect_from_config  │   │                 │   │ /api/* JSON            │
-│   ├ rsync ssh remotes →  │ → │ runs channels   │ → │                        │
-│   │   inbox/<dev>/<date> │   │ in dep order:   │ → │ Markdown + PNG charts  │
-│   └ import_inbox.py      │   │  stats (cheap)  │   │  + Feishu Docs import  │
-│                          │   │  ai (DeepSeek)  │   │  + Gmail SMTP          │
-│ → events table           │   │ → day_channel   │   │ (scripts/export_report)│
-└──────────────────────────┘   └─────────────────┘   └────────────────────────┘
+┌─ collectors ─────────────────┐   ┌─ orchestrator ──┐   ┌─ delivery ─────────────┐
+│ scripts/collect_*.py         │   │                 │   │                        │
+│ scripts/run_daily.py catchup │   │ regenerate_day_ │   │ /today, /weekly        │
+│   ├ collect_from_config      │   │ from_db()       │   │   (dashboard/server.py)│
+│   ├ rsync ssh remotes →      │ → │ runs channels   │ → │ /api/* JSON            │
+│   │   data/inbox/<dev>/<dt>/ │   │ in dep order:   │   │ Markdown + PNG charts  │
+│   └ import_inbox.py          │   │  stats (cheap)  │   │  + Feishu Docs import  │
+│                              │   │  ai (DeepSeek)  │   │  + Gmail SMTP          │
+│ → events table               │   │ → day_channel   │   │ (scripts/export_report)│
+└──────────────────────────────┘   └─────────────────┘   └────────────────────────┘
 ```
 
 One SQLite file (`data/daytrace.sqlite`) is the system of record. Every
@@ -29,7 +28,7 @@ step reads from it or writes to it; there is no separate cache layer.
 |---|---|---|
 | `daytrace/schema.py`         | 74   | `TraceEvent` dataclass — the canonical event shape that collectors must produce. |
 | `daytrace/db.py`             | 817  | All SQL: `init_db()`, `connect()`, `upsert_events()`, `query_events()`, `query_today()`, schema migrations, `iso_week_to_date_range()` etc. Single source of truth for the 18 tables (see [data-model.md](data-model.md)). |
-| `daytrace/io.py`             | tiny | JSONL read/write helpers for `inbox/` and `events/`. |
+| `daytrace/io.py`             | tiny | JSONL read/write helpers used by collectors and `import_inbox`. |
 | `daytrace/collector_config.py` | 133  | Parses `config/devices/<device>.yaml` (per-device source enable/disable + paths). |
 | `daytrace/stats.py`          | 355  | Pure deterministic stats channels (time_span, active_minutes, longest_focus_block, context_switches, peak_windows, dimension_counts, quality). No I/O, no LLM. |
 | `daytrace/channels.py`       | 446  | Channel registry + dependency ordering + `regenerate_day()` orchestrator. Stats channels register at import; AI channels register at import of `ai_report`. |
@@ -112,9 +111,9 @@ One Mac is the hub. Other Linux/Windows-WSL machines are listed in
    `rsync scripts/ daytrace/ config/` → every remote's `repo_path`.
 2. `run_daily.py catchup` per `(remote, pending date)` pair:
    - SSH in, `cd repo_path`, `python scripts/collect_from_config.py
-     --config <device.yaml> --date <date> --output inbox/<dev>/<date>/`.
-   - `rsync` that slice back to the hub's `inbox/<dev>/<date>/`.
-   - On the hub: `import_inbox.py inbox/<dev>/<date>/` → `events` table.
+     --config <device.yaml> --date <date> --output data/inbox/<dev>/<date>/`.
+   - `rsync` that slice back to the hub's `data/inbox/<dev>/<date>/`.
+   - On the hub: `import_inbox.py data/inbox/<dev>/<date>/` → `events` table.
    - `regenerate_day_from_db(con, date, include_ai=True)`.
    - Failed (remote offline, ssh timeout) gets logged in `device_pull_log`
      and retried on the next run. Other remotes / days proceed.

@@ -5,7 +5,7 @@
 #   - `run_daily.py deploy`  — rsync local code (scripts/, daytrace/, config/)
 #                              to every remote's repo_path
 #   - `run_daily.py catchup` — for each remote, ssh in to run collect_from_config
-#                              and rsync inbox/<device>/<date>/ back
+#                              and rsync data/inbox/<device>/<date>/ back
 #
 # Adding a new remote: append a block here, then re-run `deploy` once. catchup
 # will start including it on the next nightly run.

@@ -391,7 +391,7 @@ def import_inbox(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--inbox", default="inbox")
+    parser.add_argument("--inbox", default="data/inbox")
     parser.add_argument("--db", default="data/daytrace.sqlite")
     parser.add_argument("--archive")
     parser.add_argument("--failed")

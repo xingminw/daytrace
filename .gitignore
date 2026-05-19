@@ -13,27 +13,22 @@ htmlcov/
 venv/
 env/
 
-# Local runtime data and private traces
+# All runtime state — single bucket. Everything DayTrace writes goes
+# under data/: SQLite, inbox staging, per-device archive mirrors, logs,
+# rendered reports, weekly AI cache. None of it is source of truth for
+# the code, all of it is per-machine.
 data/
-events/
-logs/
-outputs/
+
+# Database files that might sit elsewhere during local poking
 *.sqlite
 *.sqlite-*
 *.db
-*.jsonl
 
-# Local Feishu Drive sync state (per-machine ledger, not source of truth)
-.daytrace/
+# Raw event JSONL anywhere on disk
+*.jsonl
 
 # Claude Code / agent local state (settings, worktrees, launch.json, etc.)
 .claude/
-
-# Inbox staging + per-device archive mirror (per-machine runtime data,
-# not source). `*.jsonl` above catches event files but manifest .json
-# files and the directory trees themselves also shouldn't be tracked.
-inbox/
-archive/
 
 # Local screenshots / media captures
 *.jpg
@@ -43,19 +38,16 @@ archive/
 *.gif
 *.mp4
 
-# OS/editor noise
+# OS / editor noise
 .DS_Store
 .idea/
 .vscode/
 
-# Local environment / secrets
+# Secrets — DayTrace reads from ~/.daytrace/secrets.env (outside the repo);
+# these are the just-in-case patterns.
 .env
 .env.*
 !.env.example
 
-# Generated launchd / cron config — they embed live API keys
-ops/*.plist
-ops/*-local.*
-
-# Feishu drive folder tokens — created on first upload, machine-local
+# Feishu drive folder tokens — auto-generated on first upload, machine-local
 config/feishu_drive.yaml

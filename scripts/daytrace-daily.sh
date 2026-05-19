@@ -4,9 +4,9 @@
 # SSH-direct model:
 #   - This Mac is the hub. For every pending (device, shifted-day) pair
 #     (per device_pull_log), it:
-#       a) collects its own sources into ./inbox/<this-device>/<date>/
+#       a) collects its own sources into ./data/inbox/<this-device>/<date>/
 #       b) ssh's into each --remote, asks it to run collect_from_config locally
-#       c) rsyncs the remote's inbox/<dev>/<date>/ slice back to ./inbox/
+#       c) rsyncs the remote's data/inbox/<dev>/<date>/ slice back to ./data/inbox/
 #       d) imports everything + regenerates day_report (incl. AI).
 #
 # If a remote is unreachable (WSL off, Tailscale not up, etc.) that

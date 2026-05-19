@@ -134,7 +134,7 @@ def main() -> None:
         "--date", default=datetime.now(LOCAL_TZ).date().isoformat(), help="end date"
     )
     parser.add_argument("--lookback-days", type=int, default=1)
-    parser.add_argument("--out-dir", default="inbox")
+    parser.add_argument("--out-dir", default="data/inbox")
     args = parser.parse_args()
     manifest = collect_configured(
         Path(args.config).expanduser(),

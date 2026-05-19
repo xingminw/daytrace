@@ -9,7 +9,7 @@ The hub uses this for two distinct flows:
 
   2. catchup: per (remote × pending shifted-day), ssh in to run
               `collect_from_config.py --config <remote.config> --date <d>`,
-              then rsync the resulting inbox/<device>/<date>/ back.
+              then rsync the resulting data/inbox/<device>/<date>/ back.
 
 The schema is intentionally small (4 fields per remote) so the YAML stays
 human-readable; everything else (per-source enablement, lookback windows,

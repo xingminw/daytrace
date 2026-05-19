@@ -38,6 +38,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
+# Per-machine inbox lives under data/ now (used to be repo-root inbox/).
+# Same on every remote after `run_daily.py deploy` syncs this file.
+INBOX_ROOT = REPO_ROOT / "data" / "inbox"
+
 
 def _now_local_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
@@ -164,7 +168,7 @@ def _parse_ssh_remote(spec: str) -> dict:
 def remote_collect_and_pull(remote: dict, date: str) -> None:
     """For one remote device on one date:
        1) ssh into it, ask it to run collect_from_config locally
-       2) rsync its inbox/<device>/<date>/ down to our local inbox/.
+       2) rsync its data/inbox/<device>/<date>/ down to our local data/inbox/.
 
     Idempotent. Remote machine doesn't need its own cron — hub drives it.
     """
@@ -173,7 +177,7 @@ def remote_collect_and_pull(remote: dict, date: str) -> None:
     remote_repo = remote["remote_repo"]
     remote_config = remote["remote_config"]
 
-    # 1) remote collect — writes <remote_repo>/inbox/<dev>/<date>/*.jsonl
+    # 1) remote collect — writes <remote_repo>/data/inbox/<dev>/<date>/*.jsonl
     remote_cmd = (
         f"export PATH=$HOME/.npm-global/bin:$PATH && "
         f"cd {shlex.quote(remote_repo)} && "
@@ -185,9 +189,9 @@ def remote_collect_and_pull(remote: dict, date: str) -> None:
              ssh_alias, remote_cmd])
 
     # 2) rsync remote inbox slice down. Trailing slashes matter: src/ → dst/
-    local_target = REPO_ROOT / "inbox" / dev / date
+    local_target = INBOX_ROOT / dev / date
     local_target.mkdir(parents=True, exist_ok=True)
-    src = f"{ssh_alias}:{remote_repo}/inbox/{dev}/{date}/"
+    src = f"{ssh_alias}:{remote_repo}/data/inbox/{dev}/{date}/"
     run_cmd(["rsync", "-av", "--delete", src, f"{local_target}/"])
 
 
@@ -198,10 +202,10 @@ def _device_id_from_config(config_path: str) -> str:
 
 
 def _read_inbox_manifest_count(device_id: str, date: str) -> int | None:
-    """After a collect (local or rsync'd back), read inbox/<dev>/<date>/manifest.json
+    """After a collect (local or rsync'd back), read data/inbox/<dev>/<date>/manifest.json
     and return total_events. Returns None if the manifest isn't there yet."""
     import json
-    p = REPO_ROOT / "inbox" / device_id / date / "manifest.json"
+    p = INBOX_ROOT / device_id / date / "manifest.json"
     if not p.exists():
         return None
     try:
