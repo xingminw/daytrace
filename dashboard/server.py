@@ -130,6 +130,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "no_dim_data":    {"zh": "本周该维度无可用数据",  "en": "No data for this dimension this week"},
     "expand_all":     {"zh": "全部展开",              "en": "Expand all"},
     "collapse_all":   {"zh": "全部收起",              "en": "Collapse all"},
+    "audit_applied":  {"zh": "已保存:新增 {a} · 移除 {r} · 重建 {l} 条事件链接",
+                       "en": "Saved: +{a} · −{r} · {l} event links rebuilt"},
 
     # Reports / sections
     "report_tag":     {"zh": "Report",  "en": "Report"},
@@ -4795,8 +4797,32 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         )
 
     window_label = f"{start} ~ {end}" if start != end else end
+    # Success banner — populated client-side from ?audit_applied=A_R_L
+    # the POST handler appends after a save. Hidden by default; the inline
+    # script reveals + fills it if the query param is present, then strips
+    # the param from the URL so refreshing doesn't re-show the toast.
+    import json as _json
+    banner_template = T("audit_applied", a="__A__", r="__R__", l="__L__")
+    audit_banner = (
+        '<div id="audit-applied-banner" hidden '
+        'style="margin:0 0 10px; padding:8px 12px; border-radius:10px; '
+        'background:#e7f4ec; border:1px solid #b8e0c9; color:#1f6b3b; '
+        'font-size:13px; font-weight:600;"></div>'
+        '<script>(function(){'
+        'var p=new URLSearchParams(location.search).get("audit_applied");'
+        'if(!p)return;'
+        'var m=p.split("_");if(m.length<3)return;'
+        'var el=document.getElementById("audit-applied-banner");'
+        f'el.textContent={_json.dumps(banner_template, ensure_ascii=False)}'
+        '.replace("__A__",m[0]).replace("__R__",m[1]).replace("__L__",m[2]);'
+        'el.hidden=false;'
+        'var u=new URL(location.href);u.searchParams.delete("audit_applied");'
+        'history.replaceState(null,"",u.toString());'
+        '})();</script>'
+    )
     return (
         '<section class="card" id="alignment-audit" style="margin-top:12px;">'
+        + audit_banner +
         '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">'
         f'<h3 style="margin:0;">{esc(T("audit_title"))}</h3>'
         f'<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">{esc(T("audit_tag"))}</span>'
@@ -5476,12 +5502,25 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(str(exc).encode("utf-8"))
             return
         # Redirect back to the referring page with a success indicator
-        referer = self.headers.get("Referer") or "/today"
-        sep = "&" if "?" in referer else "?"
-        target = (
-            f"{referer.rstrip('#chart').rstrip('#alignment-audit')}"
-            f"{sep}audit_applied={stats['added']}_{stats['removed']}_{stats['links_inserted']}"
-        )
+        # so the audit card can show "X added · Y removed · Z links rebuilt".
+        # We deliberately point the fragment at #alignment-audit so the
+        # page scrolls back to where the user was — without it, after the
+        # 303 the browser lands at the top of /weekly and the user can't
+        # tell that anything happened.
+        referer = self.headers.get("Referer") or "/weekly"
+        # Strip any existing fragment AND any prior audit_applied query
+        # param (so successive saves don't pile them up).
+        from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
+        parts = urlsplit(referer)
+        qs = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+              if k != "audit_applied"]
+        qs.append(("audit_applied",
+                   f"{stats['added']}_{stats['removed']}_{stats['links_inserted']}"))
+        target = urlunsplit((
+            parts.scheme, parts.netloc, parts.path,
+            urlencode(qs), "alignment-audit",
+        ))
+        print(f"[dashboard] audit POST ok: {stats} → {target}")
         self.send_response(303)
         self.send_header("Location", target)
         self.end_headers()
