@@ -386,7 +386,7 @@ header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(
 .page-lang-toggle .lang-opt:hover { background:rgba(0,0,0,.04); }
 .page-lang-toggle .lang-opt.active { background:var(--ink); color:white; }
 h1 { margin:0; font-size:20px; letter-spacing:-0.03em; white-space:nowrap; }.sub { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-nav { display:flex; gap:6px; flex-wrap:nowrap; justify-content:flex-end; justify-self:end; margin-left:auto; } nav a { padding:5px 9px; border:1px solid var(--line); border-radius:999px; background:white; color:#3b352e; font-weight:650; font-size:13px; white-space:nowrap; } nav a.active { background:var(--ink); color:white; border-color:var(--ink); }
+nav { display:flex; gap:6px; flex-wrap:nowrap; justify-content:flex-end; justify-self:end; margin-left:auto; } nav a { padding:5px 9px; border:1px solid var(--line); border-radius:999px; background:rgba(255,250,240,.94); color:#3b352e; font-weight:650; font-size:13px; white-space:nowrap; } nav a:hover { background:#fff7e8; } nav a.active { background:var(--ink); color:white; border-color:var(--ink); }
 main { padding:12px 18px 28px; max-width:none; margin:0 auto; min-height:calc(100vh - 51px); }
 body.events-page main { height:calc(100vh - 51px); min-height:0; overflow:hidden; padding-bottom:12px; }
 body.events-page form { height:100%; }
@@ -404,10 +404,10 @@ body.events-page form { height:100%; }
 .header-controls .dim-tabs { background:rgba(255,250,240,.94); }
 /* Arrow nav buttons (← / →) and the open-db link share the same pill look
    as the date picker so the header row reads cleanly. */
-.hdr-nav-btn { display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:30px; padding:0 8px; border:1px solid var(--line); background:white; border-radius:8px; font-size:14px; font-weight:700; color:var(--ink); cursor:pointer; }
-.hdr-nav-btn:hover { background:#fdf6e3; }
-.hdr-open-db { display:inline-flex; align-items:center; height:30px; padding:0 10px; border:1px solid var(--line); background:white; border-radius:8px; font-size:12px; font-weight:650; color:var(--ink); }
-.hdr-open-db:hover { background:#fdf6e3; }
+.hdr-nav-btn { display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:30px; padding:0 8px; border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:8px; font-size:14px; font-weight:700; color:var(--ink); cursor:pointer; }
+.hdr-nav-btn:hover { background:#fff7e8; }
+.hdr-open-db { display:inline-flex; align-items:center; height:30px; padding:0 10px; border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:8px; font-size:12px; font-weight:650; color:var(--ink); }
+.hdr-open-db:hover { background:#fff7e8; }
 .dim-bar .day-nav { margin-top:0; padding-top:0; }
 .dim-bar-right { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .dim-tabs, .unit-tabs { display:flex; gap:4px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
@@ -826,7 +826,8 @@ body.events-page tbody tr:hover td { filter:brightness(.985); }
 details.evidence { color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; } details.evidence summary { cursor:pointer; color:var(--accent); font-family:ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; } details.evidence pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:220px; max-width:100%; overflow:auto; margin:8px 0 0; padding:8px; border-radius:10px; background:#fff; border:1px solid var(--line); }
 a { color:var(--accent); text-decoration:none; }
 .date-picker { position:relative; display:inline-block; }
-.date-picker summary { list-style:none; cursor:pointer; display:flex; gap:6px; align-items:center; border:1px solid var(--line); background:white; border-radius:10px; padding:5px 9px; font-size:12px; font-weight:650; }
+.date-picker summary { list-style:none; cursor:pointer; display:flex; gap:6px; align-items:center; border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:10px; padding:5px 9px; font-size:12px; font-weight:650; }
+.date-picker summary:hover { background:#fff7e8; }
 .date-picker summary::-webkit-details-marker { display:none; }
 .calendar-pop { position:absolute; top:34px; left:0; width:238px; background:white; border:1px solid var(--line); border-radius:14px; padding:10px; box-shadow:0 14px 32px rgba(40,30,10,.14); z-index:20; }
 .cal-head { display:flex; justify-content:space-between; align-items:center; font-weight:800; margin-bottom:8px; }
