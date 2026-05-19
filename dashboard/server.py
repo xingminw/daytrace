@@ -253,6 +253,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "db_tab_sources":    {"zh": "来源",          "en": "Sources"},
     "db_group_core":     {"zh": "核心数据",      "en": "Core"},
     "db_group_advanced": {"zh": "高级 / 调试",   "en": "Advanced / Debug"},
+    "db_more":           {"zh": "更多",          "en": "More"},
+    "db_less":           {"zh": "收起",          "en": "Less"},
     "open_db_t":       {"zh": "在新标签页打开本日事件", "en": "Open today's events in a new tab"},
     "open_db_short":   {"zh": "打开数据库 ↗", "en": "Open database ↗"},
     "donut_sorted_by": {"zh": "按 {dim} 排序 · 共 {n} 项", "en": "Sorted by {dim} · {n} items"},
@@ -725,10 +727,19 @@ body.events-page form { height:100%; }
 .table-tab { font-size:12.5px; padding:5px 14px; border-radius:999px; border:none; background:transparent; color:#3b352e; font-weight:650; text-decoration:none; transition:background .12s, color .12s; }
 .table-tab:hover { background:rgba(0,0,0,.04); }
 .table-tab.active { background:var(--ink); color:white; }
-/* Vertical divider between core and advanced pill groups in the
+/* Vertical divider between primary tabs and the "更多" toggle in the
    single-row table switcher. Stays in the flex flow so it wraps with
    the pills on narrow viewports. */
 .table-switcher-divider { display:inline-block; width:1px; align-self:stretch; margin:2px 4px; background:var(--line); }
+/* "更多 ▾" toggle: same pill chrome as .table-tab but with a small caret. */
+.table-more-toggle { cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:4px; }
+.table-more-toggle .tmt-caret { font-size:9px; opacity:.6; }
+.table-more-toggle[aria-expanded="true"] { background:rgba(0,0,0,.05); }
+/* Inline expansion bucket: hidden by default, becomes inline-flex when
+   the user reveals it. `hidden` attribute alone gives display:none which
+   would break the flex flow, so be explicit. */
+.table-switcher-extras { display:inline-flex; gap:4px; flex-wrap:wrap; }
+.table-switcher-extras[hidden] { display:none; }
 
 /* generic table view (any DB table) */
 .generic-table { table-layout:fixed; width:100%; }
@@ -2094,21 +2105,52 @@ def table_switcher_html(active: str, qs: dict[str, list[str]]) -> str:
         cls = "table-tab" + (" active" if table_id == active else "")
         return f'<a class="{cls}" href="{esc(href)}">{esc(T(label_key))}</a>'
 
-    core_pills = "".join(
-        _pill(tid, cfg["label_key"]) for tid, cfg in TABLE_VIEWS.items()
-        if cfg.get("group") == "core"
+    # The first 3 entries (events / day_report / day_project_report) are
+    # the everyday tabs and always show. Everything else — Feishu tasks +
+    # all advanced/debug tables — sits behind a single "更多 ▾" toggle so
+    # the toolbar stays compact, but expands inline (same row) when the
+    # user wants the debug surfaces.
+    PRIMARY_KEYS = ("events", "day", "day_project")
+    primary_pills = "".join(
+        _pill(tid, TABLE_VIEWS[tid]["label_key"])
+        for tid in PRIMARY_KEYS if tid in TABLE_VIEWS
     )
-    advanced_pills = "".join(
+    extra_pills = "".join(
         _pill(tid, cfg["label_key"]) for tid, cfg in TABLE_VIEWS.items()
-        if cfg.get("group") == "advanced"
+        if tid not in PRIMARY_KEYS
     )
-    # Core + Advanced live in one pill row with a vertical divider between
-    # them, so the toolbar reads as a single segmented control. The pill
-    # group wraps to multiple lines if the viewport is narrow.
-    divider = '<span class="table-switcher-divider" aria-hidden="true"></span>' if advanced_pills else ""
+    extras_open = active not in PRIMARY_KEYS  # auto-expand when current tab is hidden
+    more_label = T("db_less") if extras_open else T("db_more")
+    extras_html = (
+        '<span class="table-switcher-divider" aria-hidden="true"></span>'
+        f'<button type="button" class="table-tab table-more-toggle"'
+        f' data-extras-toggle{"" if not extras_open else " aria-expanded=\"true\""}>'
+        f'<span class="tmt-label">{esc(more_label)}</span>'
+        f' <span class="tmt-caret">{"▴" if extras_open else "▾"}</span>'
+        '</button>'
+        f'<div class="table-switcher-extras" {"" if extras_open else "hidden"}>'
+        f'{extra_pills}'
+        '</div>'
+    ) if extra_pills else ""
     return (
         '<section class="table-switcher-wrap">'
-        f'<div class="table-switcher">{core_pills}{divider}{advanced_pills}</div>'
+        f'<div class="table-switcher">{primary_pills}{extras_html}</div>'
+        '<script>(function(){'
+        'var btn=document.querySelector(".table-more-toggle");if(!btn)return;'
+        'var box=document.querySelector(".table-switcher-extras");if(!box)return;'
+        f'var more={json.dumps(T("db_more"), ensure_ascii=False)};'
+        f'var less={json.dumps(T("db_less"), ensure_ascii=False)};'
+        'btn.addEventListener("click",function(){'
+        'var open=box.hasAttribute("hidden");'
+        'if(open){box.removeAttribute("hidden");'
+        'btn.querySelector(".tmt-label").textContent=less;'
+        'btn.querySelector(".tmt-caret").textContent="▴";'
+        'btn.setAttribute("aria-expanded","true");}'
+        'else{box.setAttribute("hidden","");'
+        'btn.querySelector(".tmt-label").textContent=more;'
+        'btn.querySelector(".tmt-caret").textContent="▾";'
+        'btn.removeAttribute("aria-expanded");}'
+        '});})();</script>'
         '</section>'
     )
 
