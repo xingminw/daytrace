@@ -1485,7 +1485,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     filter_pills = [
         '<button type="button" class="dim-tab'
         + (' active' if sf == 'all' else '')
-        + '" data-filter="all">全部</button>'
+        + f'" data-filter="all">{esc(T("filter_all"))}</button>'
     ]
     for n in top_names:
         if overall_counter.get(n, 0) <= 0:
@@ -1508,7 +1508,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         '<div data-role="swim-filter" '
         'style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; '
         'margin:8px 0 12px;">'
-        '<span class="muted small" style="margin-right:4px; font-weight:600;">筛选</span>'
+        f'<span class="muted small" style="margin-right:4px; font-weight:600;">{esc(T("weekly_filter"))}</span>'
         + "".join(filter_pills) +
         '</div>'
     )
@@ -1516,7 +1516,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     daily_swim_card = (
         f'<section class="card weekly-viz" id="chart" data-view="swim" data-filter="{esc(sf)}">'
         '<div style="display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap;">'
-        '<h3 style="margin:0;">时间线</h3>'
+        f'<h3 style="margin:0;">{esc(T("page_timeline"))}</h3>'
         '<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">Timeline</span>'
         '</div>'
         + daily_filter_bar +
@@ -3384,8 +3384,9 @@ def _distribution_view_body(
     rest_total = sum(v for _, v in items_all[12:])
 
     dim_label = {
-        "project": "项目", "source": "数据源",
-        "activity": "活动", "device": "设备", "device_id": "设备",
+        "project":  T("dim_project"), "source":   T("dim_source"),
+        "activity": T("dim_activity"), "device":   T("dim_device"),
+        "device_id":T("dim_device"),
     }.get(mode, mode)
 
     # ── Donut (conic-gradient): every visible top item gets its own slice,
@@ -4934,7 +4935,7 @@ def weekly_page(
     filter_pills = [
         '<button type="button" class="dim-tab'
         + (' active' if sf == 'all' else '')
-        + '" data-filter="all">全部</button>'
+        + f'" data-filter="all">{esc(T("filter_all"))}</button>'
     ]
     for n in top_names:
         if overall_counts.get(n, 0) <= 0:
@@ -4956,7 +4957,7 @@ def weekly_page(
         '<div data-role="swim-filter" '
         'style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; '
         'margin:8px 0 12px;">'
-        '<span class="muted small" style="margin-right:4px; font-weight:600;">筛选</span>'
+        f'<span class="muted small" style="margin-right:4px; font-weight:600;">{esc(T("weekly_filter"))}</span>'
         + "".join(filter_pills) +
         '</div>'
     )
@@ -4975,7 +4976,7 @@ def weekly_page(
         f'<section class="card weekly-viz" id="chart" data-view="{esc(view)}" '
         f'data-filter="{esc(sf)}">'
         '<div style="display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap;">'
-        '<h3 style="margin:0;">时间线</h3>'
+        f'<h3 style="margin:0;">{esc(T("page_timeline"))}</h3>'
         '<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">Timeline</span>'
         f'<div style="margin-left:auto;">{bottom_switcher_pills}</div>'
         '</div>'
