@@ -29,9 +29,11 @@ outputs/
 # Claude Code / agent local state (settings, worktrees, launch.json, etc.)
 .claude/
 
-# Inbox staging (per-machine; contents already covered by *.jsonl above
-# but the directory tree itself shouldn't be tracked either)
+# Inbox staging + per-device archive mirror (per-machine runtime data,
+# not source). `*.jsonl` above catches event files but manifest .json
+# files and the directory trees themselves also shouldn't be tracked.
 inbox/
+archive/
 
 # Local screenshots / media captures
 *.jpg
