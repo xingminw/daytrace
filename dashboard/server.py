@@ -461,8 +461,11 @@ body.events-page form { height:100%; }
 .audit-table td.audit-pg   { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:12.5px; }
 .audit-table td.audit-num  { font-weight:700; }
 .audit-table td.muted      { color:var(--muted); font-weight:500; }
-.audit-table .audit-select { width:100%; max-width:100%; padding:5px 10px; border:1px solid var(--line); border-radius:8px; background-color:rgba(255,250,240,.94); font-size:13px; color:var(--ink); box-shadow:inset 0 -1px 0 rgba(0,0,0,.03); }
-.audit-table .audit-select:hover { background-color:#fff7e8; }
+/* Keep the audit <select> on white so the interactive picker reads
+   distinctly from the cream surface around it. */
+.audit-table .audit-select { width:100%; max-width:100%; padding:5px 10px; border:1px solid var(--line); border-radius:8px; background-color:#fff; font-size:13px; color:var(--ink); }
+.audit-table .audit-select:hover { background-color:#fafafa; }
+.audit-table .audit-select:focus { outline:2px solid rgba(47,111,237,.35); outline-offset:1px; }
 /* Weekly view-switcher card: only the active view's pane is visible.
    Toggling .weekly-viz[data-view] flips visibility with no reload (no scroll jump). */
 .weekly-viz .wv-pane { display:none; }
