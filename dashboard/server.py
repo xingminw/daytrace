@@ -17,6 +17,162 @@ from daytrace.db import connect, init_db, query_events, query_filter_options, qu
 
 DEFAULT_DB = Path(__file__).resolve().parents[1] / "data" / "daytrace.sqlite"
 
+
+# ───── i18n ─────────────────────────────────────────────────────────────
+# Cookie-driven 2-language UI. Default is zh (the author's primary
+# language); `?lang=en` or the header switcher sets the cookie. Anything
+# not in this map renders as zh — that's intentional, since
+# fully-translating the dashboard is incremental work.
+#
+# Convention: keys are stable English snake_case; values are
+# {"zh": "...", "en": "..."}. The translation function is `T`.
+
+_STRINGS: dict[str, dict[str, str]] = {
+    # Page titles / nav
+    "nav_daily":      {"zh": "日报",   "en": "Daily"},
+    "nav_weekly":     {"zh": "周报",   "en": "Weekly"},
+    "nav_open_db":    {"zh": "数据库", "en": "Database"},
+    "nav_open_db_t":  {"zh": "在新标签页打开数据库", "en": "Open database in a new tab"},
+    "daily_title":    {"zh": "每日 Report", "en": "Daily Report"},
+    "weekly_title":   {"zh": "周报",   "en": "Weekly"},
+    "no_date":        {"zh": "无日期", "en": "no date"},
+    "lang_switch_t":  {"zh": "切到英文", "en": "Switch to Chinese"},
+
+    # Weekday short labels (used in 7-col timeline)
+    "wd_1": {"zh": "周一", "en": "Mon"},
+    "wd_2": {"zh": "周二", "en": "Tue"},
+    "wd_3": {"zh": "周三", "en": "Wed"},
+    "wd_4": {"zh": "周四", "en": "Thu"},
+    "wd_5": {"zh": "周五", "en": "Fri"},
+    "wd_6": {"zh": "周六", "en": "Sat"},
+    "wd_7": {"zh": "周日", "en": "Sun"},
+
+    # Stats tiles (4-tile dashboard)
+    "stat_events":         {"zh": "事件总数",   "en": "Events"},
+    "stat_active":         {"zh": "活跃总时长", "en": "Active hours"},
+    "stat_longest_focus":  {"zh": "最长专注",   "en": "Longest focus"},
+    "stat_ai_cost":        {"zh": "AI 花费",     "en": "AI cost"},
+    "stat_active_days":    {"zh": "活跃天数",   "en": "Active days"},
+    "stat_span":           {"zh": "时间跨度",   "en": "Time span"},
+    "stat_today_total":    {"zh": "当天累计",   "en": "today total"},
+    "stat_week_total":     {"zh": "本周累计",   "en": "this week"},
+    "stat_full_week":      {"zh": "全周累计",   "en": "weekly total"},
+    "stat_estimated":      {"zh": "估算",       "en": "estimated"},
+    "stat_full_attend":    {"zh": "满勤",       "en": "every day"},
+    "stat_blank_days":     {"zh": "空白",       "en": "blank"},
+    "stat_no_ai":          {"zh": "(未运行 AI)", "en": "(AI not run)"},
+    "stat_switches":       {"zh": "切换 {n} 次", "en": "{n} switches"},
+
+    # Insights card
+    "insights_title":     {"zh": "Insights",        "en": "Insights"},
+    "insights_hint":      {"zh": "悬停标题看每列在说什么", "en": "Hover a column header to see what it covers"},
+    "insights_progress":  {"zh": "关键任务进展",    "en": "Task progress"},
+    "insights_pattern":   {"zh": "时间安排回顾",    "en": "Time pattern"},
+    "insights_followup":  {"zh": "任务跟进提醒",    "en": "Follow-ups"},
+    "insights_none":      {"zh": "(无)",             "en": "(none)"},
+    "tip_progress":  {"zh": "今天/本周在飞书任务上有哪些具体推进 —— 完成的、改的、提的代码。只看带任务标签的事件,零散杂活不放这里。",
+                      "en": "Concrete progress on Feishu tasks — what was finished, changed, or shipped. Only events linked to a task; ad-hoc work is excluded."},
+    "tip_pattern":   {"zh": "你今天的作息和最近 7 天平均比起来怎么样 —— 几点开工、几点收工、有没有大块专注、是不是切换太频繁。基于具体数字,不会写空话。",
+                      "en": "How today's schedule compares to your 7-day baseline — start/end times, long focus blocks, context switching. Grounded in numbers, no fluff."},
+    "tip_followup":  {"zh": "明天/下周该盯哪些任务 —— deadline 临近的、好几天没动的、还有未提交改动的。",
+                      "en": "Tasks to watch tomorrow/next week — closing deadlines, idle for days, or with uncommitted changes."},
+
+    # Trend closer (Report card)
+    "trend_label":   {"zh": "变化趋势", "en": "Trend"},
+    "trend_tip":     {"zh": "和昨天/上周比,你的工作重心和节奏整体往哪儿走。",
+                      "en": "Where your focus and pace are heading compared to yesterday / last week."},
+
+    # Daily timeline card
+    "timeline_title":    {"zh": "每日时间轴",  "en": "Daily timeline"},
+    "timeline_tag":      {"zh": "Daily",        "en": "Daily"},
+    "timeline_hint":     {"zh": "本周 7 天叙事并列展示;点击星期头可以跳到当日完整 dashboard",
+                          "en": "All 7 days side by side; click a weekday header to open that day's full dashboard"},
+    "timeline_no_data":  {"zh": "(无数据)",    "en": "(no data)"},
+
+    # Tasks panel
+    "tasks_all":       {"zh": "全部",   "en": "All"},
+    "tasks_table_t":   {"zh": "任务",   "en": "Tasks"},
+    "tasks_table_r":   {"zh": "审稿",   "en": "Reviews"},
+    "tasks_col_p":     {"zh": "P",      "en": "P"},
+    "tasks_col_status":{"zh": "状态",   "en": "Status"},
+    "tasks_col_title": {"zh": "任务",   "en": "Task"},
+    "tasks_col_topic": {"zh": "题目",   "en": "Title"},
+    "tasks_col_hours": {"zh": "时长",   "en": "Hours"},
+    "tasks_col_events":{"zh": "事件",   "en": "Events"},
+    "tasks_col_last":  {"zh": "最近活动","en": "Last activity"},
+    "tasks_col_due":   {"zh": "截止",   "en": "Due"},
+    "tasks_show_done": {"zh": "显示已完成", "en": "Show completed"},
+    "status_doing":    {"zh": "进行中", "en": "In progress"},
+    "status_todo":     {"zh": "待办",   "en": "To do"},
+    "status_done":     {"zh": "完成",   "en": "Done"},
+
+    # Audit panel
+    "audit_title":    {"zh": "未匹配项目审计",      "en": "Unlinked project audit"},
+    "audit_tag":      {"zh": "Audit",                "en": "Audit"},
+    "audit_window":   {"zh": "窗口",                "en": "window"},
+    "audit_summary":  {"zh": "{n} 个项目 / 共 {ev} 条事件未对应任务",
+                        "en": "{n} projects / {ev} events with no task link"},
+    "audit_pg":       {"zh": "project_guess",       "en": "project_guess"},
+    "audit_events":   {"zh": "事件",                "en": "Events"},
+    "audit_days":     {"zh": "活跃天数",            "en": "Active days"},
+    "audit_last":     {"zh": "最近活动",            "en": "Last activity"},
+    "audit_match":    {"zh": "对应任务",            "en": "Map to task"},
+    "audit_skip":     {"zh": "— 跳过 / 无对应 —",  "en": "— Skip / no match —"},
+    "audit_save_hint":{"zh": "保存后会写入 config/work_item_aliases.yaml 并立刻重建链接(历史报告已缓存的不变;下次 catchup / 刷新时按新规则统计)",
+                       "en": "Saved picks go to config/work_item_aliases.yaml and links rebuild immediately (cached historical reports unchanged; next catchup / refresh applies new rules)"},
+    "audit_save_btn": {"zh": "保存并重建链接",       "en": "Save & rebuild links"},
+
+    # Reports / sections
+    "report_tag":     {"zh": "Report",  "en": "Report"},
+    "no_data_lede":   {"zh": "这一天没有可分析事件。", "en": "No events to analyze for this day."},
+    "no_data_hint":   {"zh": "可以切换到有数据的日期,或先运行 collector/import。",
+                       "en": "Switch to a day with data, or run a collector/import first."},
+    "no_ai_overview": {"zh": "(AI 速读未生成)",    "en": "(AI overview not generated)"},
+    "ai_unavailable": {"zh": "(DEEPSEEK_API_KEY 未设置, 跳过 AI 速读)",
+                       "en": "(DEEPSEEK_API_KEY not set; AI overview skipped)"},
+    "ai_failed":      {"zh": "AI 调用失败",       "en": "AI call failed"},
+
+    # Misc
+    "time_ago_now":    {"zh": "刚刚",        "en": "just now"},
+    "time_ago_min":    {"zh": "{n} 分钟前", "en": "{n} min ago"},
+    "time_ago_hr":     {"zh": "{n} 小时前", "en": "{n}h ago"},
+    "time_ago_day":    {"zh": "{n} 天前",   "en": "{n}d ago"},
+    "untouched":       {"zh": "未触碰",       "en": "untouched"},
+}
+
+
+import contextvars as _contextvars
+_CURRENT_LANG: _contextvars.ContextVar[str] = _contextvars.ContextVar(
+    "daytrace_lang", default="zh"
+)
+
+
+def T(key: str, lang: str | None = None, **fmt) -> str:
+    """Translate a key for the given language. Falls back to zh.
+    When `lang` is None, reads the per-request ContextVar (which the
+    HTTP handler sets at the start of each GET). Format args are
+    substituted via `str.format` if provided."""
+    if lang is None:
+        lang = _CURRENT_LANG.get()
+    entry = _STRINGS.get(key)
+    if entry is None:
+        return key  # never crash on a missing key
+    val = entry.get(lang) or entry.get("zh") or key
+    return val.format(**fmt) if fmt else val
+
+
+def _lang_from_request(handler) -> str:
+    """Parse the daytrace_lang cookie from a BaseHTTPRequestHandler.
+    Defaults to 'zh'. Acceptable values: 'zh' / 'en'."""
+    raw = (handler.headers.get("Cookie") or "")
+    for piece in raw.split(";"):
+        p = piece.strip()
+        if p.startswith("daytrace_lang="):
+            v = p.split("=", 1)[1].strip().lower()
+            if v in ("zh", "en"):
+                return v
+    return "zh"
+
 STYLE = """
 :root { color-scheme: light; --bg:#f7f5ef; --card:#fffaf0; --ink:#202124; --muted:#6b645c; --line:#e7dfd0; --accent:#2f6fed; --purple:#7b61ff; --green:#16a34a; --orange:#f59e0b; --red:#ef4444; }
 * { box-sizing: border-box; }
@@ -30,6 +186,8 @@ header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(
 .page-toggle-pill.active { background:var(--ink); color:white; }
 .page-db-btn { display:inline-flex; align-items:center; padding:6px 14px; border:1px solid var(--line); background:white; border-radius:999px; font-size:12.5px; font-weight:650; color:var(--ink); text-decoration:none; }
 .page-db-btn:hover { background:#fdf6e3; }
+.page-lang-btn { display:inline-flex; align-items:center; justify-content:center; min-width:32px; height:30px; padding:0 8px; border:1px solid var(--line); background:white; border-radius:999px; font-size:12px; font-weight:700; color:var(--ink); text-decoration:none; margin-left:6px; }
+.page-lang-btn:hover { background:#fdf6e3; }
 h1 { margin:0; font-size:20px; letter-spacing:-0.03em; white-space:nowrap; }.sub { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 nav { display:flex; gap:6px; flex-wrap:nowrap; justify-content:flex-end; justify-self:end; margin-left:auto; } nav a { padding:5px 9px; border:1px solid var(--line); border-radius:999px; background:white; color:#3b352e; font-weight:650; font-size:13px; white-space:nowrap; } nav a.active { background:var(--ink); color:white; border-color:var(--ink); }
 main { padding:12px 18px 28px; max-width:none; margin:0 auto; min-height:calc(100vh - 51px); }
@@ -614,28 +772,48 @@ def html_response(handler: BaseHTTPRequestHandler, body: str, status=200):
     handler.wfile.write(data)
 
 
-def layout(title: str, subtitle: str, active: str, content: str, date_control: str = "", body_class: str | None = None) -> str:
-    # Right-rail: 日报/周报 toggle pill + 数据库 (new tab) button.
-    # Subtitle dropped — the Report panel already carries that info.
+def layout(title: str, subtitle: str, active: str, content: str, date_control: str = "", body_class: str | None = None, lang: str = "zh") -> str:
+    # Right-rail: 日报/周报 toggle pill + 数据库 (new tab) button + language switcher.
     toggle = "".join(
-        f'<a class="page-toggle-pill{" active" if active == key else ""}" href="{href}">{label}</a>'
-        for key, label, href in [
-            ("today", "日报", "/today"),
-            ("weekly", "周报", "/weekly"),
+        f'<a class="page-toggle-pill{" active" if active == key else ""}" href="{href}">{esc(T(label_key, lang))}</a>'
+        for key, label_key, href in [
+            ("today",  "nav_daily",  "/today"),
+            ("weekly", "nav_weekly", "/weekly"),
         ]
     )
     db_btn = (
         '<a class="page-db-btn" target="_blank" rel="noopener" '
-        'href="/events" title="在新标签页打开数据库">数据库 ↗</a>'
+        f'href="/events" title="{esc(T("nav_open_db_t", lang))}">{esc(T("nav_open_db", lang))} ↗</a>'
+    )
+    # Language switcher — clicking sets the cookie and reloads the same page
+    other_lang = "en" if lang == "zh" else "zh"
+    other_label = "EN" if other_lang == "en" else "中"
+    lang_switcher = (
+        f'<a class="page-lang-btn" href="#" data-lang="{other_lang}" '
+        f'title="{esc(T("lang_switch_t", lang))}">{other_label}</a>'
     )
     nav = (
         f'<div class="page-toggle">{toggle}</div>'
         f'{db_btn}'
+        f'{lang_switcher}'
     )
     if body_class is None:
         body_class = f'{active}-page'
+    html_lang_attr = "zh-CN" if lang == "zh" else "en"
     script = """
 <script>
+// Language switcher: set cookie + reload
+document.addEventListener('click', (event) => {
+  const btn = event.target.closest('a.page-lang-btn');
+  if (btn) {
+    event.preventDefault();
+    const target = btn.getAttribute('data-lang') || 'zh';
+    document.cookie = 'daytrace_lang=' + target + '; path=/; max-age=' + (60*60*24*365);
+    window.location.reload();
+    return;
+  }
+});
+// Close date picker on outside click / Esc
 document.addEventListener('click', (event) => {
   document.querySelectorAll('details.date-picker[open]').forEach((picker) => {
     if (!picker.contains(event.target)) picker.removeAttribute('open');
@@ -647,7 +825,7 @@ document.addEventListener('keydown', (event) => {
   }
 });
 </script>"""
-    return f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(title)}</title><style>{STYLE}</style></head><body class="{body_class}"><header><h1>{esc(title)}</h1>{date_control}<div class="header-spacer"></div>{nav}</header><main>{content}</main>{script}</body></html>"""
+    return f"""<!doctype html><html lang="{html_lang_attr}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(title)}</title><style>{STYLE}</style></head><body class="{body_class}"><header><h1>{esc(title)}</h1>{date_control}<div class="header-spacer"></div>{nav}</header><main>{content}</main>{script}</body></html>"""
 
 
 def select_control(name: str, options: list[dict[str, str]], selected: str | bool | None, label: str = "") -> str:
@@ -1351,7 +1529,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
 
     content = f"""
 <section class="report-grid">
-  <div class="card daily-report"><div class="bucket-head"><h2>每日 Report · {esc(date or '无日期')}</h2><span class="tag source">Report</span></div>{rich_daily_body}</div>
+  <div class="card daily-report"><div class="bucket-head"><h2>{esc(T("daily_title"))} · {esc(date or T("no_date"))}</h2><span class="tag source">{esc(T("report_tag"))}</span></div>{rich_daily_body}</div>
   <div class="right-column">{right_column_body}</div>
 </section>
 {insights_card_html}
@@ -1654,8 +1832,8 @@ def _render_trend_closer(overview_payload: dict | None, continuity: dict | None)
         return ""
     return (
         '<div class="dr-trend-closer" '
-        'title="和昨天/上周比,你的工作重心和节奏整体往哪儿走。">'
-        '<span class="trend-label">变化趋势</span>'
+        f'title="{esc(T("trend_tip"))}">'
+        f'<span class="trend-label">{esc(T("trend_label"))}</span>'
         + (_momentum_chip(direction) if direction else "")
         + (f'<span class="dr-trend-text">{esc(comparison)}</span>' if comparison else "")
         + '</div>'
@@ -1671,7 +1849,7 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
     and v10+ (overview.narrative) shapes."""
     if not days:
         return ""
-    weekday_labels = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    weekday_labels = [T(f"wd_{i+1}") for i in range(7)]
 
     cols: list[str] = []
     any_data = False
@@ -1694,7 +1872,7 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
                 f'<span class="dt-day-name">{esc(wd)}</span>'
                 f'<span class="dt-date">{esc(d[5:])}</span>'
                 '</div>'
-                '<div class="dt-headline muted">(无数据)</div>'
+                f'<div class="dt-headline muted">{esc(T("timeline_no_data"))}</div>'
                 '</div>'
             )
             continue
@@ -1733,9 +1911,9 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
     return (
         '<section class="card daily-timeline-card">'
         '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:12px;">'
-        '<h3 style="margin:0;">每日时间轴</h3>'
-        '<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">Daily</span>'
-        '<span class="muted small" style="margin-left:6px;">本周 7 天叙事并列展示;点击星期头可以跳到当日完整 dashboard</span>'
+        f'<h3 style="margin:0;">{esc(T("timeline_title"))}</h3>'
+        f'<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">{esc(T("timeline_tag"))}</span>'
+        f'<span class="muted small" style="margin-left:6px;">{esc(T("timeline_hint"))}</span>'
         '</div>'
         '<div class="dt-grid">'
         + "".join(cols)
@@ -1774,16 +1952,23 @@ def _render_insights_card(overview_payload: dict | None, *, continuity: dict | N
     import re as _re_local
     _strip_re = _re_local.compile(r"^[🚀⏰🔔📌✨📰💡📊🎯]\s*")
 
-    def _col(emoji: str, label: str, key: str, items: list[str]) -> str:
-        tip = _INSIGHTS_TOOLTIPS.get(key, "")
+    # Map insight column-keys to translation keys for label + tooltip
+    _COL_KEYS = {
+        "highlights":   ("insights_progress", "tip_progress"),
+        "work_pattern": ("insights_pattern",  "tip_pattern"),
+        "suggestions":  ("insights_followup", "tip_followup"),
+    }
+
+    def _col(emoji: str, key: str, items: list[str]) -> str:
+        label_key, tip_key = _COL_KEYS[key]
         cleaned = [_strip_re.sub("", x.lstrip()).strip() for x in items]
         body_html = (
             f'<ul>{"".join(f"<li>{esc(x)}</li>" for x in cleaned)}</ul>' if cleaned
-            else '<div class="muted">(无)</div>'
+            else f'<div class="muted">{esc(T("insights_none"))}</div>'
         )
         return (
             '<div class="insights-col">'
-            f'<h4 title="{esc(tip)}">{emoji} {esc(label)}</h4>'
+            f'<h4 title="{esc(T(tip_key))}">{emoji} {esc(T(label_key))}</h4>'
             f'{body_html}'
             '</div>'
         )
@@ -1791,13 +1976,13 @@ def _render_insights_card(overview_payload: dict | None, *, continuity: dict | N
     return (
         '<section class="card insights-card">'
         '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:10px;">'
-        '<h3 style="margin:0;">Insights</h3>'
-        '<span class="muted small">悬停标题看每列在说什么</span>'
+        f'<h3 style="margin:0;">{esc(T("insights_title"))}</h3>'
+        f'<span class="muted small">{esc(T("insights_hint"))}</span>'
         '</div>'
         '<div class="insights-grid">'
-        + _col("🚀", "关键任务进展", "highlights",   highlights)
-        + _col("⏰", "时间安排回顾", "work_pattern", work_pattern)
-        + _col("🔔", "任务跟进提醒", "suggestions",  suggestions)
+        + _col("🚀", "highlights",   highlights)
+        + _col("⏰", "work_pattern", work_pattern)
+        + _col("🔔", "suggestions",  suggestions)
         + '</div>'
         '</section>'
     )
@@ -1859,7 +2044,7 @@ def _render_stats_strip_compact(header: dict, channels: dict[str, str | None], *
         focus_sub = "(无)"
 
     cost_num = f"${ai_cost:.3f}" if ai_cost is not None else "—"
-    cost_sub = "当天累计" if ai_cost is not None else "(未运行 AI)"
+    cost_sub = T("stat_today_total") if ai_cost is not None else T("stat_no_ai")
 
     def _tile(num: str, lbl: str, sub: str | None) -> str:
         sub_html = (
@@ -1876,10 +2061,10 @@ def _render_stats_strip_compact(header: dict, channels: dict[str, str | None], *
 
     return (
         '<div class="dr-stats-compact">'
-        + _tile(str(header["total_events"]), "事件总数", f"切换 {sw_count} 次")
-        + _tile(_format_duration_short(header["active_minutes"]), "活跃总时长", None)
-        + _tile(focus_num, "最长专注", focus_sub)
-        + _tile(cost_num, "AI 花费", cost_sub)
+        + _tile(str(header["total_events"]), T("stat_events"), T("stat_switches", n=sw_count))
+        + _tile(_format_duration_short(header["active_minutes"]), T("stat_active"), None)
+        + _tile(focus_num, T("stat_longest_focus"), focus_sub)
+        + _tile(cost_num, T("stat_ai_cost"), cost_sub)
         + '</div>'
     )
 
@@ -3495,26 +3680,29 @@ def _weekly_stats_strip(
     hours_delta = (total_minutes - last_active_minutes) / 60.0
     delta_color = "#16a34a" if delta >= 0 else "#dc2626"
     hours_color = "#16a34a" if hours_delta >= 0 else "#dc2626"
+    _lw = T("nav_weekly")  # "Weekly" / "周报"
+    _prev_label = "Prev " if _CURRENT_LANG.get() == "en" else "上周 "
+    _blank_label = T("stat_blank_days")
     return (
         '<div class="dr-stats-compact">'
         f'<div class="dr-stat">'
         f'<span class="dr-stat-num">{total_events}</span>'
-        f'<span class="dr-stat-lbl">事件总数</span>'
-        f'<span class="muted" style="font-size:10.5px; margin-top:2px;">上周 {last_total} '
+        f'<span class="dr-stat-lbl">{esc(T("stat_events"))}</span>'
+        f'<span class="muted" style="font-size:10.5px; margin-top:2px;">{esc(_prev_label)}{last_total} '
         f'<span style="color:{delta_color};">({delta:+d}, {delta_pct:+.0f}%)</span></span></div>'
         f'<div class="dr-stat">'
         f'<span class="dr-stat-num">{total_minutes/60:.1f}h</span>'
-        f'<span class="dr-stat-lbl">活跃总时长</span>'
-        f'<span class="muted" style="font-size:10.5px; margin-top:2px;">上周 {last_active_minutes/60:.1f}h '
+        f'<span class="dr-stat-lbl">{esc(T("stat_active"))}</span>'
+        f'<span class="muted" style="font-size:10.5px; margin-top:2px;">{esc(_prev_label)}{last_active_minutes/60:.1f}h '
         f'<span style="color:{hours_color};">({hours_delta:+.1f}h)</span></span></div>'
         f'<div class="dr-stat">'
         f'<span class="dr-stat-num">{active_days}/7</span>'
-        f'<span class="dr-stat-lbl">活跃天数</span>'
-        f'<span class="muted" style="font-size:10.5px; margin-top:2px;">空白 {7 - active_days}</span></div>'
+        f'<span class="dr-stat-lbl">{esc(T("stat_active_days"))}</span>'
+        f'<span class="muted" style="font-size:10.5px; margin-top:2px;">{esc(_blank_label)} {7 - active_days}</span></div>'
         f'<div class="dr-stat">'
         f'<span class="dr-stat-num">${ai_cost:.3f}</span>'
-        f'<span class="dr-stat-lbl">AI 报告花费</span>'
-        f'<span class="muted" style="font-size:10.5px; margin-top:2px;">本周累计</span></div>'
+        f'<span class="dr-stat-lbl">{esc(T("stat_ai_cost"))}</span>'
+        f'<span class="muted" style="font-size:10.5px; margin-top:2px;">{esc(T("stat_week_total"))}</span></div>'
         '</div>'
     )
 
@@ -3812,7 +4000,7 @@ def _compute_task_stats(
 
 def _format_time_ago(iso: str | None) -> str:
     if not iso:
-        return "未触碰"
+        return T("untouched")
     from datetime import datetime
     try:
         dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).replace(tzinfo=None)
@@ -3820,16 +4008,14 @@ def _format_time_ago(iso: str | None) -> str:
         return iso[:10]
     delta = datetime.now() - dt
     s = int(delta.total_seconds())
-    if s < 0:
-        return "刚刚"
     if s < 90:
-        return "刚刚"
+        return T("time_ago_now")
     if s < 3600:
-        return f"{s // 60} 分钟前"
+        return T("time_ago_min", n=s // 60)
     if s < 86400:
-        return f"{s // 3600} 小时前"
+        return T("time_ago_hr",  n=s // 3600)
     if s < 86400 * 7:
-        return f"{s // 86400} 天前"
+        return T("time_ago_day", n=s // 86400)
     return iso[:10]
 
 
@@ -4242,7 +4428,7 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         return best[1] if best else None
 
     def _options_html(selected_rid: str | None) -> str:
-        parts = ['<option value="">— 跳过 / 无对应 —</option>']
+        parts = [f'<option value="">{esc(T("audit_skip"))}</option>']
         for w in wi_rows:
             rid = w["record_id"]
             ttl = w["title"] or ""
@@ -4286,9 +4472,9 @@ def _alignment_audit_card(con, days: list[str]) -> str:
     return (
         '<section class="card" id="alignment-audit" style="margin-top:12px;">'
         '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">'
-        '<h3 style="margin:0;">未匹配项目审计</h3>'
-        '<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">Audit</span>'
-        f'<span class="muted small">{len(rows)} 个项目 / 共 {total_unmatched} 条事件未对应任务 · 窗口 {esc(window_label)}</span>'
+        f'<h3 style="margin:0;">{esc(T("audit_title"))}</h3>'
+        f'<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">{esc(T("audit_tag"))}</span>'
+        f'<span class="muted small">{esc(T("audit_summary", n=len(rows), ev=total_unmatched))} · {esc(T("audit_window"))} {esc(window_label)}</span>'
         '</div>'
         '<form method="POST" action="/api/work-items/alias" '
         'style="margin:0;">'
@@ -4296,23 +4482,23 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         '<colgroup>'
         '<col style="width:30%">'    # project_guess
         '<col style="width:72px">'   # events
-        '<col style="width:80px">'   # 活跃天数
-        '<col style="width:120px">'  # 最近活动
-        '<col>'                       # 对应任务 dropdown (auto)
+        '<col style="width:88px">'   # active days
+        '<col style="width:128px">'  # last activity
+        '<col>'                       # match-to-task dropdown (auto)
         '</colgroup>'
         '<thead><tr>'
-        '<th class="audit-pg">project_guess</th>'
-        '<th class="audit-num">事件</th>'
-        '<th class="audit-num">活跃天数</th>'
-        '<th class="audit-time">最近活动</th>'
-        '<th>对应任务</th>'
+        f'<th class="audit-pg">{esc(T("audit_pg"))}</th>'
+        f'<th class="audit-num">{esc(T("audit_events"))}</th>'
+        f'<th class="audit-num">{esc(T("audit_days"))}</th>'
+        f'<th class="audit-time">{esc(T("audit_last"))}</th>'
+        f'<th>{esc(T("audit_match"))}</th>'
         '</tr></thead>'
         f'<tbody>{"".join(rows_html)}</tbody>'
         '</table>'
         '<div style="display:flex; align-items:center; gap:12px; padding-top:10px; margin-top:8px; border-top:1px dashed var(--line);">'
-        '<span class="muted small">保存后会写入 <code>config/work_item_aliases.yaml</code> 并立刻重建链接（历史报告已缓存的不变；下次 catchup / 刷新时按新规则统计）</span>'
+        f'<span class="muted small">{esc(T("audit_save_hint"))}</span>'
         '<button type="submit" style="margin-left:auto; padding:6px 14px; background:var(--ink); color:white; border:none; border-radius:8px; font-weight:650; cursor:pointer; font-size:13px;">'
-        '保存并重建链接'
+        f'{esc(T("audit_save_btn"))}'
         '</button>'
         '</div>'
         '</form>'
@@ -4536,7 +4722,7 @@ def weekly_page(
     # parallel to the daily report card.
     weekly_report_card = (
         '<div class="card daily-report">'
-        f'<div class="bucket-head"><h2>周报 · {esc(week)}</h2><span class="tag source">Report</span></div>'
+        f'<div class="bucket-head"><h2>{esc(T("nav_weekly"))} · {esc(week)}</h2><span class="tag source">{esc(T("report_tag"))}</span></div>'
         + stats_strip
         + _ai_summary_body(ai_summary)
         + '</div>'
@@ -4974,6 +5160,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
+        # Set the per-request language context from the cookie, so every
+        # T() call inside the renderer chain picks it up without
+        # threading `lang` through every helper.
+        _CURRENT_LANG.set(_lang_from_request(self))
+
         parsed = urlparse(self.path)
         qs = parse_qs(parsed.query)
         date = qs.get("date", [None])[0] or None
