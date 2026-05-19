@@ -453,7 +453,21 @@ header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(
 .page-lang-toggle .lang-opt.active { background:var(--ink); color:white; }
 h1 { margin:0; font-size:20px; letter-spacing:-0.03em; white-space:nowrap; }.sub { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 nav { display:flex; gap:6px; flex-wrap:nowrap; justify-content:flex-end; justify-self:end; margin-left:auto; } nav a { padding:5px 9px; border:1px solid var(--line); border-radius:999px; background:rgba(255,250,240,.94); color:#3b352e; font-weight:650; font-size:13px; white-space:nowrap; } nav a:hover { background:#fff7e8; } nav a.active { background:var(--ink); color:white; border-color:var(--ink); }
-main { padding:12px 18px 28px; max-width:none; margin:0 auto; min-height:calc(100vh - 51px); }
+/* Cap reading width on big screens so narrative + cards don't span
+   ultrawide / 27" displays (line length stays under ~90ch). Below
+   the cap we keep fluid 18px side padding so 13" laptops still
+   breathe. The events database page is a wide table that genuinely
+   needs the full viewport — opt it out via body.events-page. */
+main { padding:12px 18px 28px; max-width:1480px; margin:0 auto; min-height:calc(100vh - 51px); width:100%; }
+/* Header stays full-width (so its sticky cream backdrop spans the
+   viewport) but its grid items are squeezed by side padding equal to
+   `(100vw - 1480px) / 2` on big screens — capped at 200px so 1900+px
+   screens align nicely with main without leaving a ridiculously wide
+   gap. clamp() = (min ceiling, fluid, max ceiling). */
+header { padding-left:max(18px, calc((100vw - 1480px) / 2));
+         padding-right:max(18px, calc((100vw - 1480px) / 2)); }
+body.events-page main { max-width:none; }
+body.events-page header { padding-left:18px; padding-right:18px; }
 body.events-page main { height:calc(100vh - 51px); min-height:0; overflow:hidden; padding-bottom:12px; }
 body.events-page form { height:100%; }
 .grid { display:grid; grid-template-columns: repeat(4, minmax(150px,1fr)); gap:10px; }.section-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }.three-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }.report-grid { display:grid; grid-template-columns:minmax(320px,1fr) minmax(320px,1fr); gap:12px; align-items:stretch; }
