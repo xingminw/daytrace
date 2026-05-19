@@ -81,18 +81,31 @@ body.events-page form { height:100%; }
 }
 .tasks-card .tasks-title-cell { word-break: break-word; white-space: normal; }
 /* Full mode (single-table view via the 全部/任务/审稿 toggle): the table
-   spans the page so cap the title column instead of letting it eat all
-   the slack, and breathe more room into the data columns. The <col>
-   widths in the colgroup are the *compact* defaults; we override them
-   here for the wider layout. */
+   spans the page. With table-layout:fixed + width:100% the title col
+   gets a percentage so it stays sensible no matter how wide the page
+   is; data columns get pixel widths sized for their longest typical
+   value. */
 .tasks-grid[data-display-mode="full"] .tasks-card table.mini-table { table-layout: fixed; }
-.tasks-grid[data-display-mode="full"] .tasks-card .tasks-title-cell { max-width: 520px; }
 .tasks-grid[data-display-mode="full"] .tasks-card col[data-col="priority"] { width: 60px; }
-.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="status"]   { width: 80px; }
-.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="hours"]    { width: 76px; }
-.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="events"]   { width: 70px; }
-.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="last"]     { width: 120px; }
-.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="due"]      { width: 130px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="status"]   { width: 88px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="title"]    { width: 42%; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="hours"]    { width: 90px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="events"]   { width: 84px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="last"]     { width: 140px; }
+.tasks-grid[data-display-mode="full"] .tasks-card col[data-col="due"]      { width: 150px; }
+/* Audit table — consistent alignment + restrained styling.
+   project_guess monospace (it's a raw identifier), numeric cols
+   tabular + right-aligned, time/select left-aligned. Padding picks
+   up from .mini-table; here we just standardize alignment + look. */
+.audit-table th { padding:8px 10px; font-size:12.5px; font-weight:700; color:#6b6052; letter-spacing:0.04em; text-transform:uppercase; }
+.audit-table td { padding:8px 10px; vertical-align:middle; font-size:13px; }
+.audit-table th.audit-pg,   .audit-table td.audit-pg   { text-align:left; }
+.audit-table th.audit-num,  .audit-table td.audit-num  { text-align:right; font-variant-numeric:tabular-nums; }
+.audit-table th.audit-time, .audit-table td.audit-time { text-align:left; }
+.audit-table td.audit-pg   { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:12.5px; }
+.audit-table td.audit-num  { font-weight:700; }
+.audit-table td.muted      { color:var(--muted); font-weight:500; }
+.audit-table .audit-select { width:100%; max-width:100%; padding:4px 8px; border:1px solid var(--line); border-radius:6px; background:white; font-size:13px; }
 /* Weekly view-switcher card: only the active view's pane is visible.
    Toggling .weekly-viz[data-view] flips visibility with no reload (no scroll jump). */
 .weekly-viz .wv-pane { display:none; }
@@ -4134,7 +4147,11 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         return ""
     rows = con.execute(
         """
-        SELECT e.project_guess AS pg, COUNT(*) AS n
+        SELECT
+            e.project_guess AS pg,
+            COUNT(*)        AS n,
+            MAX(e.start)    AS last_at,
+            COUNT(DISTINCT substr(e.start, 1, 10)) AS active_days
           FROM events e
           LEFT JOIN event_work_item_links l ON l.event_id = e.id
          WHERE e.date BETWEEN ? AND ?
@@ -4229,15 +4246,21 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         pg = r["pg"]
         n = r["n"]
         total_unmatched += n
+        last_at = r["last_at"] or ""
+        active_days = r["active_days"] or 0
+        last_pretty = _format_time_ago(last_at) if last_at else "—"
+        days_label = f"{active_days} 天" if active_days else "—"
         # Prefer existing alias > fuzzy suggestion > nothing
         preselect = existing_aliases.get(pg) or _suggest(pg)
         rows_html.append(
             '<tr>'
-            f'<td><span style="font-family: ui-monospace, monospace; font-size:12px;">{esc(pg)}</span></td>'
-            f'<td style="text-align:right; font-variant-numeric:tabular-nums; font-weight:700;">{n}</td>'
+            f'<td class="audit-pg">{esc(pg)}</td>'
+            f'<td class="audit-num">{n}</td>'
+            f'<td class="audit-num muted">{esc(days_label)}</td>'
+            f'<td class="audit-time muted">{esc(last_pretty)}</td>'
             '<td>'
             f'<input type="hidden" name="project[]" value="{esc(pg)}">'
-            f'<select name="record[]" style="width:100%; max-width:100%; padding:4px 6px; border:1px solid var(--line); border-radius:6px; background:white; font-size:12.5px;">'
+            f'<select name="record[]" class="audit-select">'
             f'{_options_html(preselect)}'
             '</select>'
             '</td>'
@@ -4253,16 +4276,20 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         '</div>'
         '<form method="POST" action="/api/work-items/alias" '
         'style="margin:0;">'
-        '<table class="mini-table" style="width:100%; table-layout:fixed;">'
+        '<table class="mini-table audit-table" style="width:100%; table-layout:fixed;">'
         '<colgroup>'
-        '<col style="width:240px">'   # project_guess
-        '<col style="width:80px">'    # events
-        '<col>'                        # dropdown (auto)
+        '<col style="width:30%">'    # project_guess
+        '<col style="width:72px">'   # events
+        '<col style="width:80px">'   # 活跃天数
+        '<col style="width:120px">'  # 最近活动
+        '<col>'                       # 对应任务 dropdown (auto)
         '</colgroup>'
         '<thead><tr>'
-        '<th style="text-align:left;">project_guess</th>'
-        '<th style="text-align:right;">events</th>'
-        '<th style="text-align:left;">对应任务</th>'
+        '<th class="audit-pg">project_guess</th>'
+        '<th class="audit-num">事件</th>'
+        '<th class="audit-num">活跃天数</th>'
+        '<th class="audit-time">最近活动</th>'
+        '<th>对应任务</th>'
         '</tr></thead>'
         f'<tbody>{"".join(rows_html)}</tbody>'
         '</table>'
