@@ -7,7 +7,7 @@ from typing import Iterable, Any
 
 from .schema import TraceEvent
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 DEFAULT_DEVICE_ID = "Mac"
 DEFAULT_LOCATION_ID = "unknown"
 DEFAULT_COLLECTOR_ID = "hub-local"
@@ -341,6 +341,10 @@ def init_db(con: sqlite3.Connection) -> None:
     # so the dashboard can render the user's chosen language without
     # re-running the AI. Old rows have NULL label_json and fall back to `label`.
     _ensure_column(con, "event_activity_labels", "label_json", "label_json TEXT")
+    # v15: per-(date, project) task list — JSON array of work_item titles
+    # (deduped) so the 逐项日报告 view can render "项目 · 任务" in one cell
+    # without joining on every render. Populated by _upsert_project_report.
+    _ensure_column(con, "day_project_report", "tasks", "tasks TEXT")
     con.execute("CREATE INDEX IF NOT EXISTS idx_work_items_table_key ON work_items(table_key)")
     seed_single_machine_defaults(con)
     con.execute(

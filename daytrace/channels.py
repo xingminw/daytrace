@@ -373,19 +373,48 @@ def _upsert_project_report(con, date, project, project_events, day_total, all_ev
     event_count = len(project_events)
     am = stats.project_active_minutes(project_events)
     share = (event_count / day_total) if day_total else 0.0
+    # Collect distinct work_item titles linked to this slice's events. The
+    # join is cheap (≤ a few hundred events per project per day), and stuffing
+    # the result here means the dashboard doesn't need to re-join on every
+    # render. Order by event count desc so the top task surfaces first.
+    tasks_json = None
+    event_ids = [e.get("id") for e in project_events if e.get("id")]
+    if event_ids:
+        ph = ",".join("?" * len(event_ids))
+        try:
+            rows = con.execute(
+                f"""
+                SELECT w.title, w.title_en, COUNT(*) AS n
+                  FROM event_work_item_links l
+                  JOIN work_items w ON w.record_id = l.record_id
+                 WHERE l.event_id IN ({ph})
+                 GROUP BY w.record_id
+                 ORDER BY n DESC, w.title
+                """, event_ids,
+            ).fetchall()
+            tasks = [
+                {"title": r["title"], "title_en": r["title_en"] or "", "n": r["n"]}
+                for r in rows if r["title"]
+            ]
+            if tasks:
+                tasks_json = json.dumps(tasks, ensure_ascii=False)
+        except sqlite3.OperationalError:
+            # work_items / event_work_item_links may not exist yet
+            tasks_json = None
     con.execute(
         """
         INSERT INTO day_project_report(date, project, events_hash, event_count,
-          active_minutes, share, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+          active_minutes, share, tasks, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(date, project) DO UPDATE SET
           events_hash=excluded.events_hash,
           event_count=excluded.event_count,
           active_minutes=excluded.active_minutes,
           share=excluded.share,
+          tasks=excluded.tasks,
           updated_at=CURRENT_TIMESTAMP
         """,
-        (date, project, events_hash, event_count, am, share),
+        (date, project, events_hash, event_count, am, share, tasks_json),
     )
 
 

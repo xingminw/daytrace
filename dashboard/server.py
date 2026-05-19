@@ -236,13 +236,23 @@ _STRINGS: dict[str, dict[str, str]] = {
     "dp_th_project":     {"zh": "项目",     "en": "Project"},
     "dp_th_events":      {"zh": "事件",     "en": "Events"},
     "dp_th_active":      {"zh": "活跃时长", "en": "Active"},
-    "dp_th_share":       {"zh": "占比",     "en": "Share"},
     "dp_th_status":      {"zh": "状态",     "en": "Status"},
-    "dp_th_ai":          {"zh": "AI 概要 · 做了什么 · 下一步", "en": "AI summary · what was done · next"},
+    "dp_th_summary":     {"zh": "概要 · 做了什么", "en": "Summary · what was done"},
+    "dp_th_next":        {"zh": "下一步",   "en": "Next"},
     "dp_th_cont":        {"zh": "对比上次", "en": "vs prev"},
-    "dp_th_titles":      {"zh": "高频标题", "en": "Top titles"},
-    "dp_th_meta":        {"zh": "时段 · 来源", "en": "Span · sources"},
+    "dp_th_project_task":{"zh": "项目 · 任务", "en": "Project · Tasks"},
     "dp_rowcount":       {"zh": "{n} 行",   "en": "{n} rows"},
+    # additional table tabs (generic browser)
+    "db_tab_work_items": {"zh": "任务库",        "en": "Tasks (work_items)"},
+    "db_tab_links":      {"zh": "事件→任务",     "en": "Event→Task links"},
+    "db_tab_labels":     {"zh": "活动标签",      "en": "Activity labels"},
+    "db_tab_day_ch":     {"zh": "AI 每日缓存",   "en": "AI day cache"},
+    "db_tab_day_proj_ch":{"zh": "AI 逐项缓存",   "en": "AI per-item cache"},
+    "db_tab_devices":    {"zh": "设备",          "en": "Devices"},
+    "db_tab_locations":  {"zh": "位置",          "en": "Locations"},
+    "db_tab_sources":    {"zh": "来源",          "en": "Sources"},
+    "db_group_core":     {"zh": "核心数据",      "en": "Core"},
+    "db_group_advanced": {"zh": "高级 / 调试",   "en": "Advanced / Debug"},
     "open_db_t":       {"zh": "在新标签页打开本日事件", "en": "Open today's events in a new tab"},
     "open_db_short":   {"zh": "打开数据库 ↗", "en": "Open database ↗"},
     "donut_sorted_by": {"zh": "按 {dim} 排序 · 共 {n} 项", "en": "Sorted by {dim} · {n} items"},
@@ -679,13 +689,18 @@ body.events-page form { height:100%; }
 .dpr-table th { background:#fff7e8; }
 .dpr-table .col-date { width:90px; white-space:nowrap; }
 .dpr-table .col-project { width:140px; }
+.dpr-table .col-project-task { width:240px; }
 .dpr-table .col-num { width:60px; text-align:right; font-variant-numeric:tabular-nums; }
 .dpr-table .col-share { width:120px; }
 .dpr-table .col-status { width:90px; }
-.dpr-table .col-ai { min-width:280px; max-width:420px; }
+.dpr-table .col-ai { min-width:240px; max-width:380px; }
 .dpr-table .col-cont { width:170px; }
 .dpr-table .col-titles { width:220px; }
 .dpr-table .col-meta { width:160px; }
+.project-task-cell { display:flex; flex-direction:column; gap:6px; }
+.task-chip-row { display:flex; flex-wrap:wrap; gap:4px; }
+.task-chip { display:inline-flex; max-width:220px; padding:1px 8px; border-radius:999px; background:#e8f0ff; color:#174ea6; font-size:11px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.task-chip.muted { background:#f0ebe0; color:var(--muted); font-weight:500; }
 .project-chip { display:inline-flex; padding:2px 9px; border-radius:999px; background:#ebe6ff; color:#4632a8; font-size:12px; font-weight:650; text-decoration:none; max-width:130px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .project-chip:hover { background:#dcd3ff; }
 .share-cell { display:flex; align-items:center; gap:6px; }
@@ -703,10 +718,29 @@ body.events-page form { height:100%; }
 .tt-time { font-variant-numeric:tabular-nums; color:var(--muted); margin-right:4px; }
 
 /* segmented pill group — same look as the global dim-bar */
-.table-switcher { display:inline-flex; gap:4px; margin:0 0 12px; padding:3px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; box-shadow:0 4px 10px rgba(65,45,10,.04); flex-wrap:wrap; }
+.table-switcher-wrap { display:flex; flex-direction:column; gap:6px; margin:0 0 12px; }
+.table-switcher { display:inline-flex; gap:4px; padding:3px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; box-shadow:0 4px 10px rgba(65,45,10,.04); flex-wrap:wrap; align-self:flex-start; }
 .table-tab { font-size:12.5px; padding:5px 14px; border-radius:999px; border:none; background:transparent; color:#3b352e; font-weight:650; text-decoration:none; transition:background .12s, color .12s; }
 .table-tab:hover { background:rgba(0,0,0,.04); }
 .table-tab.active { background:var(--ink); color:white; }
+.table-switcher-adv summary { cursor:pointer; list-style:none; font-size:12px; color:var(--muted); padding:2px 6px; user-select:none; }
+.table-switcher-adv summary::-webkit-details-marker { display:none; }
+.table-switcher-adv summary:hover { color:var(--ink); }
+.table-switcher-adv[open] summary { color:var(--ink); font-weight:650; }
+.table-switcher-adv-row { margin-top:6px; }
+
+/* generic table view (any DB table) */
+.generic-table { table-layout:fixed; width:100%; }
+.generic-table th, .generic-table td { padding:6px 9px; font-size:12.5px; border-bottom:1px solid #eadfcd; vertical-align:top; }
+.generic-table th { background:#fff7e8; color:#4d4438; font-weight:700; font-size:11.5px; letter-spacing:.03em; text-transform:uppercase; position:sticky; top:0; box-shadow:0 1px 0 var(--line); }
+.generic-table td.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; color:#4d4438; }
+.generic-table td.muted { color:var(--muted); }
+.generic-table td.num { text-align:right; font-variant-numeric:tabular-nums; }
+.generic-table td.truncate { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.generic-table td.json-cell { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px; color:#4d4438; white-space:pre-wrap; word-break:break-all; max-height:80px; overflow:hidden; }
+.generic-table-meta { display:flex; align-items:center; gap:12px; margin-bottom:8px; font-size:12px; color:var(--muted); }
+.generic-table-meta .gt-name { font-family:ui-monospace,Menlo,monospace; color:var(--ink); font-weight:700; }
+.generic-table-meta .gt-count { font-weight:650; color:var(--ink); }
 
 /* compact stats strip inside the home page daily-report card —
    grid with equal columns so all 4 stats align on every day's render */
@@ -1916,33 +1950,172 @@ def events_table(events, filters: dict[str, str | None], options: dict[str, Any]
   </tr></thead><tbody>{''.join(rows) or f'<tr><td colspan="6">{esc(T("db_no_events"))}</td></tr>'}</tbody></table></div>
 </form>"""
 
-# Dropped the technical "(day_report)" / "(day_project_report)" suffixes
-# in the chip labels — the underlying SQLite table names are an
-# implementation detail nobody outside the codebase needs to know. Labels
-# are localized via T() at render time.
+# Every browsable DB table is declared here. Three view modes:
+#   • "custom"  — handled by an existing dedicated page function (events,
+#                 day_report, day_project_report). Just for tab labeling.
+#   • "generic" — rendered by generic_table_page below. Set `cols` to a
+#                 list of column specs (name, label_zh, label_en, width,
+#                 transform). Missing columns are hidden; unlisted DB
+#                 columns aren't shown (deliberate — keeps the user-facing
+#                 view curated even as the schema evolves).
+#   • "raw"     — same as generic but `cols=None` falls back to all columns
+#                 of the table, JSON-pretty-printed if value looks like JSON.
+#
+# `group` puts the tab into "core" (always visible) or "advanced" (folded
+# under a disclosure so the toolbar doesn't blow up).
+TABLE_VIEWS: dict[str, dict] = {
+    # ── Core (custom-rendered pages) ────────────────────────────────────
+    "events": {
+        "kind": "custom", "label_key": "db_tab_events", "group": "core",
+    },
+    "day": {
+        "kind": "custom", "label_key": "db_tab_day", "group": "core",
+    },
+    "day_project": {
+        "kind": "custom", "label_key": "db_tab_day_project", "group": "core",
+    },
+    # ── Core (generic, but user-relevant) ───────────────────────────────
+    "work_items": {
+        "kind": "generic", "label_key": "db_tab_work_items", "group": "core",
+        "sql_table": "work_items",
+        "default_order": "title",
+        "cols": [
+            {"name": "record_id",       "zh": "Record ID",   "en": "Record ID",  "width": 130, "mono": True},
+            {"name": "table_key",       "zh": "表",         "en": "Table",       "width": 80},
+            {"name": "title",           "zh": "标题",       "en": "Title",       "width": 240},
+            {"name": "title_en",        "zh": "EN 标题",    "en": "EN title",    "width": 220},
+            {"name": "status",          "zh": "状态",       "en": "Status",      "width": 80},
+            {"name": "priority",        "zh": "P",          "en": "P",           "width": 40},
+            {"name": "tags",            "zh": "标签",       "en": "Tags",        "width": 140},
+            {"name": "due_date",        "zh": "截止",       "en": "Due",         "width": 110},
+            {"name": "subtitle",        "zh": "副标题",     "en": "Subtitle",    "width": 160},
+            {"name": "synced_at",       "zh": "同步时间",   "en": "Synced",      "width": 150, "muted": True},
+        ],
+    },
+    # ── Advanced (generic, debug-y) ─────────────────────────────────────
+    "event_work_item_links": {
+        "kind": "generic", "label_key": "db_tab_links", "group": "advanced",
+        "sql_table": "event_work_item_links",
+        "default_order": "matched_at DESC",
+        "cols": [
+            {"name": "event_id",   "zh": "事件 ID",   "en": "Event ID",   "width": 200, "mono": True, "truncate": 32},
+            {"name": "record_id",  "zh": "任务 ID",   "en": "Task ID",    "width": 130, "mono": True},
+            {"name": "match_type", "zh": "匹配方式",  "en": "Match",      "width": 100},
+            {"name": "confidence", "zh": "置信度",    "en": "Confidence", "width": 80,  "fmt": "pct"},
+            {"name": "matched_at", "zh": "匹配时间",  "en": "Matched at", "width": 150, "muted": True},
+        ],
+    },
+    "event_activity_labels": {
+        "kind": "generic", "label_key": "db_tab_labels", "group": "advanced",
+        "sql_table": "event_activity_labels",
+        "default_order": "assigned_at DESC",
+        "cols": [
+            {"name": "event_id",   "zh": "事件 ID",   "en": "Event ID",   "width": 200, "mono": True, "truncate": 32},
+            {"name": "label",      "zh": "标签 (zh)", "en": "Label (zh)", "width": 120},
+            {"name": "label_json", "zh": "双语",      "en": "Bilingual",  "width": 200, "muted": True, "truncate": 60},
+            {"name": "source",     "zh": "来源",      "en": "Source",     "width": 80},
+            {"name": "confidence", "zh": "置信度",    "en": "Confidence", "width": 80,  "fmt": "pct"},
+            {"name": "model",      "zh": "模型",      "en": "Model",      "width": 140, "muted": True},
+            {"name": "assigned_at","zh": "时间",      "en": "Assigned at","width": 150, "muted": True},
+        ],
+    },
+    "day_channel": {
+        "kind": "generic", "label_key": "db_tab_day_ch", "group": "advanced",
+        "sql_table": "day_channel",
+        "default_order": "date DESC, channel",
+        "cols": [
+            {"name": "date",              "zh": "日期",     "en": "Date",        "width": 100},
+            {"name": "channel",           "zh": "Channel",  "en": "Channel",     "width": 160},
+            {"name": "generator_version", "zh": "版本",     "en": "Version",     "width": 80},
+            {"name": "value_json",        "zh": "Value",    "en": "Value",       "width": 360, "truncate": 120, "mono": True},
+            {"name": "tokens_in",         "zh": "in",       "en": "in",          "width": 70, "muted": True},
+            {"name": "tokens_out",        "zh": "out",      "en": "out",         "width": 70, "muted": True},
+            {"name": "cost_usd",          "zh": "成本$",    "en": "Cost $",      "width": 70, "fmt": "money"},
+            {"name": "generated_at",      "zh": "生成时间", "en": "Generated at","width": 150, "muted": True},
+            {"name": "error",             "zh": "错误",     "en": "Error",       "width": 200, "muted": True},
+        ],
+    },
+    "day_project_channel": {
+        "kind": "generic", "label_key": "db_tab_day_proj_ch", "group": "advanced",
+        "sql_table": "day_project_channel",
+        "default_order": "date DESC, project, channel",
+        "cols": [
+            {"name": "date",              "zh": "日期",     "en": "Date",        "width": 100},
+            {"name": "project",           "zh": "项目",     "en": "Project",     "width": 140},
+            {"name": "channel",           "zh": "Channel",  "en": "Channel",     "width": 140},
+            {"name": "generator_version", "zh": "版本",     "en": "Version",     "width": 80},
+            {"name": "value_json",        "zh": "Value",    "en": "Value",       "width": 360, "truncate": 120, "mono": True},
+            {"name": "tokens_in",         "zh": "in",       "en": "in",          "width": 70, "muted": True},
+            {"name": "tokens_out",        "zh": "out",      "en": "out",         "width": 70, "muted": True},
+            {"name": "cost_usd",          "zh": "成本$",    "en": "Cost $",      "width": 70, "fmt": "money"},
+            {"name": "generated_at",      "zh": "生成时间", "en": "Generated at","width": 150, "muted": True},
+        ],
+    },
+    "devices": {
+        "kind": "generic", "label_key": "db_tab_devices", "group": "advanced",
+        "sql_table": "devices",
+        "default_order": "device_id",
+        "cols": None,  # show all columns
+    },
+    "locations": {
+        "kind": "generic", "label_key": "db_tab_locations", "group": "advanced",
+        "sql_table": "locations",
+        "default_order": "location_id",
+        "cols": None,
+    },
+    "sources": {
+        "kind": "generic", "label_key": "db_tab_sources", "group": "advanced",
+        "sql_table": "sources",
+        "default_order": "source_id",
+        "cols": None,
+    },
+}
+
+# Back-compat for any caller still using TABLE_TABS
 TABLE_TABS: list[tuple[str, str]] = [
-    ("events",      "db_tab_events"),
-    ("day",         "db_tab_day"),
-    ("day_project", "db_tab_day_project"),
+    (k, v["label_key"]) for k, v in TABLE_VIEWS.items() if v.get("group") == "core"
 ]
 
 
 def table_switcher_html(active: str, qs: dict[str, list[str]]) -> str:
-    """Pill row at the top of the /events page for switching which table to view.
+    """Tab row at the top of the /events page for switching which table to view.
 
-    Preserves the `date` query param so a user filtering by date keeps that
-    filter when they switch tables. Other event-specific filters (source,
-    project, search, etc.) are intentionally dropped — they don't translate."""
+    Core tables are shown as inline pills (matching .table-switcher). Advanced
+    tables sit behind a <details> disclosure so the bar doesn't blow up with
+    debug tables that 99% of visits never need."""
     date = (qs.get("date", [None])[0] or "")
-    pills = []
-    for table_id, label_key in TABLE_TABS:
+
+    def _pill(table_id: str, label_key: str) -> str:
         params = {"table": table_id}
         if date:
             params["date"] = date
         href = "/events" + ("?" + urlencode(params) if params else "")
         cls = "table-tab" + (" active" if table_id == active else "")
-        pills.append(f'<a class="{cls}" href="{esc(href)}">{esc(T(label_key))}</a>')
-    return f'<section class="table-switcher">{"".join(pills)}</section>'
+        return f'<a class="{cls}" href="{esc(href)}">{esc(T(label_key))}</a>'
+
+    core_pills = "".join(
+        _pill(tid, cfg["label_key"]) for tid, cfg in TABLE_VIEWS.items()
+        if cfg.get("group") == "core"
+    )
+    advanced_pills = "".join(
+        _pill(tid, cfg["label_key"]) for tid, cfg in TABLE_VIEWS.items()
+        if cfg.get("group") == "advanced"
+    )
+    in_advanced = TABLE_VIEWS.get(active, {}).get("group") == "advanced"
+
+    return (
+        '<section class="table-switcher-wrap">'
+        f'<div class="table-switcher">{core_pills}</div>'
+        + (
+            '<details class="table-switcher-adv"'
+            + (' open' if in_advanced else '') + '>'
+            f'<summary>{esc(T("db_group_advanced"))} ▾</summary>'
+            f'<div class="table-switcher table-switcher-adv-row">{advanced_pills}</div>'
+            '</details>'
+            if advanced_pills else ""
+        )
+        + '</section>'
+    )
 
 
 def _format_channels_cell(json_str: str | None) -> str:
@@ -2454,6 +2627,136 @@ def _render_day_card(date_val: str, header: dict, channels: dict[str, str | None
 """
 
 
+def _format_generic_value(val, col_spec: dict) -> tuple[str, str]:
+    """Return (html_inner, css_class) for one cell. col_spec drives format
+    (`fmt`: pct/money), truncation, mono-vs-text styling."""
+    classes: list[str] = []
+    if col_spec.get("mono"):
+        classes.append("mono")
+    if col_spec.get("muted"):
+        classes.append("muted")
+    if val is None:
+        return '<span class="muted">∅</span>', " ".join(classes)
+    fmt = col_spec.get("fmt")
+    if fmt == "pct":
+        try:
+            return f"{float(val) * 100:.0f}%", " ".join(classes + ["num"])
+        except (TypeError, ValueError):
+            pass
+    if fmt == "money":
+        try:
+            return f"${float(val):.4f}", " ".join(classes + ["num"])
+        except (TypeError, ValueError):
+            pass
+    s = str(val)
+    # JSON detection: prettify and render in a max-height pre
+    stripped = s.strip()
+    if (stripped.startswith("{") and stripped.endswith("}")) or \
+       (stripped.startswith("[") and stripped.endswith("]")):
+        try:
+            parsed = json.loads(stripped)
+            pretty = json.dumps(parsed, ensure_ascii=False, indent=2)
+            return f'<pre class="gt-json">{esc(pretty)}</pre>', " ".join(classes + ["json-cell"])
+        except json.JSONDecodeError:
+            pass
+    truncate = col_spec.get("truncate")
+    if truncate and len(s) > truncate:
+        return (
+            f'<span title="{esc(s)}">{esc(s[:truncate])}…</span>',
+            " ".join(classes + ["truncate"]),
+        )
+    # Numeric-ish: right-align
+    try:
+        float(s)
+        if classes and "mono" not in classes:
+            pass
+        else:
+            classes.append("num")
+    except (TypeError, ValueError):
+        pass
+    return esc(s), " ".join(classes)
+
+
+def generic_table_page(db_path: Path, table_key: str, qs: dict[str, list[str]]) -> str:
+    """Render any DB table whose `TABLE_VIEWS[key]` entry is `kind='generic'`.
+    Columns come from the entry's `cols` (curated, with width + label_zh/en),
+    or from PRAGMA table_info if `cols=None`.
+
+    No filtering UI here on purpose — this is a transparency surface, not a
+    secondary report builder. Limit + order are read from QS so the user can
+    paginate / sort manually."""
+    con = connect(db_path)
+    init_db(con)
+    cfg = TABLE_VIEWS.get(table_key)
+    if not cfg or cfg.get("kind") != "generic":
+        return layout("DayTrace · ?", "unknown table", "events", "<div class='card'>unknown table</div>")
+
+    sql_table = cfg.get("sql_table", table_key)
+    cols = cfg.get("cols")
+    if cols is None:
+        # Auto-discover via PRAGMA — no width/label customization.
+        info = con.execute(f"PRAGMA table_info({sql_table})").fetchall()
+        cols = [
+            {"name": r["name"], "zh": r["name"], "en": r["name"], "width": 140}
+            for r in info
+        ]
+
+    # Build SELECT clause from declared columns. Avoid `SELECT *` so removing
+    # a config column is enough to hide it without DB-side changes.
+    col_names = [c["name"] for c in cols]
+    select_clause = ", ".join(f'"{n}"' for n in col_names)
+    order_clause = cfg.get("default_order") or col_names[0]
+    try:
+        limit = max(10, min(2000, int(qs.get("limit", ["500"])[0])))
+    except ValueError:
+        limit = 500
+    rows = con.execute(
+        f'SELECT {select_clause} FROM {sql_table} ORDER BY {order_clause} LIMIT ?',
+        (limit,),
+    ).fetchall()
+    total = con.execute(f'SELECT COUNT(*) FROM {sql_table}').fetchone()[0]
+
+    _lang = _CURRENT_LANG.get()
+    # <colgroup> with fixed widths to address the long-standing "wide columns
+    # eat the screen" complaint.
+    colgroup = "".join(
+        f'<col style="width:{c.get("width", 140)}px">' for c in cols
+    )
+    head_cells = "".join(
+        f'<th>{esc(c.get(_lang) or c.get("en") or c["name"])}</th>'
+        for c in cols
+    )
+    body_rows: list[str] = []
+    for r in rows:
+        cells: list[str] = []
+        for c in cols:
+            html_inner, klass = _format_generic_value(r[c["name"]], c)
+            cells.append(f'<td class="{klass}">{html_inner}</td>')
+        body_rows.append("<tr>" + "".join(cells) + "</tr>")
+    body = "".join(body_rows) or f'<tr><td colspan="{len(cols)}" class="muted">{esc(T("db_no_events"))}</td></tr>'
+
+    table_label = T(cfg["label_key"])
+    meta = (
+        '<div class="generic-table-meta">'
+        f'<span><span class="gt-name">{esc(sql_table)}</span></span>'
+        f'<span><span class="gt-count">{len(rows)}</span> / {total} rows</span>'
+        '</div>'
+    )
+    content = (
+        table_switcher_html(table_key, qs)
+        + meta
+        + '<div class="table-wrap">'
+        + f'<table class="generic-table"><colgroup>{colgroup}</colgroup>'
+        + f'<thead><tr>{head_cells}</tr></thead>'
+        + f'<tbody>{body}</tbody></table>'
+        + '</div>'
+    )
+    return layout(
+        f"DayTrace · {table_label}", f"{len(rows)} / {total} rows",
+        "events", content,
+    )
+
+
 def day_report_table_page(db_path: Path, qs: dict[str, list[str]]) -> str:
     """Human-friendly view: one card per day with AI summary + key stats up
     top, raw channel JSON folded away at the bottom."""
@@ -2537,80 +2840,91 @@ PROJECT_TABLE_ORDERS = {
 def _render_project_row(row: dict, channels: dict[str, str | None]) -> str:
     summary = _safe_load_json(channels.get("ai_summary")) or {}
     continuity = _safe_load_json(channels.get("ai_continuity")) or {}
-    source_mix = _safe_load_json(channels.get("source_mix")) or {}
-    time_span = _safe_load_json(channels.get("time_span")) or {}
-    top_titles = _safe_load_json(channels.get("top_titles")) or []
 
+    # Project + tasks merged in one cell. tasks column is JSON list of
+    # {title, title_en, n}; we localize via _CURRENT_LANG and show the
+    # top few inline. Long tail collapsed into a "+N more" muted chip.
     project_link = (
         f'<a class="project-chip" href="/events?project={esc(row["project"])}'
-        f'&start_from={esc(row["date"])}&start_to={esc(row["date"])}" '
-        f'title="点击看该项目的事件">{esc(row["project"])}</a>'
+        f'&start_from={esc(row["date"])}&start_to={esc(row["date"])}">'
+        f'{esc(row["project"])}</a>'
+    )
+    tasks_raw = _safe_load_json(row.get("tasks")) or []
+    _lang = _CURRENT_LANG.get()
+    task_chips_html = ""
+    if isinstance(tasks_raw, list) and tasks_raw:
+        chips: list[str] = []
+        TOP = 3
+        for t in tasks_raw[:TOP]:
+            if not isinstance(t, dict):
+                continue
+            ttl_en = (t.get("title_en") or "").strip()
+            ttl_zh = (t.get("title") or "").strip()
+            ttl = ttl_en if (_lang == "en" and ttl_en) else ttl_zh
+            n = t.get("n") or 0
+            chips.append(
+                f'<span class="task-chip" title="{esc(ttl_zh)} · {n} events">'
+                f'{esc(ttl)}'
+                + (f' <span class="muted">·{n}</span>' if n else '')
+                + '</span>'
+            )
+        if len(tasks_raw) > TOP:
+            chips.append(
+                f'<span class="task-chip muted">+{len(tasks_raw) - TOP}</span>'
+            )
+        task_chips_html = '<div class="task-chip-row">' + "".join(chips) + '</div>'
+
+    project_task_cell = (
+        f'<div class="project-task-cell">{project_link}{task_chips_html}</div>'
     )
 
-    share_pct = row["share"] * 100
-    share_cell = (
-        f'<div class="share-cell">'
-        f'<div class="share-bar"><div class="share-fill" style="width:{share_pct:.1f}%"></div></div>'
-        f'<span class="share-pct">{share_pct:.0f}%</span></div>'
-    )
-
-    src_mix_str = ", ".join(f"{esc(k)}({v})" for k, v in sorted(source_mix.items(), key=lambda kv: -kv[1])[:3])
-    span_str = (
-        f"{esc(time_span.get('first','?'))}–{esc(time_span.get('last','?'))}"
-        if time_span else "—"
-    )
-
+    # AI 摘要 → 3 columns:
+    #   1) 概要 + 做了什么  (summary + what_was_done bullets)
+    #   2) 下一步             (next_steps bullets)
+    #   3) 对比上次           (continuity momentum + relation_to_previous)
     summary_text = summary.get("summary") if isinstance(summary, dict) else ""
     what_was_done = summary.get("what_was_done") if isinstance(summary, dict) else None
     status = summary.get("status") if isinstance(summary, dict) else None
     next_steps = summary.get("next_steps") if isinstance(summary, dict) else None
 
-    ai_cell_parts = [f'<div class="ai-summary-text">{esc(summary_text or "—")}</div>']
+    summary_cell_parts: list[str] = []
+    if status:
+        summary_cell_parts.append(_status_chip(status))
+    summary_cell_parts.append(
+        f'<div class="ai-summary-text">{esc(summary_text or "—")}</div>'
+    )
     if what_was_done:
-        ai_cell_parts.append(
+        summary_cell_parts.append(
             "<ul class='ai-bullets'>"
             + "".join(f"<li>{esc(w)}</li>" for w in what_was_done[:4])
             + "</ul>"
         )
+    summary_cell = "".join(summary_cell_parts)
+
+    next_cell = ""
     if next_steps:
-        ai_cell_parts.append(
-            "<div class='ai-next-label'>next:</div>"
+        next_cell = (
             "<ul class='ai-bullets ai-next'>"
             + "".join(f"<li>{esc(n)}</li>" for n in next_steps[:3])
             + "</ul>"
         )
-    ai_cell = "".join(ai_cell_parts)
 
-    cont_html = ""
+    cont_cell = ""
     if isinstance(continuity, dict) and continuity:
-        cont_html = (
+        cont_cell = (
             f'{_momentum_chip(continuity.get("momentum"))}'
             f'<div class="cont-text">{esc(continuity.get("relation_to_previous") or "")}</div>'
-        )
-
-    titles_cell = ""
-    if top_titles:
-        titles_cell = (
-            "<ul class='top-titles-list'>"
-            + "".join(
-                f"<li><span class='tt-time'>{esc(t.get('time','--:--'))}</span> {esc(t.get('title',''))}</li>"
-                for t in top_titles[:4]
-            )
-            + "</ul>"
         )
 
     return (
         f'<tr>'
         f'<td class="col-date"><a href="/events?table=day&date={esc(row["date"])}">{esc(row["date"])}</a></td>'
-        f'<td class="col-project">{project_link}</td>'
+        f'<td class="col-project-task">{project_task_cell}</td>'
         f'<td class="col-num">{row["event_count"]}</td>'
         f'<td class="col-num">{_format_duration_short(row["active_minutes"])}</td>'
-        f'<td class="col-share">{share_cell}</td>'
-        f'<td class="col-status">{_status_chip(status)}</td>'
-        f'<td class="col-ai">{ai_cell}</td>'
-        f'<td class="col-cont">{cont_html}</td>'
-        f'<td class="col-titles">{titles_cell}</td>'
-        f'<td class="col-meta muted small">{esc(span_str)}<br>{esc(src_mix_str)}</td>'
+        f'<td class="col-ai">{summary_cell or "—"}</td>'
+        f'<td class="col-ai">{next_cell or "—"}</td>'
+        f'<td class="col-cont">{cont_cell or "—"}</td>'
         f"</tr>"
     )
 
@@ -2638,7 +2952,7 @@ def day_project_report_table_page(db_path: Path, qs: dict[str, list[str]]) -> st
     order_clause, _ = PROJECT_TABLE_ORDERS[order_key]
     rows = con.execute(
         f"""
-        SELECT date, project, event_count, active_minutes, share, updated_at
+        SELECT date, project, event_count, active_minutes, share, tasks, updated_at
         FROM day_project_report {where}
         ORDER BY {order_clause}
         LIMIT 300
@@ -2718,18 +3032,15 @@ def day_project_report_table_page(db_path: Path, qs: dict[str, list[str]]) -> st
     head = (
         "<thead><tr>"
         f"<th class='col-date'>{esc(T('dp_th_date'))}</th>"
-        f"<th class='col-project'>{esc(T('dp_th_project'))}</th>"
+        f"<th class='col-project-task'>{esc(T('dp_th_project_task'))}</th>"
         f"<th class='col-num'>{esc(T('dp_th_events'))}</th>"
         f"<th class='col-num'>{esc(T('dp_th_active'))}</th>"
-        f"<th class='col-share'>{esc(T('dp_th_share'))}</th>"
-        f"<th class='col-status'>{esc(T('dp_th_status'))}</th>"
-        f"<th class='col-ai'>{esc(T('dp_th_ai'))}</th>"
+        f"<th class='col-ai'>{esc(T('dp_th_summary'))}</th>"
+        f"<th class='col-ai'>{esc(T('dp_th_next'))}</th>"
         f"<th class='col-cont'>{esc(T('dp_th_cont'))}</th>"
-        f"<th class='col-titles'>{esc(T('dp_th_titles'))}</th>"
-        f"<th class='col-meta'>{esc(T('dp_th_meta'))}</th>"
         "</tr></thead>"
     )
-    body = "".join(rendered) or f'<tr><td colspan="10" class="label">{esc(T("db_empty_dp"))}</td></tr>'
+    body = "".join(rendered) or f'<tr><td colspan="7" class="label">{esc(T("db_empty_dp"))}</td></tr>'
     table_html = f'<div class="table-wrap dpr-table"><table>{head}<tbody>{body}</tbody></table></div>'
 
     content = table_switcher_html("day_project", qs) + filter_strip + table_html
@@ -5636,10 +5947,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
             elif parsed.path == "/events":
                 table_choice = qs.get("table", ["events"])[0] or "events"
+                # Custom-rendered pages (kept as their own functions because
+                # they have AI cells, calendar pickers, etc.); everything
+                # else falls through to the generic table browser.
                 if table_choice == "day":
                     html_response(self, day_report_table_page(self.db_path, qs))
                 elif table_choice == "day_project":
                     html_response(self, day_project_report_table_page(self.db_path, qs))
+                elif table_choice == "events":
+                    html_response(self, events_page(self.db_path, qs))
+                elif table_choice in TABLE_VIEWS and \
+                        TABLE_VIEWS[table_choice].get("kind") == "generic":
+                    html_response(self, generic_table_page(self.db_path, table_choice, qs))
                 else:
                     html_response(self, events_page(self.db_path, qs))
             elif parsed.path == "/api/summary":
