@@ -126,6 +126,10 @@ _STRINGS: dict[str, dict[str, str]] = {
     "audit_save_hint":{"zh": "保存后会写入 config/work_item_aliases.yaml 并立刻重建链接(历史报告已缓存的不变;下次 catchup / 刷新时按新规则统计)",
                        "en": "Saved picks go to config/work_item_aliases.yaml and links rebuild immediately (cached historical reports unchanged; next catchup / refresh applies new rules)"},
     "audit_save_btn": {"zh": "保存并重建链接",       "en": "Save & rebuild links"},
+    "other_bucket":   {"zh": "其它",                  "en": "Other"},
+    "no_dim_data":    {"zh": "本周该维度无可用数据",  "en": "No data for this dimension this week"},
+    "expand_all":     {"zh": "全部展开",              "en": "Expand all"},
+    "collapse_all":   {"zh": "全部收起",              "en": "Collapse all"},
 
     # Reports / sections
     "report_tag":     {"zh": "Report",  "en": "Report"},
@@ -413,7 +417,8 @@ body.events-page form { height:100%; }
 /* Tasks panels: 任务 + 审稿 side-by-side (2 cols), collapses to 1 col
    when narrow or when the toggle picks a single table. */
 .day-jumps { display:flex; flex-wrap:wrap; gap:6px; }
-.day-jump { display:inline-flex; align-items:center; padding:4px 10px; border:1px solid var(--line); background:white; border-radius:999px; font-size:12px; font-weight:600; color:var(--ink); text-decoration:none; white-space:nowrap; }
+.day-jump { display:inline-flex; align-items:center; padding:4px 10px; border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:999px; font-size:12px; font-weight:600; color:var(--ink); text-decoration:none; white-space:nowrap; box-shadow:inset 0 -1px 0 rgba(0,0,0,.03); }
+.day-jump:hover { background:#fff7e8; }
 .day-jump:hover { background:#fdf6e3; }
 .tasks-grid { display:grid; grid-template-columns: 1fr 1fr; gap:12px; align-items:start; }
 @media (max-width:1100px) { .tasks-grid { grid-template-columns: 1fr; } }
@@ -456,7 +461,8 @@ body.events-page form { height:100%; }
 .audit-table td.audit-pg   { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size:12.5px; }
 .audit-table td.audit-num  { font-weight:700; }
 .audit-table td.muted      { color:var(--muted); font-weight:500; }
-.audit-table .audit-select { width:100%; max-width:100%; padding:4px 8px; border:1px solid var(--line); border-radius:6px; background:white; font-size:13px; }
+.audit-table .audit-select { width:100%; max-width:100%; padding:5px 10px; border:1px solid var(--line); border-radius:8px; background-color:rgba(255,250,240,.94); font-size:13px; color:var(--ink); box-shadow:inset 0 -1px 0 rgba(0,0,0,.03); }
+.audit-table .audit-select:hover { background-color:#fff7e8; }
 /* Weekly view-switcher card: only the active view's pane is visible.
    Toggling .weekly-viz[data-view] flips visibility with no reload (no scroll jump). */
 .weekly-viz .wv-pane { display:none; }
@@ -469,11 +475,12 @@ body.events-page form { height:100%; }
 .card { background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:14px; padding:12px; box-shadow:0 8px 18px rgba(65,45,10,.05); }
 .metric { font-size:26px; font-weight:850; letter-spacing:-0.04em; }.metric-small { font-size:18px; font-weight:850; }.label { color:var(--muted); margin-top:3px; font-size:12px; } section { margin-top:12px; } h2 { font-size:16px; margin:0 0 8px; } h3 { margin:0 0 5px; font-size:14px; }
 .bar { display:flex; align-items:center; gap:10px; margin:9px 0; }.bar-name { width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }.bar-track { flex:1; height:10px; border-radius:999px; background:#ece3d2; overflow:hidden; }.bar-fill { height:100%; background:linear-gradient(90deg,#2f6fed,#7b61ff); border-radius:999px; }.bar-count { width:42px; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
-.filters { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:0 0 8px; } input,select,button { border:1px solid var(--line); background:white; border-radius:8px; padding:5px 7px; font:inherit; font-size:12px; } button { background:var(--accent); color:white; border-color:var(--accent); cursor:pointer; }.checkbox { display:flex; gap:4px; align-items:center; }
+.filters { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:0 0 8px; } input,select,button { border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:8px; padding:5px 7px; font:inherit; font-size:12px; color:var(--ink); } button { background:var(--accent); color:white; border-color:var(--accent); cursor:pointer; }.checkbox { display:flex; gap:4px; align-items:center; }
 .bucket-head { display:flex; gap:10px; align-items:center; justify-content:space-between; margin-bottom:8px; }.mini-event { padding:8px 0; border-top:1px dashed #eadfcd; }.mini-event:first-of-type { border-top:none; }.event-title { font-weight:700; }.muted { color:var(--muted); }.pills { display:flex; flex-wrap:wrap; gap:6px; }.tag { display:inline-flex; max-width:100%; border-radius:999px; padding:2px 8px; background:#ebe6ff; color:#4632a8; font-size:12px; font-weight:650; overflow:hidden; text-overflow:ellipsis; }.source { background:#e8f0ff; color:#174ea6; }.device { background:#dcfce7; color:#166534; }.location { background:#ffedd5; color:#9a3412; }.low { background:#fff3cd; color:#8a5a00; }
-.daily-report { line-height:1.55; display:flex; flex-direction:column; }.daily-report ul { margin:8px 0 0 18px; padding:0; }.daily-report li { margin:5px 0; }.report-lede { font-size:15px; color:#362f27; margin:0 0 8px; }.day-nav { display:flex; gap:8px; flex-wrap:wrap; margin-top:auto; padding-top:14px; }.day-nav a { border:1px solid var(--line); background:white; border-radius:999px; padding:4px 9px; font-size:12px; font-weight:700; }
+.daily-report { line-height:1.55; display:flex; flex-direction:column; }.daily-report ul { margin:8px 0 0 18px; padding:0; }.daily-report li { margin:5px 0; }.report-lede { font-size:15px; color:#362f27; margin:0 0 8px; }.day-nav { display:flex; gap:8px; flex-wrap:wrap; margin-top:auto; padding-top:14px; }.day-nav a { border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:999px; padding:4px 9px; font-size:12px; font-weight:700; }
 .donut-row { display:grid; grid-template-columns:120px 1fr; gap:12px; align-items:center; }.donut { width:112px; height:112px; border-radius:50%; display:grid; place-items:center; background:conic-gradient(var(--accent) 0 40%, var(--purple) 40% 70%, var(--orange) 70% 88%, #cbd5e1 88% 100%); }.donut:after { content:attr(data-label); width:70px; height:70px; border-radius:50%; background:var(--card); display:grid; place-items:center; font-size:13px; font-weight:800; color:var(--muted); text-align:center; }.legend-dot { width:9px; height:9px; display:inline-block; border-radius:50%; margin-right:6px; }.stack { display:flex; height:18px; overflow:hidden; border-radius:999px; background:#ece3d2; border:1px solid #e2d6c4; }.stack-seg { min-width:2px; height:100%; }.mini-table { width:100%; border-collapse:separate; border-spacing:0; }.mini-table th,.mini-table td { font-size:12px; padding:6px 4px; border-bottom:1px solid #eadfcd; }.mini-table th { position:static; background:transparent; box-shadow:none; color:var(--muted); }.composition-card .cc-tabs { display:flex; gap:4px; flex-wrap:wrap; }
-.composition-card .cc-tab { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:white; color:#3b352e; font-weight:650; cursor:pointer; }
+.composition-card .cc-tab { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:rgba(255,250,240,.94); color:#3b352e; font-weight:650; cursor:pointer; }
+.composition-card .cc-tab:hover { background:#fff7e8; }
 .composition-card .cc-tab.active { background:var(--ink); color:white; border-color:var(--ink); }
 .composition-card { display:flex; flex-direction:column; }
 .composition-card .cc-pane { display:none; flex:1; }
@@ -499,7 +506,7 @@ body.events-page form { height:100%; }
 .dr-filter-strip { display:flex; gap:14px; align-items:center; flex-wrap:wrap; padding:8px 12px; margin:0 0 12px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:12px; font-size:12.5px; }
 .dr-filter-inline { display:flex; gap:14px; align-items:center; flex-wrap:wrap; flex:1; }
 .dr-filter-strip label { display:inline-flex; gap:4px; align-items:center; }
-.dr-filter-strip select { border:1px solid var(--line); border-radius:8px; padding:3px 6px; background:white; font:inherit; font-size:12px; }
+.dr-filter-strip select { border:1px solid var(--line); border-radius:8px; padding:3px 6px; background:rgba(255,250,240,.94); font:inherit; font-size:12px; color:var(--ink); }
 .dr-rowcount { margin-left:auto; }
 .dr-reset { color:var(--accent); font-weight:650; }
 .day-report-cards { display:flex; flex-direction:column; gap:14px; }
@@ -551,6 +558,8 @@ body.events-page form { height:100%; }
      • top accent line (per-weekday color) — only structure cue
      • narrative blockquote stays cream like the rest of the page */
 .daily-timeline-card { margin-top:12px; }
+.daily-timeline-card .dt-bulk-btn { font-size:11.5px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:rgba(255,250,240,.94); color:#3b352e; font-weight:650; cursor:pointer; font-family:inherit; }
+.daily-timeline-card .dt-bulk-btn:hover { background:#fff7e8; }
 .dt-grid { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; align-items:start; }
 .dt-col { background:transparent; padding:10px 10px 12px; border-top:2px solid #f0d68b; min-width:0; }
 .dt-col[open] { background:rgba(255,247,232,0.5); border-radius:0 0 8px 8px; }
@@ -705,7 +714,8 @@ body.events-page form { height:100%; }
 .small { font-size:11px; } .mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
 .timeline-card .tl-tab-group { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
 .timeline-card .tl-tabs { display:flex; gap:4px; flex-wrap:wrap; }
-.timeline-card .tl-tab { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:white; color:#3b352e; font-weight:650; cursor:pointer; }
+.timeline-card .tl-tab { font-size:12px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:rgba(255,250,240,.94); color:#3b352e; font-weight:650; cursor:pointer; }
+.timeline-card .tl-tab:hover { background:#fff7e8; }
 .timeline-card .tl-tab.active { background:var(--ink); color:white; border-color:var(--ink); }
 .timeline-card .tl-axis-wrap { position:relative; margin:14px 0 6px; }
 /* Shared 24h canvas */
@@ -2131,16 +2141,32 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
 
     if not any_data:
         return ""
+    toggle_html = (
+        '<div class="dt-bulk" style="margin-left:auto; display:inline-flex; gap:4px;">'
+        f'<button type="button" class="dt-bulk-btn" data-dt-bulk="expand">{esc(T("expand_all"))}</button>'
+        f'<button type="button" class="dt-bulk-btn" data-dt-bulk="collapse">{esc(T("collapse_all"))}</button>'
+        '</div>'
+    )
+    bulk_script = (
+        '<script>(function(){'
+        'document.querySelectorAll(".daily-timeline-card .dt-bulk-btn").forEach(function(b){'
+        'b.addEventListener("click",function(){'
+        'var open=b.getAttribute("data-dt-bulk")==="expand";'
+        'b.closest(".daily-timeline-card").querySelectorAll("details.dt-col").forEach(function(d){d.open=open;});'
+        '});});})();</script>'
+    )
     return (
         '<section class="card daily-timeline-card">'
         '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:12px;">'
         f'<h3 style="margin:0;">{esc(T("timeline_title"))}</h3>'
         f'<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">{esc(T("timeline_tag"))}</span>'
         f'<span class="muted small" style="margin-left:6px;">{esc(T("timeline_hint"))}</span>'
+        + toggle_html +
         '</div>'
         '<div class="dt-grid">'
         + "".join(cols)
         + '</div>'
+        + bulk_script +
         '</section>'
     )
 
@@ -2861,12 +2887,15 @@ def _event_weight_for_unit(ev: dict, unit: str) -> int:
 
 
 def _stack_value_of(ev: dict, stack_by: str) -> str:
+    _lang = _CURRENT_LANG.get()
     if stack_by == "project":
         return _project_of(ev)
     if stack_by == "task":
-        return str(ev.get("task") or "未对应任务")
+        _no_task = "Unlinked" if _lang == "en" else "未对应任务"
+        return str(ev.get("task") or _no_task)
     if stack_by == "activity":
-        return str(ev.get("activity") or "未分类")
+        _unc = "Unclassified" if _lang == "en" else "未分类"
+        return str(ev.get("activity") or _unc)
     if stack_by == "device":
         return str(ev.get("device_id") or "unknown")
     if stack_by == "location":
@@ -2893,13 +2922,19 @@ def _enrich_events_with_tasks(con, events: list[dict]) -> list[dict]:
         return events
 
     # Build collapse map: table_key → collapsed_label
+    # In EN mode, prefer `collapsed_label_en` from work_items.yaml when set.
+    _lang = _CURRENT_LANG.get()
     collapse_map: dict[str, str] = {}
     try:
         from daytrace.work_items import load_config
         cfg = load_config()
         for t in (cfg or {}).get("tables", []):
             if t.get("collapse_in_dim"):
-                collapse_map[t["key"]] = t.get("collapsed_label") or t.get("name") or t["key"]
+                label = None
+                if _lang == "en":
+                    label = t.get("collapsed_label_en") or t.get("name_en")
+                label = label or t.get("collapsed_label") or t.get("name") or t["key"]
+                collapse_map[t["key"]] = label
     except Exception:
         pass
 
@@ -2913,7 +2948,7 @@ def _enrich_events_with_tasks(con, events: list[dict]) -> list[dict]:
         ph = ",".join("?" * len(sub))
         for r in con.execute(
             f"""
-            SELECT l.event_id, w.title, w.table_key
+            SELECT l.event_id, w.title, w.title_en, w.table_key
               FROM event_work_item_links l
               JOIN work_items w ON w.record_id = l.record_id
              WHERE l.event_id IN ({ph})
@@ -2923,7 +2958,11 @@ def _enrich_events_with_tasks(con, events: list[dict]) -> list[dict]:
             if tk in collapse_map:
                 title_map[r["event_id"]] = collapse_map[tk]
             else:
-                title_map[r["event_id"]] = r["title"]
+                if _lang == "en":
+                    en = (r["title_en"] or "").strip() if "title_en" in r.keys() else ""
+                    title_map[r["event_id"]] = en or r["title"]
+                else:
+                    title_map[r["event_id"]] = r["title"]
     for ev in events:
         ev["task"] = title_map.get(ev.get("id"))
     return events
@@ -3338,7 +3377,8 @@ def _compute_palette_for_week(
             overall[k] += v
     top = [n for n, _ in overall.most_common(10)]
     palette = _palette_for(top)
-    palette["其它"] = _WEEKLY_OTHER_COLOR
+    palette[T("other_bucket")] = _WEEKLY_OTHER_COLOR
+    palette["其它"] = _WEEKLY_OTHER_COLOR  # back-compat: zh-default callers
     return top, palette, overall
 
 
@@ -3401,12 +3441,12 @@ def _main_chart_card(
                 other += v
         kept.sort(key=lambda kv: -kv[1])
         if other > 0:
-            kept.append(("其它", other))
+            kept.append((T("other_bucket"), other))
         return kept
 
     raw_max = max(per_day_totals.values()) if per_day_totals else 0
     if raw_max <= 0:
-        return '<div class="muted">本周该维度无可用数据</div>'
+        return f'<div class="muted">{esc(T("no_dim_data"))}</div>'
 
     axis_max, axis_ticks = _nice_axis_max(raw_max, unit)
 
@@ -3512,7 +3552,7 @@ def _distribution_view_body(
     the whole pie; bars give a sortable easy-to-read table next to it."""
     items_all = list(overall.most_common())
     if not items_all:
-        return '<div class="muted">本周该维度无可用数据</div>'
+        return f'<div class="muted">{esc(T("no_dim_data"))}</div>'
 
     grand_total = sum(v for _, v in items_all) or 1
     items_top = overall.most_common(12)
@@ -3547,7 +3587,7 @@ def _distribution_view_body(
     if rest_total > 0:
         segs_css.append(f"{_WEEKLY_OTHER_COLOR} {pos:.3f}% 100%")
         segs_data.append({
-            "name": "其它", "color": _WEEKLY_OTHER_COLOR,
+            "name": T("other_bucket"), "color": _WEEKLY_OTHER_COLOR,
             "start": round(pos, 3), "end": 100.0,
             "label": _format_value(rest_total, unit),
             "share": round(rest_total / grand_total, 4),
@@ -3565,7 +3605,7 @@ def _distribution_view_body(
     # ── Bars (right column)
     bar_items = list(items_top)
     if rest_total > 0:
-        bar_items.append(("其它", rest_total))
+        bar_items.append((T("other_bucket"), rest_total))
     max_val = max(v for _, v in bar_items) or 1
     rows_html = []
     for name, value in bar_items:
@@ -4097,7 +4137,7 @@ def _daily_histogram_body(
                 other += v
         kept.sort(key=lambda kv: -kv[1])
         if other > 0:
-            kept.append(("其它", other))
+            kept.append((T("other_bucket"), other))
         return kept
 
     raw_max = max(per_hour_totals.values()) if per_hour_totals else 0
