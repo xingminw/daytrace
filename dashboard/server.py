@@ -138,6 +138,62 @@ _STRINGS: dict[str, dict[str, str]] = {
     "time_ago_hr":     {"zh": "{n} 小时前", "en": "{n}h ago"},
     "time_ago_day":    {"zh": "{n} 天前",   "en": "{n}d ago"},
     "untouched":       {"zh": "未触碰",       "en": "untouched"},
+
+    # Dimension pills (DIMENSIONS list — what to stack the chart by)
+    "dim_source":   {"zh": "来源",   "en": "Source"},
+    "dim_project":  {"zh": "项目",   "en": "Project"},
+    "dim_task":     {"zh": "任务",   "en": "Task"},
+    "dim_device":   {"zh": "设备",   "en": "Device"},
+    "dim_activity": {"zh": "活动",   "en": "Activity"},
+    "dim_tooltip":  {"zh": "按哪个维度堆叠/上色", "en": "Which dimension to stack / color by"},
+    "dim_label":    {"zh": "维度",   "en": "Dim"},
+
+    # Unit pills (UNITS list)
+    "unit_count":  {"zh": "条目", "en": "Events"},
+    "unit_chars":  {"zh": "字数", "en": "Chars"},
+    "unit_hours":  {"zh": "小时", "en": "Hours"},
+    "unit_label":  {"zh": "单位", "en": "Unit"},
+
+    # Chart panel — view-switcher pills
+    "chart_view_hist": {"zh": "直方图", "en": "Histogram"},
+    "chart_view_dist": {"zh": "分布",   "en": "Distribution"},
+    "chart_panel_tag": {"zh": "Chart",  "en": "Chart"},
+    "chart_per_hour":  {"zh": "每小时", "en": "Per hour"},
+    "chart_per_day":   {"zh": "每天",   "en": "Per day"},
+
+    # Tasks panel
+    "tasks_panel_t":   {"zh": "工作项 · 任务",       "en": "Work items · Tasks"},
+    "tasks_panel_r":   {"zh": "工作项 · 审稿",       "en": "Work items · Reviews"},
+    "tasks_n_rows":    {"zh": "{n} 行",                "en": "{n} rows"},
+    "tasks_p_zero":    {"zh": "{n} 个 P0/P1 本期零活动", "en": "{n} P0/P1 with zero activity"},
+    "tasks_p_stale_tip":{"zh": "高优先级任务但本期零活动", "en": "High-priority task with no activity this period"},
+    "tasks_filter":    {"zh": "筛选", "en": "Filter"},
+    "tasks_select_all":{"zh": "全部", "en": "All"},
+
+    # Weekly view-switcher pills
+    "view_swim":    {"zh": "泳道",     "en": "Swimlane"},
+    "view_heat":    {"zh": "热力图",   "en": "Heatmap"},
+
+    # Due-date chip
+    "due_overdue":  {"zh": "已过期 {n}d", "en": "{n}d overdue"},
+    "due_urgent":   {"zh": "急 {n}d",      "en": "due in {n}d"},
+    "due_tight":    {"zh": "紧 {n}d",      "en": "due in {n}d"},
+
+    # Misc UI bits
+    "no_title":        {"zh": "(无标题)", "en": "(no title)"},
+    "filter_all":      {"zh": "全部",      "en": "All"},
+    "task_prefix":     {"zh": "任务",      "en": "Task"},
+    "review_prefix":   {"zh": "审稿",      "en": "Review"},
+    "open_full_day":   {"zh": "→ 当日完整 dashboard", "en": "→ Full day dashboard"},
+    "events_table_t":  {"zh": "原始事件",  "en": "Events"},
+    "open_db_t":       {"zh": "在新标签页打开本日事件", "en": "Open today's events in a new tab"},
+    "open_db_short":   {"zh": "打开数据库 ↗", "en": "Open database ↗"},
+    "weekly_dim_intro":{"zh": "维度 · {label}", "en": "Dim · {label}"},
+    "weekly_filter":   {"zh": "筛选",      "en": "Filter"},
+    "tag_timeline":    {"zh": "Timeline",  "en": "Timeline"},
+    "page_timeline":   {"zh": "时间线",    "en": "Timeline"},
+    "page_chart":      {"zh": "Chart",     "en": "Chart"},
+    "tasks_show_total":{"zh": "{n} 条", "en": "{n}"},
 }
 
 
@@ -209,8 +265,13 @@ header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(
 .page-toggle-pill.active { background:var(--ink); color:white; }
 .page-db-btn { display:inline-flex; align-items:center; padding:6px 14px; border:1px solid var(--line); background:white; border-radius:999px; font-size:12.5px; font-weight:650; color:var(--ink); text-decoration:none; }
 .page-db-btn:hover { background:#fdf6e3; }
-.page-lang-btn { display:inline-flex; align-items:center; justify-content:center; min-width:32px; height:30px; padding:0 8px; border:1px solid var(--line); background:white; border-radius:999px; font-size:12px; font-weight:700; color:var(--ink); text-decoration:none; margin-left:6px; }
-.page-lang-btn:hover { background:#fdf6e3; }
+/* Language toggle — segmented control with two pills. Mirrors the look
+   of the dim-tabs / unit-tabs elsewhere in the dashboard so it reads as
+   a deliberate switch rather than a stray button. */
+.page-lang-toggle { display:inline-flex; align-items:center; gap:0; padding:3px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; margin-left:6px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
+.page-lang-toggle .lang-opt { display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:24px; padding:0 10px; border-radius:999px; font-size:12px; font-weight:700; color:#3b352e; text-decoration:none; cursor:pointer; transition:background .12s, color .12s; }
+.page-lang-toggle .lang-opt:hover { background:rgba(0,0,0,.04); }
+.page-lang-toggle .lang-opt.active { background:var(--ink); color:white; }
 h1 { margin:0; font-size:20px; letter-spacing:-0.03em; white-space:nowrap; }.sub { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 nav { display:flex; gap:6px; flex-wrap:nowrap; justify-content:flex-end; justify-self:end; margin-left:auto; } nav a { padding:5px 9px; border:1px solid var(--line); border-radius:999px; background:white; color:#3b352e; font-weight:650; font-size:13px; white-space:nowrap; } nav a.active { background:var(--ink); color:white; border-color:var(--ink); }
 main { padding:12px 18px 28px; max-width:none; margin:0 auto; min-height:calc(100vh - 51px); }
@@ -808,12 +869,15 @@ def layout(title: str, subtitle: str, active: str, content: str, date_control: s
         '<a class="page-db-btn" target="_blank" rel="noopener" '
         f'href="/events" title="{esc(T("nav_open_db_t", lang))}">{esc(T("nav_open_db", lang))} ↗</a>'
     )
-    # Language switcher — clicking sets the cookie and reloads the same page
-    other_lang = "en" if lang == "zh" else "zh"
-    other_label = "EN" if other_lang == "en" else "中"
+    # Language switcher — two pills, the active one highlighted, the other
+    # clickable. Clicking sets the cookie and reloads the same URL.
     lang_switcher = (
-        f'<a class="page-lang-btn" href="#" data-lang="{other_lang}" '
-        f'title="{esc(T("lang_switch_t", lang))}">{other_label}</a>'
+        '<div class="page-lang-toggle">'
+        f'<a class="lang-opt{" active" if lang == "zh" else ""}" '
+        f'href="#" data-lang="zh">中</a>'
+        f'<a class="lang-opt{" active" if lang == "en" else ""}" '
+        f'href="#" data-lang="en">EN</a>'
+        '</div>'
     )
     nav = (
         f'<div class="page-toggle">{toggle}</div>'
@@ -825,11 +889,12 @@ def layout(title: str, subtitle: str, active: str, content: str, date_control: s
     html_lang_attr = "zh-CN" if lang == "zh" else "en"
     script = """
 <script>
-// Language switcher: set cookie + reload
+// Language toggle: set cookie + reload when an inactive option is clicked
 document.addEventListener('click', (event) => {
-  const btn = event.target.closest('a.page-lang-btn');
+  const btn = event.target.closest('.page-lang-toggle .lang-opt');
   if (btn) {
     event.preventDefault();
+    if (btn.classList.contains('active')) return;  // already in this language
     const target = btn.getAttribute('data-lang') || 'zh';
     document.cookie = 'daytrace_lang=' + target + '; path=/; max-age=' + (60*60*24*365);
     window.location.reload();
@@ -1062,22 +1127,34 @@ def daily_report_text(today: dict[str, Any], hours: list[dict[str, Any]]) -> str
 """
 
 
-DIMENSIONS = [
-    ("source", "来源"),
-    ("project", "项目"),
-    ("task", "任务"),
-    ("device", "设备"),
-    ("activity", "活动"),
-]
+def _dimensions():
+    """DIMENSIONS list — labels resolved against the current request language.
+    Called as a function (not a constant) so changing the cookie flips the
+    labels immediately. Returns [(dim_id, label), ...]."""
+    return [
+        ("source",   T("dim_source")),
+        ("project",  T("dim_project")),
+        ("task",     T("dim_task")),
+        ("device",   T("dim_device")),
+        ("activity", T("dim_activity")),
+    ]
 
-# Global unit toggle. Affects donut shares, composition bars, project-card
-# share bars, and the unit label inside the donut hole. Persisted via URL
-# ?unit=...
-UNITS = [
-    ("count", "条目"),
-    ("chars", "字数"),
-    ("hours", "小时"),
-]
+
+def _units():
+    """UNITS list — same lazy-translation pattern as _dimensions()."""
+    return [
+        ("count", T("unit_count")),
+        ("chars", T("unit_chars")),
+        ("hours", T("unit_hours")),
+    ]
+
+
+# Static dim/unit IDs — used for validation only (the labels live in
+# _dimensions() / _units() which read the current language).
+DIMENSIONS = [("source", "Source"), ("project", "Project"),
+              ("task", "Task"),     ("device", "Device"),
+              ("activity", "Activity")]
+UNITS = [("count", "Events"), ("chars", "Chars"), ("hours", "Hours")]
 
 
 def _event_weight(ev: dict, unit: str) -> int:
@@ -1324,10 +1401,10 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         f'data-param="mode" data-value="{dim_id}" '
         f'href="{esc(_mode_link("/today", {"date": date, "mode": dim_id if dim_id != "source" else None, "unit": unit if unit != "count" else None}))}">'
         f'{label}</a>'
-        for dim_id, label in DIMENSIONS
+        for dim_id, label in _dimensions()
     )
     dim_pills_html = (
-        f'<div class="dim-tabs" title="按哪个维度堆叠/上色">{dim_pill_links}</div>'
+        f'<div class="dim-tabs" title="{esc(T("dim_tooltip"))}">{dim_pill_links}</div>'
     )
 
     # Build daily top-chart-card (直方图 + 分布) — mirrors weekly's structure
@@ -1358,24 +1435,24 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         f'data-param="unit" data-value="{u_id}" '
         f'href="{esc(_mode_link("/today", {"date": date, "mode": mode if mode != "source" else None, "unit": u_id if u_id != "count" else None}))}">'
         f'{label}</a>'
-        for u_id, label in UNITS
+        for u_id, label in _units()
     )
     top_chart_switcher = (
         '<div class="dim-tabs" data-role="tc-switcher">'
-        f'<button type="button" class="dim-tab{" active" if top_view == "chart" else ""}" data-view="chart">直方图</button>'
-        f'<button type="button" class="dim-tab{" active" if top_view == "dist" else ""}" data-view="dist">分布</button>'
+        f'<button type="button" class="dim-tab{" active" if top_view == "chart" else ""}" data-view="chart">{esc(T("chart_view_hist"))}</button>'
+        f'<button type="button" class="dim-tab{" active" if top_view == "dist" else ""}" data-view="dist">{esc(T("chart_view_dist"))}</button>'
         '</div>'
     )
-    unit_label_daily = dict(UNITS).get(unit, unit)
-    dim_label_daily = dict(DIMENSIONS).get(mode, mode)
-    # ┃ Chart panel ┃ — histogram (24 hourly bars) + 分布 (donut+bars)
+    unit_label_daily = dict(_units()).get(unit, unit)
+    dim_label_daily = dict(_dimensions()).get(mode, mode)
+    # ┃ Chart panel ┃ — histogram (24 hourly bars) + distribution (donut+bars)
     daily_top_chart_card = (
         f'<div class="card top-chart-card" id="top-chart" data-tc-view="{esc(top_view)}">'
         '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">'
-        f'<h3 style="margin:0;">每小时 {esc(unit_label_daily)} <span class="muted small" style="font-weight:500;">· 维度: {esc(dim_label_daily)}</span></h3>'
-        '<span class="tag source" style="background:rgba(47,111,237,0.12); color:#2f6fed;">Chart</span>'
+        f'<h3 style="margin:0;">{esc(T("chart_per_hour"))} {esc(unit_label_daily)} <span class="muted small" style="font-weight:500;">· {esc(T("dim_label"))}: {esc(dim_label_daily)}</span></h3>'
+        f'<span class="tag source" style="background:rgba(47,111,237,0.12); color:#2f6fed;">{esc(T("chart_panel_tag"))}</span>'
         '<div style="margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
-        f'<span class="muted small" style="font-weight:600;">单位</span>'
+        f'<span class="muted small" style="font-weight:600;">{esc(T("unit_label"))}</span>'
         f'<div class="unit-tabs">{unit_pill_links}</div>'
         f'{top_chart_switcher}'
         '</div>'
@@ -1573,7 +1650,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         + dim_pills_html
         + '</div>'
     )
-    return layout("DayTrace · 报告", f"{total} events · daily report", "today", content, date_control=header_controls)
+    return layout(f"DayTrace · {T('daily_title')}", f"{total} events · daily report", "today", content, date_control=header_controls)
 
 
 def events_table(events, filters: dict[str, str | None], options: dict[str, Any]):
@@ -1913,7 +1990,7 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
             if narrative:
                 inner.append(f'<p class="dt-narrative">{esc(narrative)}</p>')
             inner.append(
-                f'<a class="dt-day-link" href="/today?date={esc(d)}">→ 当日完整 dashboard</a>'
+                f'<a class="dt-day-link" href="/today?date={esc(d)}">{esc(T("open_full_day"))}</a>'
             )
             body_html = '<div class="dt-body">' + "".join(inner) + '</div>'
 
@@ -2523,7 +2600,7 @@ def events_page(db_path: Path, qs: dict[str, list[str]]):
         {"value": a, "label": a} for a in activity_values
     ]
     content = table_switcher_html("events", qs) + events_table(events, filters, options)
-    return layout("DayTrace · 数据库", f"{len(events)} events", "events", content)
+    return layout(f"DayTrace · {T('events_table_t')}", f"{len(events)} events", "events", content)
 
 
 # ───────────────────────────── weekly report ──────────────────────────────
@@ -2797,27 +2874,39 @@ def _palette_for(top_names: list[str]) -> dict[str, str]:
     return palette
 
 
-_WEEKLY_UNIT_OPTS = [
-    ("hours", "小时"),
-    ("count", "事件数"),
-    ("chars", "字数"),
-]
-# Order + labels match daily's DIMENSIONS so the dim pills are visually
-# identical across both pages. Key "device" (not "device_id") — _stack_value_of
-# accepts the short alias and resolves to events.device_id internally.
-_WEEKLY_DIM_OPTS = [
-    ("source",   "来源"),
-    ("project",  "项目"),
-    ("task",     "任务"),
-    ("device",   "设备"),
-    ("activity", "活动"),
-]
-_WEEKLY_VIEW_OPTS = [
-    # Histogram has its own standalone card on top, so it's not in this
-    # switcher — these two views are complementary cuts of the same data.
-    ("swim",  "泳道"),
-    ("heat",  "热力图"),
-]
+# Weekly pills — the *labels* on these tuples are placeholders. The
+# template renders them via T() (see _weekly_unit_opts / _weekly_dim_opts
+# below), so the cookie language flips them on the fly.
+_WEEKLY_UNIT_OPTS = [("hours", "Hours"), ("count", "Events"), ("chars", "Chars")]
+_WEEKLY_DIM_OPTS = [("source",   "Source"), ("project",  "Project"),
+                    ("task",     "Task"),   ("device",   "Device"),
+                    ("activity", "Activity")]
+_WEEKLY_VIEW_OPTS = [("swim", "Swimlane"), ("heat", "Heatmap")]
+
+
+def _weekly_unit_opts():
+    return [
+        ("hours", T("unit_hours")),
+        ("count", T("unit_count")),
+        ("chars", T("unit_chars")),
+    ]
+
+
+def _weekly_dim_opts():
+    return [
+        ("source",   T("dim_source")),
+        ("project",  T("dim_project")),
+        ("task",     T("dim_task")),
+        ("device",   T("dim_device")),
+        ("activity", T("dim_activity")),
+    ]
+
+
+def _weekly_view_opts():
+    return [
+        ("swim", T("view_swim", lang=None) if "view_swim" in _STRINGS else "Swimlane"),
+        ("heat", T("view_heat", lang=None) if "view_heat" in _STRINGS else "Heatmap"),
+    ]
 
 
 def _weekly_url(
@@ -2904,7 +2993,7 @@ def _weekly_header_controls(
     )
 
     dim_bar_html = _pill_bar(
-        css_class="dim-tab", options=_WEEKLY_DIM_OPTS, current=mode,
+        css_class="dim-tab", options=_weekly_dim_opts(), current=mode,
         href_for=lambda v: _weekly_url(week=week, mode=v, unit=unit, view=view),
         param_name="mode",
     )
@@ -2920,7 +3009,7 @@ def _weekly_header_controls(
 def _view_switcher_pills(*, week: str, mode: str, unit: str, view: str) -> str:
     """The 直方图 / 泳道 / 热力图 pill row inside the main viz card."""
     return _pill_bar(
-        css_class="dim-tab", options=_WEEKLY_VIEW_OPTS, current=view,
+        css_class="dim-tab", options=_weekly_view_opts(), current=view,
         href_for=lambda v: _weekly_url(
             week=week, mode=mode, unit=unit, view=v, anchor="chart",
         ),
@@ -4062,11 +4151,11 @@ def _due_chip_html(due_date: str | None) -> str:
         return f'<span class="muted">{esc(due_date)}</span>'
     delta = (d - _date.today()).days
     if delta < 0:
-        bg, color, label = "#fce8e8", "#b32a2a", f"已过期 {-delta}d"
+        bg, color, label = "#fce8e8", "#b32a2a", T("due_overdue", n=-delta)
     elif delta <= 3:
-        bg, color, label = "#fce8e8", "#b32a2a", f"急 {delta}d"
+        bg, color, label = "#fce8e8", "#b32a2a", T("due_urgent",  n=delta)
     elif delta <= 7:
-        bg, color, label = "#fff3cd", "#7a5a00", f"紧 {delta}d"
+        bg, color, label = "#fff3cd", "#7a5a00", T("due_tight",   n=delta)
     else:
         bg, color, label = "#eef5ff", "#2f6fed", f"{delta}d"
     return (
@@ -4081,6 +4170,17 @@ _STATUS_COLOR = {
     "待办":   ("#fff3cd", "#7a5a00"),
     "完成":   ("#eee", "#888"),
 }
+
+
+def _localized_status(status: str | None) -> str:
+    """Translate Feishu task status word for display.
+    The raw values stay in zh in the SQLite mirror; only display text flips."""
+    if not status:
+        return ""
+    if status == "进行中": return T("status_doing")
+    if status == "待办":   return T("status_todo")
+    if status == "完成":   return T("status_done")
+    return status
 _PRIORITY_COLOR = {
     "P0": ("#fce8e8", "#b32a2a"),
     "P1": ("#fde9d3", "#a05300"),
@@ -4116,7 +4216,7 @@ def _tasks_panel_one(
     if not items:
         return ""
 
-    table_labels = {"tasks": "任务", "reviews": "审稿"}
+    table_labels = {"tasks": T("tasks_table_t"), "reviews": T("tasks_table_r")}
 
     rows_html = []
     for wi in items:
@@ -4156,7 +4256,7 @@ def _tasks_panel_one(
         if is_stale:
             title_html += (
                 '<span style="margin-left:8px; color:#b32a2a; font-size:11px;" '
-                'title="高优先级任务但本期零活动">⚠</span>'
+                f'title="{esc(T("tasks_p_stale_tip"))}">⚠</span>'
             )
         title_html += f"{subtitle_html}</div>"
 
@@ -4190,7 +4290,7 @@ def _tasks_panel_one(
             f'data-title="{esc(wi.get("title") or "")}">'
             f'<td>{_chip(table_labels.get(table_key, table_key), _TABLE_KEY_COLOR.get(table_key))}</td>'
             f'<td>{_chip(priority, _PRIORITY_COLOR.get(priority)) or chr(0x2014)}</td>'
-            f'<td>{_chip(status, _STATUS_COLOR.get(status))}</td>'
+            f'<td>{_chip(_localized_status(status), _STATUS_COLOR.get(status))}</td>'
             f'<td class="tasks-title-cell">{title_html}</td>'
             f'<td style="text-align:right;">{time_html}</td>'
             f'<td class="col-events" style="text-align:right;">{ev_html}</td>'
@@ -4206,15 +4306,15 @@ def _tasks_panel_one(
         and stats.get(wi["record_id"], {}).get("event_count", 0) == 0
     )
     completed_count = sum(1 for wi in items if wi.get("status") == "完成")
-    summary_bits = [f"{len(items)} 行"]
+    summary_bits = [T("tasks_n_rows", n=len(items))]
     if active_p01_stale:
-        summary_bits.append(f'<span style="color:#b32a2a;">{active_p01_stale} 个 P0/P1 本期零活动</span>')
+        summary_bits.append(f'<span style="color:#b32a2a;">{esc(T("tasks_p_zero", n=active_p01_stale))}</span>')
     summary_line = " · ".join(summary_bits)
 
     toggle_html = (
         '<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); cursor:pointer; user-select:none;">'
         '<input type="checkbox" data-role="tasks-show-completed" style="cursor:pointer;">'
-        f'显示已完成 ({completed_count})'
+        f'{esc(T("tasks_show_done"))} ({completed_count})'
         '</label>'
     )
 
@@ -4341,7 +4441,7 @@ def _tasks_panel_one(
     return (
         f'<section class="card tasks-card" id="{panel_id}" data-table-key="{esc(table_key)}">'
         '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">'
-        f'<h3 style="margin:0;">工作项 · {esc(table_label)}</h3>'
+        f'<h3 style="margin:0;">{esc(T("tasks_panel_t") if table_key == "tasks" else T("tasks_panel_r"))}</h3>'
         f'{chip_html}'
         f'<span class="muted small">{summary_line}</span>'
         f'<span style="margin-left:auto;">{toggle_html}</span>'
@@ -4425,7 +4525,7 @@ def _alignment_audit_card(con, days: list[str]) -> str:
     if not wi_rows:
         return ""
 
-    table_labels = {"tasks": "任务", "reviews": "审稿"}
+    table_labels = {"tasks": T("task_prefix"), "reviews": T("review_prefix")}
 
     # Existing aliases — pre-select in the dropdown if already mapped.
     from daytrace.work_items import load_aliases
@@ -4557,7 +4657,7 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
     if not table_order:
         return ""
 
-    table_labels = {"tasks": "任务", "reviews": "审稿"}
+    table_labels = {"tasks": T("tasks_table_t"), "reviews": T("tasks_table_r")}
 
     cards_html: list[str] = []
     for tk in table_order:
@@ -4573,7 +4673,7 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
 
     # Top selector pill bar — JS toggles visibility of each card and
     # collapses/expands the 2-col grid accordingly.
-    pills = ['<button type="button" class="dim-tab active" data-table-pick="all">全部</button>']
+    pills = [f'<button type="button" class="dim-tab active" data-table-pick="all">{esc(T("tasks_all"))}</button>']
     for tk in table_order:
         pills.append(
             f'<button type="button" class="dim-tab" data-table-pick="{esc(tk)}">'
@@ -4671,7 +4771,7 @@ def weekly_page(
     try:
         monday, sunday, days = iso_week_to_date_range(week)
     except ValueError as e:
-        return layout("DayTrace · 周报", "格式错误", "weekly",
+        return layout(f"DayTrace · {T('nav_weekly')}", "format error", "weekly",
                       f'<section class="card"><div class="muted">{esc(str(e))}</div></section>')
     prev_week, next_week = iso_week_neighbors(week)
     bh = _stats.DAY_BOUNDARY_HOUR
@@ -4776,28 +4876,28 @@ def weekly_page(
     )
     top_chart_switcher = (
         '<div class="dim-tabs" data-role="tc-switcher">'
-        f'<button type="button" class="dim-tab{" active" if top_view == "chart" else ""}" data-view="chart">直方图</button>'
-        f'<button type="button" class="dim-tab{" active" if top_view == "dist" else ""}" data-view="dist">分布</button>'
+        f'<button type="button" class="dim-tab{" active" if top_view == "chart" else ""}" data-view="chart">{esc(T("chart_view_hist"))}</button>'
+        f'<button type="button" class="dim-tab{" active" if top_view == "dist" else ""}" data-view="dist">{esc(T("chart_view_dist"))}</button>'
         '</div>'
     )
     # Unit pills lived in the global dim-bar in v8; moved here because they
     # only affect the histogram/distribution views (swim + heat are
     # inherently per-event count).
     unit_pills = _pill_bar(
-        css_class="unit-tab", options=_WEEKLY_UNIT_OPTS, current=unit,
+        css_class="unit-tab", options=_weekly_unit_opts(), current=unit,
         href_for=lambda v: _weekly_url(week=week, mode=mode, unit=v, view=view),
         param_name="unit",
     )
-    unit_label = dict(_WEEKLY_UNIT_OPTS).get(unit, unit)
-    dim_label = dict(_WEEKLY_DIM_OPTS).get(mode, mode)
-    # ┃ Chart panel ┃ — histogram (7 daily bars) + 分布 (donut+bars)
+    unit_label = dict(_weekly_unit_opts()).get(unit, unit)
+    dim_label  = dict(_weekly_dim_opts()).get(mode, mode)
+    # ┃ Chart panel ┃ — histogram (7 daily bars) + distribution (donut+bars)
     top_histogram_card = (
         f'<div class="card top-chart-card" id="top-chart" data-tc-view="{esc(top_view)}">'
         '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">'
-        f'<h3 style="margin:0;">每日 {esc(unit_label)} <span class="muted small" style="font-weight:500;">· 维度: {esc(dim_label)}</span></h3>'
-        '<span class="tag source" style="background:rgba(47,111,237,0.12); color:#2f6fed;">Chart</span>'
+        f'<h3 style="margin:0;">{esc(T("chart_per_day"))} {esc(unit_label)} <span class="muted small" style="font-weight:500;">· {esc(T("dim_label"))}: {esc(dim_label)}</span></h3>'
+        f'<span class="tag source" style="background:rgba(47,111,237,0.12); color:#2f6fed;">{esc(T("chart_panel_tag"))}</span>'
         '<div style="margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
-        f'<span class="muted small" style="font-weight:600;">单位</span>{unit_pills}'
+        f'<span class="muted small" style="font-weight:600;">{esc(T("unit_label"))}</span>{unit_pills}'
         f'{top_chart_switcher}'
         '</div>'
         '</div>'
