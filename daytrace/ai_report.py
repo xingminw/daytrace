@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v15"  # v15 = bilingual activity labels (zh + en)
+AI_VERSION = "v16"  # v16 = en fields must be pure English (no CJK characters)
 
 
 # ----- Shape validators ------------------------------------------------
@@ -308,7 +308,7 @@ def _load_active_task_context(con: sqlite3.Connection) -> str:
     try:
         rows = con.execute(
             """
-            SELECT title, status, due_date
+            SELECT title, title_en, status, due_date
               FROM work_items
              WHERE table_key = 'tasks'
                AND (
@@ -333,12 +333,19 @@ def _load_active_task_context(con: sqlite3.Connection) -> str:
     lines = []
     for r in rows:
         title = (r["title"] or "").strip()
+        title_en = (r["title_en"] or "").strip() if "title_en" in r.keys() else ""
         status = (r["status"] or "").strip() or "?"
         due = (r["due_date"] or "").strip()
         suffix = f" · {status}"
         if due:
             suffix += f" · due {due}"
-        lines.append(f"- {title}{suffix}")
+        # When an English title is available, surface both so the AI
+        # has a direct map for bilingual output (en bullets should use
+        # the EN title, not embed the zh one).
+        if title_en and title_en != title:
+            lines.append(f"- {title} / {title_en}{suffix}")
+        else:
+            lines.append(f"- {title}{suffix}")
     return "\n".join(lines)
 
 
@@ -479,6 +486,12 @@ OVERVIEW_SYSTEM = (
     "读者是这位工程师本人 / the reader is the engineer themself.\n\n"
     "**双语输出 / Bilingual output**: 每个文本字段输出 {\"zh\": ..., \"en\": ...} "
     "对象。两种语言独立生成同一份内容(不是简单翻译),各自符合语言习惯。\n\n"
+    "**en 字段是纯英文 / EN field MUST be pure English**: 任务清单里如果"
+    "提供了 `中文名 / English name` 形式的对照, 在 en 输出里 **必须用英文名**, "
+    "不要把中文名复制进英文 bullet。不要出现任何 CJK 汉字字符。如果某个名字没有"
+    "英文对照, 用简短英文意译 (例: 'paper-review project', 'i18n rollout'), 不要"
+    "保留汉字。Same rule for narrative, headline, work_pattern, suggestions: "
+    "the `en` value contains zero Chinese characters.\n\n"
     "输入会按顺序给你:\n"
     "  1. 活跃任务清单 (飞书任务表)\n"
     "  2. 近 N 天基线 (用于和今天对比)\n"
@@ -532,6 +545,10 @@ def _overview_user(
         f"{baseline_block}"
         f"【今日骨架统计】\n{stats_text}\n\n"
         f"【事件清单, 按时间; 前缀 [task:X] 表示已关联到任务 X, [proj:Y] 表示游离项目】\n{events_text}\n\n"
+        "**重要 — EN 字段纯英文要求**: 上面任务清单里 `中文名 / English name` "
+        "的行, en 输出里 **必须用 English name**, 禁止把中文名抄进英文 bullet。"
+        "narrative/headline/highlights/work_pattern/suggestions 的 en 字段里 "
+        "**不允许出现任何汉字**。\n\n"
         "【输出 JSON — 双语 schema】\n"
         "每个文本字段都用 {\"zh\": \"...\", \"en\": \"...\"} 的双语对象,"
         "**两种语言要表达同一份内容、同一个判断**,不是一个翻译另一个 ——"
