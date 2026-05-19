@@ -4142,9 +4142,25 @@ def _alignment_audit_card(con, days: list[str]) -> str:
     """Audit unmatched project_guess values + interactive dropdown to map
     each to an existing work_item. POST → /api/work-items/alias persists to
     config/work_item_aliases.yaml and rebuilds links so future catchups
-    follow the user's manual mapping."""
+    follow the user's manual mapping.
+
+    Audit is a *config* surface, not a per-day stat — a single-day window
+    rarely has enough unmatched events to make the audit useful. We
+    always sweep at least the last 7 calendar days ending at max(days)
+    so the daily page and the weekly page both surface meaningful
+    alignment work to do."""
     if not days:
         return ""
+    from datetime import date as _date_mod, timedelta as _td_mod
+    end = max(days)
+    try:
+        end_dt = _date_mod.fromisoformat(end)
+    except ValueError:
+        end_dt = _date_mod.today()
+    start = (end_dt - _td_mod(days=6)).isoformat()  # 7-day inclusive window
+    # If the caller's window is already wider, honor it.
+    if min(days) < start:
+        start = min(days)
     rows = con.execute(
         """
         SELECT
@@ -4162,7 +4178,7 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         HAVING n >= 3
          ORDER BY n DESC
          LIMIT 20
-        """, (min(days), max(days)),
+        """, (start, end),
     ).fetchall()
     if not rows:
         return ""
@@ -4267,12 +4283,13 @@ def _alignment_audit_card(con, days: list[str]) -> str:
             '</tr>'
         )
 
+    window_label = f"{start} ~ {end}" if start != end else end
     return (
         '<section class="card" id="alignment-audit" style="margin-top:12px;">'
         '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">'
         '<h3 style="margin:0;">未匹配项目审计</h3>'
         '<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">Audit</span>'
-        f'<span class="muted small">{len(rows)} 个项目 / 共 {total_unmatched} 条事件未对应任务</span>'
+        f'<span class="muted small">{len(rows)} 个项目 / 共 {total_unmatched} 条事件未对应任务 · 窗口 {esc(window_label)}</span>'
         '</div>'
         '<form method="POST" action="/api/work-items/alias" '
         'style="margin:0;">'
