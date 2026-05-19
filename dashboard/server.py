@@ -167,23 +167,32 @@ body.events-page form { height:100%; }
 .insights-col ul li { font-size:14.5px; line-height:1.65; color:#362f27; margin-bottom:8px; }
 .insights-col ul li:last-child { margin-bottom:0; }
 .insights-col .muted { font-size:13.5px; }
-/* Daily timeline card — 7 columns side by side, one per weekday.
-   Full-width below the swim/heat panel; collapses to 1 col on narrow. */
+/* Daily timeline card — 7 cols side by side, each a <details> that
+   shows weekday + headline by default and unfolds the narrative on
+   click. Visual style:
+     • transparent background (column blends into the parent card)
+     • top accent line (per-weekday color) — only structure cue
+     • narrative blockquote stays cream like the rest of the page */
 .daily-timeline-card { margin-top:12px; }
-.dt-grid { display:grid; grid-template-columns:repeat(7, 1fr); gap:10px; align-items:stretch; }
-.dt-col { background:white; border:1px solid var(--line); border-radius:10px; padding:10px 12px 12px; display:flex; flex-direction:column; min-width:0; box-shadow:0 1px 2px rgba(45,30,10,0.03); }
-.dt-col.dt-empty { background:#fafaf7; }
-.dt-col-head { display:flex; align-items:baseline; gap:6px; padding:0 0 8px; margin:0 0 8px; border-bottom:2px solid #f0d68b; text-decoration:none; color:inherit; }
-.dt-col-head:hover { border-bottom-color:#2f6fed; }
-.dt-col-head:hover .dt-day-name { color:#2f6fed; }
+.dt-grid { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; align-items:start; }
+.dt-col { background:transparent; padding:10px 10px 12px; border-top:2px solid #f0d68b; min-width:0; }
+.dt-col[open] { background:rgba(255,247,232,0.5); border-radius:0 0 8px 8px; }
+.dt-col.dt-empty { opacity:0.55; }
+.dt-col:nth-child(3n+1) { border-top-color:#f59e0b; }
+.dt-col:nth-child(3n+2) { border-top-color:#2f6fed; }
+.dt-col:nth-child(3n)   { border-top-color:#16a34a; }
+.dt-col summary { list-style:none; cursor:pointer; margin:0; padding:0; }
+.dt-col summary::-webkit-details-marker { display:none; }
+.dt-col-head { display:flex; align-items:baseline; gap:6px; margin-bottom:8px; }
 .dt-day-name { font-weight:700; font-size:14px; color:#1a1814; }
 .dt-date { font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; }
-.dt-headline { font-size:13px; font-weight:700; color:#1a1814; line-height:1.4; margin-bottom:8px; }
-.dt-headline.muted { color:var(--muted); font-weight:500; font-style:italic; }
-.dt-narrative { font-size:12px; line-height:1.55; color:#4d4438; flex:1; word-break:break-word; }
-.dt-col:nth-child(3n+1) .dt-col-head { border-bottom-color:#f59e0b; }
-.dt-col:nth-child(3n+2) .dt-col-head { border-bottom-color:#2f6fed; }
-.dt-col:nth-child(3n)   .dt-col-head { border-bottom-color:#16a34a; }
+.dt-headline { font-size:13px; font-weight:700; color:#1a1814; line-height:1.45; cursor:pointer; }
+.dt-col summary:hover .dt-headline { color:#2f6fed; }
+.dt-headline.muted { color:var(--muted); font-weight:500; font-style:italic; cursor:default; }
+.dt-body { margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); }
+.dt-narrative { font-size:12.5px; line-height:1.65; color:#4d4438; margin:0 0 8px; word-break:break-word; }
+.dt-day-link { display:inline-block; font-size:11.5px; color:#2f6fed; text-decoration:none; font-weight:600; }
+.dt-day-link:hover { text-decoration:underline; }
 @media (max-width:1100px) { .dt-grid { grid-template-columns:repeat(4, 1fr); } }
 @media (max-width:720px)  { .dt-grid { grid-template-columns:repeat(2, 1fr); } }
 @media (max-width:480px)  { .dt-grid { grid-template-columns:1fr; } }
@@ -1628,10 +1637,9 @@ def _render_trend_closer(overview_payload: dict | None, continuity: dict | None)
 
 
 def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
-    """Full-width 7-column horizontal timeline card for the weekly page.
-    One column per weekday (周一→周日), each showing the day's headline
-    and narrative. Clicking the weekday header jumps to /today?date=…
-    for the full dashboard.
+    """Full-width 7-column horizontal timeline card. Each column is a
+    <details> block — summary shows weekday + date + headline; click to
+    unfold the day's narrative + a 'jump to /today' link.
 
     Reads cached ai_overview per day; tolerates v6 (top-level narrative)
     and v10+ (overview.narrative) shapes."""
@@ -1671,16 +1679,27 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
             narrative = (ov.get("narrative") or "").strip()
         else:
             narrative = (val.get("narrative") or "").strip()
+
+        body_html = ""
+        if narrative or headline:
+            inner: list[str] = []
+            if narrative:
+                inner.append(f'<p class="dt-narrative">{esc(narrative)}</p>')
+            inner.append(
+                f'<a class="dt-day-link" href="/today?date={esc(d)}">→ 当日完整 dashboard</a>'
+            )
+            body_html = '<div class="dt-body">' + "".join(inner) + '</div>'
+
         cols.append(
-            '<div class="dt-col">'
-            '<a class="dt-col-head" '
-            f'href="/today?date={esc(d)}" title="跳到该日完整 dashboard">'
+            '<details class="dt-col"><summary>'
+            '<div class="dt-col-head">'
             f'<span class="dt-day-name">{esc(wd)}</span>'
             f'<span class="dt-date">{esc(d[5:])}</span>'
-            '</a>'
-            + (f'<div class="dt-headline">{esc(headline)}</div>' if headline else "")
-            + (f'<div class="dt-narrative">{esc(narrative)}</div>' if narrative else "")
-            + '</div>'
+            '</div>'
+            + (f'<div class="dt-headline">{esc(headline or "(无标题)")}</div>')
+            + '</summary>'
+            + body_html
+            + '</details>'
         )
 
     if not any_data:
@@ -1690,7 +1709,7 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
         '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:12px;">'
         '<h3 style="margin:0;">每日时间轴</h3>'
         '<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">Daily</span>'
-        '<span class="muted small" style="margin-left:6px;">点击每天的星期头跳到当日完整 dashboard</span>'
+        '<span class="muted small" style="margin-left:6px;">点击任一天展开当日叙事</span>'
         '</div>'
         '<div class="dt-grid">'
         + "".join(cols)
