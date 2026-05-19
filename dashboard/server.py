@@ -371,10 +371,14 @@ header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(
 .header-spacer { /* 1fr eater so right-rail right-aligns */ }
 /* Right-rail nav: page toggle + db btn + lang toggle, kept on one row. */
 .page-nav { display:inline-flex; align-items:center; gap:8px; flex-wrap:nowrap; }
-.page-toggle { display:inline-flex; align-items:center; gap:0; height:30px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:2px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
-.page-toggle-pill { display:inline-flex; align-items:center; height:24px; font-size:13px; font-weight:700; padding:0 14px; border-radius:999px; color:#3b352e; cursor:pointer; transition:background .12s, color .12s; text-decoration:none; }
-.page-toggle-pill:hover { background:rgba(0,0,0,.04); }
-.page-toggle-pill.active { background:var(--ink); color:white; }
+/* Flat segmented control — no outer "box around buttons" frame.
+   Each pill carries its own subtle border + cream surface so the
+   group reads as a row of independent buttons instead of nested
+   chrome. Active pill = dark ink fill. */
+.page-toggle { display:inline-flex; align-items:center; gap:4px; height:30px; background:transparent; border:none; border-radius:0; padding:0; box-shadow:none; }
+.page-toggle-pill { display:inline-flex; align-items:center; height:28px; font-size:13px; font-weight:700; padding:0 14px; border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:999px; color:#3b352e; cursor:pointer; transition:background .12s, color .12s; text-decoration:none; }
+.page-toggle-pill:hover { background:#fff7e8; }
+.page-toggle-pill.active { background:var(--ink); color:white; border-color:var(--ink); }
 /* Database button — matches the toggle containers so the right rail
    reads as one consistent cluster, not a white pill jammed between
    two cream segmented controls. */
@@ -383,10 +387,10 @@ header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(
 /* Language toggle — segmented control with two pills. Mirrors the look
    of the dim-tabs / unit-tabs elsewhere in the dashboard so it reads as
    a deliberate switch rather than a stray button. */
-.page-lang-toggle { display:inline-flex; align-items:center; gap:0; height:30px; padding:2px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; margin-left:0; box-shadow:0 4px 10px rgba(65,45,10,.04); }
-.page-lang-toggle .lang-opt { display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:24px; padding:0 10px; border-radius:999px; font-size:12px; font-weight:700; color:#3b352e; text-decoration:none; cursor:pointer; transition:background .12s, color .12s; }
-.page-lang-toggle .lang-opt:hover { background:rgba(0,0,0,.04); }
-.page-lang-toggle .lang-opt.active { background:var(--ink); color:white; }
+.page-lang-toggle { display:inline-flex; align-items:center; gap:4px; height:30px; padding:0; background:transparent; border:none; border-radius:0; margin-left:0; box-shadow:none; }
+.page-lang-toggle .lang-opt { display:inline-flex; align-items:center; justify-content:center; min-width:34px; height:28px; padding:0 10px; border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:999px; font-size:12px; font-weight:700; color:#3b352e; text-decoration:none; cursor:pointer; transition:background .12s, color .12s; }
+.page-lang-toggle .lang-opt:hover { background:#fff7e8; }
+.page-lang-toggle .lang-opt.active { background:var(--ink); color:white; border-color:var(--ink); }
 h1 { margin:0; font-size:20px; letter-spacing:-0.03em; white-space:nowrap; }.sub { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 nav { display:flex; gap:6px; flex-wrap:nowrap; justify-content:flex-end; justify-self:end; margin-left:auto; } nav a { padding:5px 9px; border:1px solid var(--line); border-radius:999px; background:rgba(255,250,240,.94); color:#3b352e; font-weight:650; font-size:13px; white-space:nowrap; } nav a:hover { background:#fff7e8; } nav a.active { background:var(--ink); color:white; border-color:var(--ink); }
 main { padding:12px 18px 28px; max-width:none; margin:0 auto; min-height:calc(100vh - 51px); }
@@ -572,13 +576,16 @@ body.events-page form { height:100%; }
 .dt-col:nth-child(3n+1) { border-top-color:#f59e0b; }
 .dt-col:nth-child(3n+2) { border-top-color:#2f6fed; }
 .dt-col:nth-child(3n)   { border-top-color:#16a34a; }
-.dt-col summary { list-style:none; cursor:pointer; margin:0; padding:0; }
+/* Per-column <details> is driven exclusively by the global
+   Expand-all / Collapse-all buttons in the timeline header — clicking
+   on a column header should not toggle its open state. */
+.dt-col summary { list-style:none; cursor:default; margin:0; padding:0; pointer-events:none; }
 .dt-col summary::-webkit-details-marker { display:none; }
 .dt-col-head { display:flex; align-items:baseline; gap:6px; margin-bottom:8px; }
 .dt-day-name { font-weight:700; font-size:14px; color:#1a1814; }
 .dt-date { font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; }
 .dt-headline { font-size:13px; font-weight:700; color:#1a1814; line-height:1.45; cursor:pointer; }
-.dt-col summary:hover .dt-headline { color:#2f6fed; }
+/* hover-colorize disabled — clicks no longer toggle. */
 .dt-headline.muted { color:var(--muted); font-weight:500; font-style:italic; cursor:default; }
 .dt-body { margin-top:10px; padding-top:10px; border-top:1px dashed var(--line); }
 .dt-narrative { font-size:12.5px; line-height:1.65; color:#4d4438; margin:0 0 8px; word-break:break-word; }
@@ -1523,11 +1530,11 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
             next_day = dates_desc[idx - 1]
             href = _mode_link("/today", {"date": next_day, "mode": mode if mode != "source" else None, "unit": unit if unit != "count" else None})
             next_link = f'<a class="hdr-nav-btn" title="后一天 {esc(next_day)}" href="{esc(href)}">→</a>'
-    open_db_link = (
-        f'<a class="hdr-open-db" title="在新标签页打开本日事件" target="_blank" rel="noopener" '
-        f'href="/events?start_from={esc(date)}&start_to={esc(date)}">{esc(T("open_db_short"))}</a>'
-        if date else ""
-    )
+    # Database button removed from the centered header — the right-rail
+    # already has a Database pill (.page-db-btn). Keeping both gave the
+    # daily/weekly page two distinct "open DB" affordances that did the
+    # same thing.
+    open_db_link = ""
 
     # Global controls are now ALL inlined into the sticky page header (via
     # the layout()'s date_control slot) — single row holding: day-nav +
@@ -3145,10 +3152,9 @@ def _weekly_header_controls(
         f'<a class="hdr-nav-btn" title="下一周 {esc(next_week)}" '
         f'href="{_weekly_url(week=next_week, mode=mode, unit=unit, view=view)}">→</a>'
     )
-    open_db_html = (
-        f'<a class="hdr-open-db" title="在新标签页打开本周事件" target="_blank" rel="noopener" '
-        f'href="/events?start_from={esc(monday)}&start_to={esc(sunday)}">{esc(T("open_db_short"))}</a>'
-    )
+    # Database button removed from the centered header — right-rail's
+    # .page-db-btn covers the same affordance. (See daily-side comment.)
+    open_db_html = ""
     # Week picker: feed daily-style calendar with Monday as the selected date.
     # When user clicks any day, route /weekly?date= maps it to that day's week.
     # available_dates list comes from the events DB so days-with-data are highlighted.
