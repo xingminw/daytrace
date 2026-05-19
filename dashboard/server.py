@@ -243,7 +243,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "dp_th_project_task":{"zh": "项目 · 任务", "en": "Project · Tasks"},
     "dp_rowcount":       {"zh": "{n} 行",   "en": "{n} rows"},
     # additional table tabs (generic browser)
-    "db_tab_work_items": {"zh": "任务库",        "en": "Tasks (work_items)"},
+    "db_tab_work_items": {"zh": "飞书任务",      "en": "Feishu tasks"},
     "db_tab_links":      {"zh": "事件→任务",     "en": "Event→Task links"},
     "db_tab_labels":     {"zh": "活动标签",      "en": "Activity labels"},
     "db_tab_day_ch":     {"zh": "AI 每日缓存",   "en": "AI day cache"},
@@ -723,11 +723,10 @@ body.events-page form { height:100%; }
 .table-tab { font-size:12.5px; padding:5px 14px; border-radius:999px; border:none; background:transparent; color:#3b352e; font-weight:650; text-decoration:none; transition:background .12s, color .12s; }
 .table-tab:hover { background:rgba(0,0,0,.04); }
 .table-tab.active { background:var(--ink); color:white; }
-.table-switcher-adv summary { cursor:pointer; list-style:none; font-size:12px; color:var(--muted); padding:2px 6px; user-select:none; }
-.table-switcher-adv summary::-webkit-details-marker { display:none; }
-.table-switcher-adv summary:hover { color:var(--ink); }
-.table-switcher-adv[open] summary { color:var(--ink); font-weight:650; }
-.table-switcher-adv-row { margin-top:6px; }
+/* Vertical divider between core and advanced pill groups in the
+   single-row table switcher. Stays in the flex flow so it wraps with
+   the pills on narrow viewports. */
+.table-switcher-divider { display:inline-block; width:1px; align-self:stretch; margin:2px 4px; background:var(--line); }
 
 /* generic table view (any DB table) */
 .generic-table { table-layout:fixed; width:100%; }
@@ -2101,20 +2100,14 @@ def table_switcher_html(active: str, qs: dict[str, list[str]]) -> str:
         _pill(tid, cfg["label_key"]) for tid, cfg in TABLE_VIEWS.items()
         if cfg.get("group") == "advanced"
     )
-    in_advanced = TABLE_VIEWS.get(active, {}).get("group") == "advanced"
-
+    # Core + Advanced live in one pill row with a vertical divider between
+    # them, so the toolbar reads as a single segmented control. The pill
+    # group wraps to multiple lines if the viewport is narrow.
+    divider = '<span class="table-switcher-divider" aria-hidden="true"></span>' if advanced_pills else ""
     return (
         '<section class="table-switcher-wrap">'
-        f'<div class="table-switcher">{core_pills}</div>'
-        + (
-            '<details class="table-switcher-adv"'
-            + (' open' if in_advanced else '') + '>'
-            f'<summary>{esc(T("db_group_advanced"))} ▾</summary>'
-            f'<div class="table-switcher table-switcher-adv-row">{advanced_pills}</div>'
-            '</details>'
-            if advanced_pills else ""
-        )
-        + '</section>'
+        f'<div class="table-switcher">{core_pills}{divider}{advanced_pills}</div>'
+        '</section>'
     )
 
 
