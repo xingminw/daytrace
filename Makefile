@@ -30,8 +30,11 @@ export-daily:          ## One-off: render + upload yesterday's report
 export-weekly:         ## One-off: render + upload + email last week's report
 	$(PY) scripts/export_report.py --upload-feishu --email
 
-sync-tasks:            ## Pull Feishu work_items + rebuild event links
+sync-tasks:            ## Pull Feishu work_items + rebuild event links + translate titles
 	$(PY) scripts/run_daily.py work-items-sync
+
+translate-tasks:       ## (Re-)translate work_items.title → title_en via DeepSeek
+	$(PY) scripts/translate_work_items.py
 
 deploy:                ## rsync code to every remote in config/remotes.yaml
 	$(PY) scripts/run_daily.py deploy

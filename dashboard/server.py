@@ -181,6 +181,7 @@ _STRINGS: dict[str, dict[str, str]] = {
 
     # Section headers
     "jump_to_day":  {"zh": "跳到每日报告", "en": "Jump to a day"},
+    "n_days":       {"zh": "{n} 天",        "en": "{n} days"},
 
     # Misc UI bits
     "no_title":        {"zh": "(无标题)", "en": "(no title)"},
@@ -191,6 +192,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     "events_table_t":  {"zh": "原始事件",  "en": "Events"},
     "open_db_t":       {"zh": "在新标签页打开本日事件", "en": "Open today's events in a new tab"},
     "open_db_short":   {"zh": "打开数据库 ↗", "en": "Open database ↗"},
+    "donut_sorted_by": {"zh": "按 {dim} 排序 · 共 {n} 项", "en": "Sorted by {dim} · {n} items"},
+    "swim_help":       {"zh": "横轴 24h (shifted 边界 {hh}:00 起),hover 任意竖线看事件详情。上方筛选 pill 同时控制下面的热力图。",
+                         "en": "24h x-axis (shifted boundary at {hh}:00). Hover any tick for event detail; the top filter pills also control the heatmap below."},
     "weekly_dim_intro":{"zh": "维度 · {label}", "en": "Dim · {label}"},
     "weekly_filter":   {"zh": "筛选",      "en": "Filter"},
     "tag_timeline":    {"zh": "Timeline",  "en": "Timeline"},
@@ -204,6 +208,36 @@ import contextvars as _contextvars
 _CURRENT_LANG: _contextvars.ContextVar[str] = _contextvars.ContextVar(
     "daytrace_lang", default="zh"
 )
+
+
+def _load_strings_from_yaml() -> None:
+    """Merge `config/strings.yaml` over the in-code `_STRINGS` defaults.
+
+    Lets users override any UI label without forking the code, and lets
+    them add languages beyond zh/en by extending the YAML. Silently
+    no-ops when the file is missing or PyYAML isn't installed."""
+    try:
+        import yaml as _y
+        from pathlib import Path as _P
+        path = _P(__file__).resolve().parents[1] / "config" / "strings.yaml"
+        if not path.exists():
+            return
+        data = _y.safe_load(path.read_text(encoding="utf-8")) or {}
+        for k, langs in data.items():
+            if not isinstance(langs, dict):
+                continue
+            existing = _STRINGS.setdefault(k, {})
+            for lang_code, value in langs.items():
+                if isinstance(value, str):
+                    existing[lang_code] = value
+    except Exception as e:
+        print(f"[i18n] failed to load config/strings.yaml: {e}")
+
+
+# Merge config/strings.yaml over the hard-coded defaults at import time.
+# Users can extend or override any label without touching the source file
+# (and add new languages by adding extra keys per entry).
+_load_strings_from_yaml()
 
 
 def T(key: str, lang: str | None = None, **fmt) -> str:
@@ -1058,13 +1092,11 @@ def calendar_control(action: str, selected: str | None, dates: list[str], hidden
     if allow_all:
         params = {k: v for k, v in hidden.items() if v and k != "date"}
         all_link = f'<a class="cal-all" href="{esc(action)}{("?" + esc(urlencode(params))) if params else ""}">All dates</a>'
-    # Show "2026-05-15 周五" so the user knows what day of week without
-    # squinting at the calendar. Chinese single-char abbreviations.
-    _WEEKDAYS = ["一", "二", "三", "四", "五", "六", "日"]
+    # Show "2026-05-15 Fri / 周五" so the user knows the day of week
+    # without squinting at the calendar.
     if selected:
         try:
-            _wd = _WEEKDAYS[dt_date.fromisoformat(selected).weekday()]
-            label = f"{selected} 周{_wd}"
+            label = f"{selected} {_short_weekday(selected)}"
         except ValueError:
             label = selected
     else:
@@ -1400,7 +1432,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
             next_link = f'<a class="hdr-nav-btn" title="后一天 {esc(next_day)}" href="{esc(href)}">→</a>'
     open_db_link = (
         f'<a class="hdr-open-db" title="在新标签页打开本日事件" target="_blank" rel="noopener" '
-        f'href="/events?start_from={esc(date)}&start_to={esc(date)}">打开数据库 ↗</a>'
+        f'href="/events?start_from={esc(date)}&start_to={esc(date)}">{esc(T("open_db_short"))}</a>'
         if date else ""
     )
 
@@ -2991,7 +3023,7 @@ def _weekly_header_controls(
     )
     open_db_html = (
         f'<a class="hdr-open-db" title="在新标签页打开本周事件" target="_blank" rel="noopener" '
-        f'href="/events?start_from={esc(monday)}&start_to={esc(sunday)}">打开数据库 ↗</a>'
+        f'href="/events?start_from={esc(monday)}&start_to={esc(sunday)}">{esc(T("open_db_short"))}</a>'
     )
     # Week picker: feed daily-style calendar with Monday as the selected date.
     # When user clicks any day, route /weekly?date= maps it to that day's week.
@@ -3207,8 +3239,7 @@ def _weekly_swimlane_card(
         tooltip_html +
         js_html +
         '<div class="muted small" style="margin-top:6px;">'
-        f'横轴 24h (shifted 边界 {boundary_hour:02d}:00 起)，hover 任意竖线看事件详情。'
-        '上方筛选 pill 同时控制下面的热力图。'
+        f'{esc(T("swim_help", hh=f"{boundary_hour:02d}"))}'
         '</div>'
         '</div>'
     )
@@ -3484,7 +3515,7 @@ def _distribution_view_body(
         f'<div class="cc-donut-wrap" style="flex:none;">{donut_html}</div>'
         '<div>'
         f'<div class="muted small" style="margin-bottom:4px;">'
-        f'按{esc(dim_label)}排序 · 共 {len(bar_items)} 项'
+        f'{esc(T("donut_sorted_by", dim=dim_label, n=len(bar_items)))}'
         '</div>'
         + "".join(rows_html) +
         '</div>'
@@ -4198,6 +4229,19 @@ _STATUS_COLOR = {
 }
 
 
+def _localized_task_title(wi: dict | None) -> str:
+    """Pick title_en when current lang is en AND the row has it; otherwise
+    fall back to the original Chinese title. Run scripts/translate_work_items.py
+    to bulk-populate title_en via DeepSeek."""
+    if not wi:
+        return ""
+    if _CURRENT_LANG.get() == "en":
+        en = (wi.get("title_en") or "").strip()
+        if en:
+            return en
+    return wi.get("title") or ""
+
+
 def _localized_status(status: str | None) -> str:
     """Translate Feishu task status word for display.
     The raw values stay in zh in the SQLite mirror; only display text flips."""
@@ -4276,7 +4320,7 @@ def _tasks_panel_one(
         )
         title_html = (
             '<div style="line-height:1.25;">'
-            f'<span style="font-weight:600; color:#3b352e;">{esc(wi.get("title") or "")}</span>'
+            f'<span style="font-weight:600; color:#3b352e;">{esc(_localized_task_title(dict(wi)))}</span>'
             f'{link_html}'
         )
         if is_stale:
@@ -4369,34 +4413,34 @@ def _tasks_panel_one(
         )
         thead_html = (
             '<tr>'
-            + thead_cell("P",  "priority")
-            + thead_cell("状态","status")
-            + thead_cell("任务","title")
-            + thead_cell("时长","hours", align="right", default_dir="desc")
-            + thead_cell("事件","events", align="right", default_dir="desc", cls="col-events")
-            + thead_cell("最近活动","last", default_dir="desc", cls="col-last")
-            + thead_cell("截止","due")
+            + thead_cell(T("tasks_col_p"),      "priority")
+            + thead_cell(T("tasks_col_status"), "status")
+            + thead_cell(T("tasks_col_title"),  "title")
+            + thead_cell(T("tasks_col_hours"),  "hours", align="right", default_dir="desc")
+            + thead_cell(T("tasks_col_events"), "events", align="right", default_dir="desc", cls="col-events")
+            + thead_cell(T("tasks_col_last"),   "last", default_dir="desc", cls="col-last")
+            + thead_cell(T("tasks_col_due"),    "due")
             + '</tr>'
         )
     else:
         colgroup = (
             '<colgroup>'
-            '<col data-col="status"   style="width:64px">'                       # 状态
-            '<col data-col="title">'                                              # 题目 (auto in compact, capped in full)
-            '<col data-col="hours"    style="width:54px">'                       # 时长
-            '<col data-col="events"   class="col-events" style="width:48px">'    # 事件
-            '<col data-col="last"     class="col-last"   style="width:92px">'    # 最近活动
-            '<col data-col="due"      style="width:104px">'                      # 截止
+            '<col data-col="status"   style="width:64px">'                       # status
+            '<col data-col="title">'                                              # title (auto in compact, capped in full)
+            '<col data-col="hours"    style="width:54px">'                       # hours
+            '<col data-col="events"   class="col-events" style="width:48px">'    # events
+            '<col data-col="last"     class="col-last"   style="width:92px">'    # last activity
+            '<col data-col="due"      style="width:104px">'                      # due
             '</colgroup>'
         )
         thead_html = (
             '<tr>'
-            + thead_cell("状态","status")
-            + thead_cell("题目","title")
-            + thead_cell("时长","hours", align="right", default_dir="desc")
-            + thead_cell("事件","events", align="right", default_dir="desc", cls="col-events")
-            + thead_cell("最近活动","last", default_dir="desc", cls="col-last")
-            + thead_cell("截止","due")
+            + thead_cell(T("tasks_col_status"), "status")
+            + thead_cell(T("tasks_col_topic"),  "title")
+            + thead_cell(T("tasks_col_hours"),  "hours", align="right", default_dir="desc")
+            + thead_cell(T("tasks_col_events"), "events", align="right", default_dir="desc", cls="col-events")
+            + thead_cell(T("tasks_col_last"),   "last", default_dir="desc", cls="col-last")
+            + thead_cell(T("tasks_col_due"),    "due")
             + '</tr>'
         )
 
@@ -4534,7 +4578,7 @@ def _alignment_audit_card(con, days: list[str]) -> str:
     from datetime import date as _date_mod, timedelta as _td_mod
     _cutoff = (_date_mod.today() - _td_mod(days=7)).isoformat()
     wi_rows_all = con.execute(
-        "SELECT record_id, title, table_key, status, due_date FROM work_items "
+        "SELECT record_id, title, title_en, table_key, status, due_date FROM work_items "
         "ORDER BY CASE table_key WHEN 'tasks' THEN 0 ELSE 1 END, title"
     ).fetchall()
     wi_rows = []
@@ -4590,7 +4634,7 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         parts = [f'<option value="">{esc(T("audit_skip"))}</option>']
         for w in wi_rows:
             rid = w["record_id"]
-            ttl = w["title"] or ""
+            ttl = _localized_task_title(dict(w))
             tk = w["table_key"] or "tasks"
             sel = ' selected' if rid == selected_rid else ''
             parts.append(
@@ -4609,7 +4653,7 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         last_at = r["last_at"] or ""
         active_days = r["active_days"] or 0
         last_pretty = _format_time_ago(last_at) if last_at else "—"
-        days_label = f"{active_days} 天" if active_days else "—"
+        days_label = T("n_days", n=active_days) if active_days else "—"
         # Prefer existing alias > fuzzy suggestion > nothing
         preselect = existing_aliases.get(pg) or _suggest(pg)
         rows_html.append(

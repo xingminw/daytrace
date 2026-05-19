@@ -1,0 +1,384 @@
+nav_daily:
+  zh: 日报
+  en: Daily
+nav_weekly:
+  zh: 周报
+  en: Weekly
+nav_open_db:
+  zh: 数据库
+  en: Database
+nav_open_db_t:
+  zh: 在新标签页打开数据库
+  en: Open database in a new tab
+daily_title:
+  zh: 每日 Report
+  en: Daily Report
+weekly_title:
+  zh: 周报
+  en: Weekly
+no_date:
+  zh: 无日期
+  en: no date
+lang_switch_t:
+  zh: 切到英文
+  en: Switch to Chinese
+wd_1:
+  zh: 周一
+  en: Mon
+wd_2:
+  zh: 周二
+  en: Tue
+wd_3:
+  zh: 周三
+  en: Wed
+wd_4:
+  zh: 周四
+  en: Thu
+wd_5:
+  zh: 周五
+  en: Fri
+wd_6:
+  zh: 周六
+  en: Sat
+wd_7:
+  zh: 周日
+  en: Sun
+stat_events:
+  zh: 事件总数
+  en: Events
+stat_active:
+  zh: 活跃总时长
+  en: Active hours
+stat_longest_focus:
+  zh: 最长专注
+  en: Longest focus
+stat_ai_cost:
+  zh: AI 花费
+  en: AI cost
+stat_active_days:
+  zh: 活跃天数
+  en: Active days
+stat_span:
+  zh: 时间跨度
+  en: Time span
+stat_today_total:
+  zh: 当天累计
+  en: today total
+stat_week_total:
+  zh: 本周累计
+  en: this week
+stat_full_week:
+  zh: 全周累计
+  en: weekly total
+stat_estimated:
+  zh: 估算
+  en: estimated
+stat_full_attend:
+  zh: 满勤
+  en: every day
+stat_blank_days:
+  zh: 空白
+  en: blank
+stat_no_ai:
+  zh: (未运行 AI)
+  en: (AI not run)
+stat_switches:
+  zh: 切换 {n} 次
+  en: '{n} switches'
+insights_title:
+  zh: Insights
+  en: Insights
+insights_hint:
+  zh: 悬停标题看每列在说什么
+  en: Hover a column header to see what it covers
+insights_progress:
+  zh: 关键任务进展
+  en: Task progress
+insights_pattern:
+  zh: 时间安排回顾
+  en: Time pattern
+insights_followup:
+  zh: 任务跟进提醒
+  en: Follow-ups
+insights_none:
+  zh: (无)
+  en: (none)
+tip_progress:
+  zh: 今天/本周在飞书任务上有哪些具体推进 —— 完成的、改的、提的代码。只看带任务标签的事件,零散杂活不放这里。
+  en: Concrete progress on Feishu tasks — what was finished, changed, or shipped. Only events linked to a task; ad-hoc work is excluded.
+tip_pattern:
+  zh: 你今天的作息和最近 7 天平均比起来怎么样 —— 几点开工、几点收工、有没有大块专注、是不是切换太频繁。基于具体数字,不会写空话。
+  en: How today's schedule compares to your 7-day baseline — start/end times, long focus blocks, context switching. Grounded in numbers, no fluff.
+tip_followup:
+  zh: 明天/下周该盯哪些任务 —— deadline 临近的、好几天没动的、还有未提交改动的。
+  en: Tasks to watch tomorrow/next week — closing deadlines, idle for days, or with uncommitted changes.
+trend_label:
+  zh: 变化趋势
+  en: Trend
+trend_tip:
+  zh: 和昨天/上周比,你的工作重心和节奏整体往哪儿走。
+  en: Where your focus and pace are heading compared to yesterday / last week.
+timeline_title:
+  zh: 每日时间轴
+  en: Daily timeline
+timeline_tag:
+  zh: Daily
+  en: Daily
+timeline_hint:
+  zh: 本周 7 天叙事并列展示;点击星期头可以跳到当日完整 dashboard
+  en: All 7 days side by side; click a weekday header to open that day's full dashboard
+timeline_no_data:
+  zh: (无数据)
+  en: (no data)
+tasks_all:
+  zh: 全部
+  en: All
+tasks_table_t:
+  zh: 任务
+  en: Tasks
+tasks_table_r:
+  zh: 审稿
+  en: Reviews
+tasks_col_p:
+  zh: P
+  en: P
+tasks_col_status:
+  zh: 状态
+  en: Status
+tasks_col_title:
+  zh: 任务
+  en: Task
+tasks_col_topic:
+  zh: 题目
+  en: Title
+tasks_col_hours:
+  zh: 时长
+  en: Hours
+tasks_col_events:
+  zh: 事件
+  en: Events
+tasks_col_last:
+  zh: 最近活动
+  en: Last activity
+tasks_col_due:
+  zh: 截止
+  en: Due
+tasks_show_done:
+  zh: 显示已完成
+  en: Show completed
+status_doing:
+  zh: 进行中
+  en: In progress
+status_todo:
+  zh: 待办
+  en: To do
+status_done:
+  zh: 完成
+  en: Done
+audit_title:
+  zh: 未匹配项目审计
+  en: Unlinked project audit
+audit_tag:
+  zh: Audit
+  en: Audit
+audit_window:
+  zh: 窗口
+  en: window
+audit_summary:
+  zh: '{n} 个项目 / 共 {ev} 条事件未对应任务'
+  en: '{n} projects / {ev} events with no task link'
+audit_pg:
+  zh: project_guess
+  en: project_guess
+audit_events:
+  zh: 事件
+  en: Events
+audit_days:
+  zh: 活跃天数
+  en: Active days
+audit_last:
+  zh: 最近活动
+  en: Last activity
+audit_match:
+  zh: 对应任务
+  en: Map to task
+audit_skip:
+  zh: — 跳过 / 无对应 —
+  en: — Skip / no match —
+audit_save_hint:
+  zh: 保存后会写入 config/work_item_aliases.yaml 并立刻重建链接(历史报告已缓存的不变;下次 catchup / 刷新时按新规则统计)
+  en: Saved picks go to config/work_item_aliases.yaml and links rebuild immediately (cached historical reports unchanged; next catchup / refresh applies new rules)
+audit_save_btn:
+  zh: 保存并重建链接
+  en: Save & rebuild links
+report_tag:
+  zh: Report
+  en: Report
+no_data_lede:
+  zh: 这一天没有可分析事件。
+  en: No events to analyze for this day.
+no_data_hint:
+  zh: 可以切换到有数据的日期,或先运行 collector/import。
+  en: Switch to a day with data, or run a collector/import first.
+no_ai_overview:
+  zh: (AI 速读未生成)
+  en: (AI overview not generated)
+ai_unavailable:
+  zh: (DEEPSEEK_API_KEY 未设置, 跳过 AI 速读)
+  en: (DEEPSEEK_API_KEY not set; AI overview skipped)
+ai_failed:
+  zh: AI 调用失败
+  en: AI call failed
+time_ago_now:
+  zh: 刚刚
+  en: just now
+time_ago_min:
+  zh: '{n} 分钟前'
+  en: '{n} min ago'
+time_ago_hr:
+  zh: '{n} 小时前'
+  en: '{n}h ago'
+time_ago_day:
+  zh: '{n} 天前'
+  en: '{n}d ago'
+untouched:
+  zh: 未触碰
+  en: untouched
+dim_source:
+  zh: 来源
+  en: Source
+dim_project:
+  zh: 项目
+  en: Project
+dim_task:
+  zh: 任务
+  en: Task
+dim_device:
+  zh: 设备
+  en: Device
+dim_activity:
+  zh: 活动
+  en: Activity
+dim_tooltip:
+  zh: 按哪个维度堆叠/上色
+  en: Which dimension to stack / color by
+dim_label:
+  zh: 维度
+  en: Dim
+unit_count:
+  zh: 条目
+  en: Events
+unit_chars:
+  zh: 字数
+  en: Chars
+unit_hours:
+  zh: 小时
+  en: Hours
+unit_label:
+  zh: 单位
+  en: Unit
+chart_view_hist:
+  zh: 直方图
+  en: Histogram
+chart_view_dist:
+  zh: 分布
+  en: Distribution
+chart_panel_tag:
+  zh: Chart
+  en: Chart
+chart_per_hour:
+  zh: 每小时
+  en: Per hour
+chart_per_day:
+  zh: 每天
+  en: Per day
+tasks_panel_t:
+  zh: 工作项 · 任务
+  en: Work items · Tasks
+tasks_panel_r:
+  zh: 工作项 · 审稿
+  en: Work items · Reviews
+tasks_n_rows:
+  zh: '{n} 行'
+  en: '{n} rows'
+tasks_p_zero:
+  zh: '{n} 个 P0/P1 本期零活动'
+  en: '{n} P0/P1 with zero activity'
+tasks_p_stale_tip:
+  zh: 高优先级任务但本期零活动
+  en: High-priority task with no activity this period
+tasks_filter:
+  zh: 筛选
+  en: Filter
+tasks_select_all:
+  zh: 全部
+  en: All
+view_swim:
+  zh: 泳道
+  en: Swimlane
+view_heat:
+  zh: 热力图
+  en: Heatmap
+due_overdue:
+  zh: 已过期 {n}d
+  en: '{n}d overdue'
+due_urgent:
+  zh: 急 {n}d
+  en: due in {n}d
+due_tight:
+  zh: 紧 {n}d
+  en: due in {n}d
+jump_to_day:
+  zh: 跳到每日报告
+  en: Jump to a day
+n_days:
+  zh: '{n} 天'
+  en: '{n} days'
+no_title:
+  zh: (无标题)
+  en: (no title)
+filter_all:
+  zh: 全部
+  en: All
+task_prefix:
+  zh: 任务
+  en: Task
+review_prefix:
+  zh: 审稿
+  en: Review
+open_full_day:
+  zh: → 当日完整 dashboard
+  en: → Full day dashboard
+events_table_t:
+  zh: 原始事件
+  en: Events
+open_db_t:
+  zh: 在新标签页打开本日事件
+  en: Open today's events in a new tab
+open_db_short:
+  zh: 打开数据库 ↗
+  en: Open database ↗
+donut_sorted_by:
+  zh: 按 {dim} 排序 · 共 {n} 项
+  en: Sorted by {dim} · {n} items
+swim_help:
+  zh: 横轴 24h (shifted 边界 {hh}:00 起),hover 任意竖线看事件详情。上方筛选 pill 同时控制下面的热力图。
+  en: 24h x-axis (shifted boundary at {hh}:00). Hover any tick for event detail; the top filter pills also control the heatmap below.
+weekly_dim_intro:
+  zh: 维度 · {label}
+  en: Dim · {label}
+weekly_filter:
+  zh: 筛选
+  en: Filter
+tag_timeline:
+  zh: Timeline
+  en: Timeline
+page_timeline:
+  zh: 时间线
+  en: Timeline
+page_chart:
+  zh: Chart
+  en: Chart
+tasks_show_total:
+  zh: '{n} 条'
+  en: '{n}'

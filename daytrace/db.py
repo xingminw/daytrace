@@ -7,7 +7,7 @@ from typing import Iterable, Any
 
 from .schema import TraceEvent
 
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 DEFAULT_DEVICE_ID = "Mac"
 DEFAULT_LOCATION_ID = "unknown"
 DEFAULT_COLLECTOR_ID = "hub-local"
@@ -332,6 +332,10 @@ def init_db(con: sqlite3.Connection) -> None:
     _ensure_column(con, "work_items", "table_key",
                    "table_key TEXT NOT NULL DEFAULT 'tasks'")
     _ensure_column(con, "work_items", "subtitle", "subtitle TEXT")
+    # v13: bilingual task titles. Populated lazily by
+    # scripts/translate_work_items.py (DeepSeek). Empty by default;
+    # renderers fall back to `title` when missing.
+    _ensure_column(con, "work_items", "title_en", "title_en TEXT")
     con.execute("CREATE INDEX IF NOT EXISTS idx_work_items_table_key ON work_items(table_key)")
     seed_single_machine_defaults(con)
     con.execute(

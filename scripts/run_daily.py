@@ -391,6 +391,20 @@ def cmd_work_items_sync(args: argparse.Namespace) -> int:
         f"inserted={link_stats['links_inserted']} by={link_stats['by_type']}",
         flush=True,
     )
+
+    # Translate any newly-added or still-untranslated task titles. Idempotent;
+    # only touches rows where title_en is NULL/empty.
+    try:
+        import subprocess as _sp
+        r = _sp.run(
+            ["python3", "scripts/translate_work_items.py", "--db", args.db],
+            capture_output=True, text=True, cwd=REPO_ROOT,
+        )
+        out_tail = (r.stdout or "").strip().splitlines()[-3:]
+        for line in out_tail:
+            print(f"  translate: {line}", flush=True)
+    except Exception as e:
+        print(f"  translate: skipped ({e})", flush=True)
     return 0
 
 
