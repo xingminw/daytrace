@@ -201,6 +201,48 @@ _STRINGS: dict[str, dict[str, str]] = {
     "review_prefix":   {"zh": "审稿",      "en": "Review"},
     "open_full_day":   {"zh": "→ 当日完整 dashboard", "en": "→ Full day dashboard"},
     "events_table_t":  {"zh": "原始事件",  "en": "Events"},
+    # ── /events database page ─────────────────────────────────────────────
+    "db_tab_events":     {"zh": "原始事件",       "en": "Events"},
+    "db_tab_day":        {"zh": "日报告",         "en": "Day report"},
+    "db_tab_day_project":{"zh": "逐项日报告",     "en": "Per-item day report"},
+    "db_col_time":       {"zh": "时间",           "en": "Time"},
+    "db_col_source":     {"zh": "来源",           "en": "Source"},
+    "db_col_activity":   {"zh": "活动",           "en": "Activity"},
+    "db_col_location":   {"zh": "位置",           "en": "Location"},
+    "db_col_project":    {"zh": "项目",           "en": "Project"},
+    "db_col_title":      {"zh": "标题 / 内容",    "en": "Title / Content"},
+    "db_col_rows":       {"zh": "行数",           "en": "Rows"},
+    "db_search_ph":      {"zh": "搜标题或内容",   "en": "Search title/content"},
+    "db_no_events":      {"zh": "暂无事件",       "en": "No events"},
+    "db_clear":          {"zh": "✕ 清空筛选",     "en": "✕ Clear filters"},
+    "db_clear_t":        {"zh": "清空所有筛选条件", "en": "Clear all filter conditions"},
+    "db_clear_idle_t":   {"zh": "当前未设置任何筛选","en": "No filters set"},
+    "db_filter_all":     {"zh": "全部",           "en": "All"},
+    "db_date_start":     {"zh": "开始",           "en": "Start"},
+    "db_date_end":       {"zh": "结束",           "en": "End"},
+    "db_date_all":       {"zh": "全部日期",       "en": "All dates"},
+    "db_date_same":      {"zh": "同一天",         "en": "Same day"},
+    "db_date_no_end":    {"zh": "无终止",         "en": "No end"},
+    "db_view_raw":       {"zh": "看原始事件 →",   "en": "View raw events →"},
+    "db_empty_dp":       {"zh": "暂无 day_project_report 行", "en": "No per-item rows yet"},
+    "db_empty_day":      {"zh": "暂无 day_report 行","en": "No day-report rows yet"},
+    "db_reset_filters":  {"zh": "清空筛选",       "en": "Reset filters"},
+    # /events?table=day_project page (rebranded "逐项日报告")
+    "dp_label_date":     {"zh": "日期",     "en": "Date"},
+    "dp_label_project":  {"zh": "项目",     "en": "Project"},
+    "dp_label_status":   {"zh": "状态",     "en": "Status"},
+    "dp_label_order":    {"zh": "排序",     "en": "Sort"},
+    "dp_th_date":        {"zh": "日期",     "en": "Date"},
+    "dp_th_project":     {"zh": "项目",     "en": "Project"},
+    "dp_th_events":      {"zh": "事件",     "en": "Events"},
+    "dp_th_active":      {"zh": "活跃时长", "en": "Active"},
+    "dp_th_share":       {"zh": "占比",     "en": "Share"},
+    "dp_th_status":      {"zh": "状态",     "en": "Status"},
+    "dp_th_ai":          {"zh": "AI 概要 · 做了什么 · 下一步", "en": "AI summary · what was done · next"},
+    "dp_th_cont":        {"zh": "对比上次", "en": "vs prev"},
+    "dp_th_titles":      {"zh": "高频标题", "en": "Top titles"},
+    "dp_th_meta":        {"zh": "时段 · 来源", "en": "Span · sources"},
+    "dp_rowcount":       {"zh": "{n} 行",   "en": "{n} rows"},
     "open_db_t":       {"zh": "在新标签页打开本日事件", "en": "Open today's events in a new tab"},
     "open_db_short":   {"zh": "打开数据库 ↗", "en": "Open database ↗"},
     "donut_sorted_by": {"zh": "按 {dim} 排序 · 共 {n} 项", "en": "Sorted by {dim} · {n} items"},
@@ -1810,7 +1852,7 @@ def events_table(events, filters: dict[str, str | None], options: dict[str, Any]
 <tr class="{row_class}">
   <td><span class="time" title="{esc(e['start'])}">{esc(format_event_time(e['start']))}</span></td>
   <td class="db-cell"><strong>{esc(display_source(e['source']))}</strong></td>
-  <td class="db-cell">{esc(e.get('activity') or '未分类')}</td>
+  <td class="db-cell">{esc(e.get('activity') or ('Unclassified' if _CURRENT_LANG.get()=='en' else '未分类'))}</td>
   <td class="db-cell">{esc(e['location_id'])}</td>
   <td class="db-cell">{esc(e['project'])}</td>
   <td>{display_title_content(e.get('title'), e.get('summary'))}</td>
@@ -1845,34 +1887,43 @@ def events_table(events, filters: dict[str, str | None], options: dict[str, Any]
         "start_from": format_date_input(filters.get("start_from")),
         "start_to": format_date_input(filters.get("start_to")),
     }
-    time_filter = f"""<div class=\"time-range\">{date_filter_calendar_control('/events', 'start_from', filters.get('start_from'), date_counts, date_hidden, 'Start', 'All dates')}{date_filter_calendar_control('/events', 'start_to', filters.get('start_to') or filters.get('start_from'), date_counts, date_hidden, 'End', 'Same day' if filters.get('start_from') else 'No end', min_date=filters.get('start_from'), picker_class='end-date')}</div>"""
+    time_filter = (
+        f'<div class="time-range">'
+        f'{date_filter_calendar_control("/events", "start_from", filters.get("start_from"), date_counts, date_hidden, T("db_date_start"), T("db_date_all"))}'
+        f'{date_filter_calendar_control("/events", "start_to", filters.get("start_to") or filters.get("start_from"), date_counts, date_hidden, T("db_date_end"), T("db_date_same") if filters.get("start_from") else T("db_date_no_end"), min_date=filters.get("start_from"), picker_class="end-date")}'
+        f'</div>'
+    )
     has_active_filter = any(
         filters.get(k)
         for k in ("source", "activity", "location_id", "project", "search", "start_from", "start_to")
     )
     clear_link = (
-        '<a class="clear-filters" href="/events" title="清空所有筛选条件">✕ 清空筛选</a>'
+        f'<a class="clear-filters" href="/events" title="{esc(T("db_clear_t"))}">{esc(T("db_clear"))}</a>'
         if has_active_filter
-        else '<span class="clear-filters muted" title="当前未设置任何筛选">✕ 清空筛选</span>'
+        else f'<span class="clear-filters muted" title="{esc(T("db_clear_idle_t"))}">{esc(T("db_clear"))}</span>'
     )
     return f"""
 <form method="get" action="/events">
   {hidden_order}
   <div class="table-wrap"><table><colgroup><col class="col-time"><col class="col-source"><col class="col-activity"><col class="col-location"><col class="col-project"><col class="col-title"></colgroup>
   <thead><tr>
-    <th><div class="th-title"><a class="sort-link" href="{esc(sort_href)}">Time {sort_arrow}</a><span class="clear-filters-wrap">{clear_link}</span></div>{time_filter}</th>
-    <th><div class="th-title"><span>Source</span></div>{select_control('source', options['source'], filters.get('source'))}</th>
-    <th><div class="th-title"><span>Activity</span></div>{select_control('activity', options['activity'], filters.get('activity'))}</th>
-    <th><div class="th-title"><span>Location</span></div>{select_control('location_id', options['location_id'], filters.get('location_id'))}</th>
-    <th><div class="th-title"><span>Project</span></div>{select_control('project', options['project'], filters.get('project'))}</th>
-    <th><div class="th-title"><span>Title / Content</span><label class="header-filter"><span>Rows</span>{event_limit_control(filters.get('limit'))}</label></div><input name="search" value="{esc(filters.get('search') or '')}" placeholder="Search title/content"></th>
-  </tr></thead><tbody>{''.join(rows) or '<tr><td colspan="6">暂无事件</td></tr>'}</tbody></table></div>
+    <th><div class="th-title"><a class="sort-link" href="{esc(sort_href)}">{esc(T('db_col_time'))} {sort_arrow}</a><span class="clear-filters-wrap">{clear_link}</span></div>{time_filter}</th>
+    <th><div class="th-title"><span>{esc(T('db_col_source'))}</span></div>{select_control('source', options['source'], filters.get('source'))}</th>
+    <th><div class="th-title"><span>{esc(T('db_col_activity'))}</span></div>{select_control('activity', options['activity'], filters.get('activity'))}</th>
+    <th><div class="th-title"><span>{esc(T('db_col_location'))}</span></div>{select_control('location_id', options['location_id'], filters.get('location_id'))}</th>
+    <th><div class="th-title"><span>{esc(T('db_col_project'))}</span></div>{select_control('project', options['project'], filters.get('project'))}</th>
+    <th><div class="th-title"><span>{esc(T('db_col_title'))}</span><label class="header-filter"><span>{esc(T('db_col_rows'))}</span>{event_limit_control(filters.get('limit'))}</label></div><input name="search" value="{esc(filters.get('search') or '')}" placeholder="{esc(T('db_search_ph'))}"></th>
+  </tr></thead><tbody>{''.join(rows) or f'<tr><td colspan="6">{esc(T("db_no_events"))}</td></tr>'}</tbody></table></div>
 </form>"""
 
-TABLE_TABS = [
-    ("events",      "原始事件"),
-    ("day",         "日报告 (day_report)"),
-    ("day_project", "项目日报告 (day_project_report)"),
+# Dropped the technical "(day_report)" / "(day_project_report)" suffixes
+# in the chip labels — the underlying SQLite table names are an
+# implementation detail nobody outside the codebase needs to know. Labels
+# are localized via T() at render time.
+TABLE_TABS: list[tuple[str, str]] = [
+    ("events",      "db_tab_events"),
+    ("day",         "db_tab_day"),
+    ("day_project", "db_tab_day_project"),
 ]
 
 
@@ -1884,13 +1935,13 @@ def table_switcher_html(active: str, qs: dict[str, list[str]]) -> str:
     project, search, etc.) are intentionally dropped — they don't translate."""
     date = (qs.get("date", [None])[0] or "")
     pills = []
-    for table_id, label in TABLE_TABS:
+    for table_id, label_key in TABLE_TABS:
         params = {"table": table_id}
         if date:
             params["date"] = date
         href = "/events" + ("?" + urlencode(params) if params else "")
         cls = "table-tab" + (" active" if table_id == active else "")
-        pills.append(f'<a class="{cls}" href="{esc(href)}">{esc(label)}</a>')
+        pills.append(f'<a class="{cls}" href="{esc(href)}">{esc(T(label_key))}</a>')
     return f'<section class="table-switcher">{"".join(pills)}</section>'
 
 
@@ -2392,7 +2443,7 @@ def _render_day_card(date_val: str, header: dict, channels: dict[str, str | None
     <div class="dr-stats">{_render_stats_strip(header, channels)}</div>
     <div class="dr-actions">
       <a href="/today?date={esc(date_val)}">在报告页打开 →</a>
-      <a href="/events?start_from={esc(date_val)}&start_to={esc(date_val)}">看原始事件 →</a>
+      <a href="/events?start_from={esc(date_val)}&start_to={esc(date_val)}">{esc(T("db_view_raw"))}</a>
     </div>
   </div>
   {_render_overview_section(overview)}
@@ -2441,7 +2492,7 @@ def day_report_table_page(db_path: Path, qs: dict[str, list[str]]) -> str:
         total_tokens += day_tokens
         cards.append(_render_day_card(date_val, dict(row), channels))
 
-    cards_html = "\n".join(cards) or '<div class="card label">暂无 day_report 行</div>'
+    cards_html = "\n".join(cards) or f'<div class="card label">{esc(T("db_empty_day"))}</div>'
     # Calendar-style date picker (same widget as the home page header).
     all_dates = [
         r["date"] for r in
@@ -2464,7 +2515,7 @@ def day_report_table_page(db_path: Path, qs: dict[str, list[str]]) -> str:
         + f'<section class="day-report-cards">{cards_html}</section>'
     )
     return layout(
-        "DayTrace · 日报告",
+        f"DayTrace · {T('db_tab_day')}",
         f"{len(rows)} 天 · ${total_cost:.4f}",
         "events", content,
         body_class="day-report-page",
@@ -2645,7 +2696,7 @@ def day_project_report_table_page(db_path: Path, qs: dict[str, list[str]]) -> st
             "status": selected_status,
             "order": order_key if order_key != "date_desc" else "",
         },
-        allow_all=True, label_text="日期",
+        allow_all=True, label_text=T("dp_label_date"),
     )
     filter_strip = (
         '<div class="dr-filter-strip">'
@@ -2653,37 +2704,37 @@ def day_project_report_table_page(db_path: Path, qs: dict[str, list[str]]) -> st
         '<form method="get" action="/events" class="dr-filter-inline">'
         '<input type="hidden" name="table" value="day_project">'
         f'<input type="hidden" name="date" value="{esc(selected_date or "")}">'
-        f'<label>📁 项目 <select name="project" onchange="this.form.submit()">'
-        f'<option value="">全部</option>{opts(all_projects, selected_project)}</select></label> '
-        f'<label>🏷 状态 <select name="status" onchange="this.form.submit()">'
-        f'<option value="">全部</option>{opts(statuses, selected_status)}</select></label> '
-        f'<label>↕ 排序 <select name="order" onchange="this.form.submit()">{sort_opts}</select></label> '
-        f'<a href="/events?table=day_project" class="dr-reset">清空筛选</a>'
-        f'<span class="muted small dr-rowcount">{len(rendered)} rows</span>'
+        f'<label>📁 {esc(T("dp_label_project"))} <select name="project" onchange="this.form.submit()">'
+        f'<option value="">{esc(T("db_filter_all"))}</option>{opts(all_projects, selected_project)}</select></label> '
+        f'<label>🏷 {esc(T("dp_label_status"))} <select name="status" onchange="this.form.submit()">'
+        f'<option value="">{esc(T("db_filter_all"))}</option>{opts(statuses, selected_status)}</select></label> '
+        f'<label>↕ {esc(T("dp_label_order"))} <select name="order" onchange="this.form.submit()">{sort_opts}</select></label> '
+        f'<a href="/events?table=day_project" class="dr-reset">{esc(T("db_reset_filters"))}</a>'
+        f'<span class="muted small dr-rowcount">{esc(T("dp_rowcount", n=len(rendered)))}</span>'
         '</form>'
         '</div>'
     )
 
     head = (
         "<thead><tr>"
-        "<th class='col-date'>Date</th>"
-        "<th class='col-project'>Project</th>"
-        "<th class='col-num'>Events</th>"
-        "<th class='col-num'>Active</th>"
-        "<th class='col-share'>Share</th>"
-        "<th class='col-status'>Status</th>"
-        "<th class='col-ai'>AI summary · what was done · next</th>"
-        "<th class='col-cont'>vs prev</th>"
-        "<th class='col-titles'>Top titles</th>"
-        "<th class='col-meta'>Span · sources</th>"
+        f"<th class='col-date'>{esc(T('dp_th_date'))}</th>"
+        f"<th class='col-project'>{esc(T('dp_th_project'))}</th>"
+        f"<th class='col-num'>{esc(T('dp_th_events'))}</th>"
+        f"<th class='col-num'>{esc(T('dp_th_active'))}</th>"
+        f"<th class='col-share'>{esc(T('dp_th_share'))}</th>"
+        f"<th class='col-status'>{esc(T('dp_th_status'))}</th>"
+        f"<th class='col-ai'>{esc(T('dp_th_ai'))}</th>"
+        f"<th class='col-cont'>{esc(T('dp_th_cont'))}</th>"
+        f"<th class='col-titles'>{esc(T('dp_th_titles'))}</th>"
+        f"<th class='col-meta'>{esc(T('dp_th_meta'))}</th>"
         "</tr></thead>"
     )
-    body = "".join(rendered) or '<tr><td colspan="10" class="label">没有匹配的行</td></tr>'
+    body = "".join(rendered) or f'<tr><td colspan="10" class="label">{esc(T("db_empty_dp"))}</td></tr>'
     table_html = f'<div class="table-wrap dpr-table"><table>{head}<tbody>{body}</tbody></table></div>'
 
     content = table_switcher_html("day_project", qs) + filter_strip + table_html
     return layout(
-        "DayTrace · 项目日报告",
+        f"DayTrace · {T('db_tab_day_project')}",
         f"{len(rendered)} rows",
         "events", content,
         body_class="day-project-report-page",
@@ -2757,13 +2808,13 @@ def events_page(db_path: Path, qs: dict[str, list[str]]):
             events = events[:event_limit]
     options: dict[str, Any] = query_filter_options(con, option_filters)
     options["date_counts"] = available_event_date_counts(con, VISIBLE_EVENT_SOURCES)
-    options["source"] = [{"value": "", "label": "All"}] + [
+    options["source"] = [{"value": "", "label": T("db_filter_all")}] + [
         {"value": source_value, "label": SOURCE_LABELS[source_value]}
         for source_value in VISIBLE_EVENT_SOURCES
     ]
     # Build the activity dropdown options from currently visible label set.
     activity_values = sorted({e["activity"] for e in events if e.get("activity")})
-    options["activity"] = [{"value": "", "label": "All"}] + [
+    options["activity"] = [{"value": "", "label": T("db_filter_all")}] + [
         {"value": a, "label": a} for a in activity_values
     ]
     content = table_switcher_html("events", qs) + events_table(events, filters, options)
