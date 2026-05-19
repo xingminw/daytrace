@@ -7,7 +7,7 @@ from typing import Iterable, Any
 
 from .schema import TraceEvent
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 DEFAULT_DEVICE_ID = "Mac"
 DEFAULT_LOCATION_ID = "unknown"
 DEFAULT_COLLECTOR_ID = "hub-local"
@@ -336,6 +336,11 @@ def init_db(con: sqlite3.Connection) -> None:
     # scripts/translate_work_items.py (DeepSeek). Empty by default;
     # renderers fall back to `title` when missing.
     _ensure_column(con, "work_items", "title_en", "title_en TEXT")
+    # v14: bilingual activity labels. `label` keeps the zh form (back-compat);
+    # `label_json` carries the full {lang: text} map from `ai_activity_labels`
+    # so the dashboard can render the user's chosen language without
+    # re-running the AI. Old rows have NULL label_json and fall back to `label`.
+    _ensure_column(con, "event_activity_labels", "label_json", "label_json TEXT")
     con.execute("CREATE INDEX IF NOT EXISTS idx_work_items_table_key ON work_items(table_key)")
     seed_single_machine_defaults(con)
     con.execute(
@@ -723,9 +728,13 @@ def events_for_shifted_week(
 
 
 def load_activity_labels_for_event_ids(
-    con: sqlite3.Connection, event_ids: list[str], *, chunk: int = 900
+    con: sqlite3.Connection, event_ids: list[str], *, chunk: int = 900,
+    lang: str | None = None,
 ) -> dict[str, str]:
-    """Return {event_id: label} for the given event ids. Empty on schema race."""
+    """Return {event_id: label} for the given event ids. When `lang` is set
+    and `label_json` carries that language, the localized form is used;
+    otherwise falls back to the canonical zh `label`. Empty on schema race."""
+    import json as _json
     if not event_ids:
         return {}
     out: dict[str, str] = {}
@@ -735,29 +744,60 @@ def load_activity_labels_for_event_ids(
             sub = unique[start:start + chunk]
             ph = ",".join("?" for _ in sub)
             for r in con.execute(
-                f"SELECT event_id, label FROM event_activity_labels WHERE event_id IN ({ph})",
+                f"SELECT event_id, label, label_json FROM event_activity_labels WHERE event_id IN ({ph})",
                 sub,
             ).fetchall():
-                out[r["event_id"]] = r["label"]
+                label_zh = r["label"] or ""
+                if lang and r["label_json"]:
+                    try:
+                        m = _json.loads(r["label_json"])
+                        if isinstance(m, dict):
+                            chosen = (m.get(lang) or "").strip()
+                            if chosen:
+                                out[r["event_id"]] = chosen
+                                continue
+                    except Exception:
+                        pass
+                out[r["event_id"]] = label_zh
     except sqlite3.OperationalError:
         return {}
     return out
 
 
-def load_activity_labels_for_date(con: sqlite3.Connection, date: str) -> dict[str, str]:
+def load_activity_labels_for_date(
+    con: sqlite3.Connection, date: str, lang: str | None = None
+) -> dict[str, str]:
     """Return {event_id: label} for all labeled events on the given date.
 
-    Events without labels are simply omitted; callers default missing values
-    to '未分类'. Falls back to empty dict on schema/migration races."""
+    When `lang` is set and `label_json` carries that language, returns the
+    localized form; otherwise falls back to the canonical zh `label`
+    column. Events without labels are omitted; callers default missing
+    values to '未分类' (or 'Unclassified' in en)."""
+    import json as _json
     try:
         rows = con.execute(
-            "SELECT eal.event_id, eal.label FROM event_activity_labels eal"
+            "SELECT eal.event_id, eal.label, eal.label_json FROM event_activity_labels eal"
             " JOIN events e ON e.id = eal.event_id WHERE e.date = ?",
             (date,),
         ).fetchall()
     except sqlite3.OperationalError:
         return {}
-    return {r["event_id"]: r["label"] for r in rows}
+    out: dict[str, str] = {}
+    for r in rows:
+        label_zh = r["label"] or ""
+        label_json_str = r["label_json"] if "label_json" in r.keys() else None
+        if lang and label_json_str:
+            try:
+                m = _json.loads(label_json_str)
+                if isinstance(m, dict):
+                    chosen = (m.get(lang) or "").strip()
+                    if chosen:
+                        out[r["event_id"]] = chosen
+                        continue
+            except Exception:
+                pass
+        out[r["event_id"]] = label_zh
+    return out
 
 
 def upsert_activity_labels(
@@ -766,15 +806,21 @@ def upsert_activity_labels(
     *,
     commit: bool = True,
 ) -> int:
-    """Insert / overwrite labels. `rows`: list of {event_id, label, source?, confidence?, model?}."""
+    """Insert / overwrite labels. `rows`: list of
+    {event_id, label, label_json?, source?, confidence?, model?}.
+    `label` is the canonical zh form (back-compat); `label_json` (optional)
+    is a JSON string carrying the full {lang: text} bilingual map produced
+    by the v15+ AI prompt."""
+    import json as _json
     if not rows:
         return 0
     con.executemany(
         """
-        INSERT INTO event_activity_labels(event_id, label, source, confidence, model, assigned_at)
-        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO event_activity_labels(event_id, label, label_json, source, confidence, model, assigned_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         ON CONFLICT(event_id) DO UPDATE SET
           label=excluded.label,
+          label_json=excluded.label_json,
           source=excluded.source,
           confidence=excluded.confidence,
           model=excluded.model,
@@ -784,6 +830,8 @@ def upsert_activity_labels(
             (
                 r["event_id"],
                 r["label"],
+                (_json.dumps(r["label_json"], ensure_ascii=False)
+                 if isinstance(r.get("label_json"), dict) else None),
                 r.get("source") or "ai",
                 float(r.get("confidence") or 0.0),
                 r.get("model"),

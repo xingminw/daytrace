@@ -1422,12 +1422,14 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     # 任务 dim option across histogram / distribution / swim.
     _enrich_events_with_tasks(con, day_events)
     total = len(day_events)  # subtitle uses shifted-day total, not calendar-day
-    # Enrich events with activity labels from the side table (filled by AI).
+    # Enrich events with activity labels (bilingual since v15).
     if date:
         from daytrace.db import load_activity_labels_for_date
-        labels = load_activity_labels_for_date(con, date)
+        _cur_lang = _CURRENT_LANG.get()
+        labels = load_activity_labels_for_date(con, date, lang=_cur_lang)
+        _unclassified = "Unclassified" if _cur_lang == "en" else "未分类"
         for ev in day_events:
-            ev["activity"] = labels.get(ev["id"], "未分类") if labels else "未分类"
+            ev["activity"] = labels.get(ev["id"], _unclassified) if labels else _unclassified
         # Recompute every dim breakdown with the active unit (count or chars)
         # so the composition donut + per-project shares reflect what the user
         # picked in the dim-bar.
@@ -2700,11 +2702,13 @@ def events_page(db_path: Path, qs: dict[str, list[str]]):
         # doesn't know about the side table.
         limit=None if activity_filter else event_limit,
     )
-    # Enrich with AI activity labels.
+    # Enrich with AI activity labels (bilingual since v15).
     from daytrace.db import load_activity_labels_for_event_ids
-    labels = load_activity_labels_for_event_ids(con, [e["id"] for e in events])
+    _cur_lang = _CURRENT_LANG.get()
+    labels = load_activity_labels_for_event_ids(con, [e["id"] for e in events], lang=_cur_lang)
+    _unclassified = "Unclassified" if _cur_lang == "en" else "未分类"
     for ev in events:
-        ev["activity"] = labels.get(ev["id"], "未分类")
+        ev["activity"] = labels.get(ev["id"], _unclassified)
     if activity_filter:
         events = [e for e in events if e.get("activity") == activity_filter]
         if event_limit:
@@ -4927,11 +4931,13 @@ def weekly_page(
     _enrich_events_with_tasks(con, events)
     _enrich_events_with_tasks(con, last_events)
 
-    # Activity labels for stack_by=activity
+    # Activity labels for stack_by=activity (bilingual since v15).
     if events and mode == "activity":
-        labels = load_activity_labels_for_event_ids(con, [e["id"] for e in events])
+        _cur_lang = _CURRENT_LANG.get()
+        labels = load_activity_labels_for_event_ids(con, [e["id"] for e in events], lang=_cur_lang)
+        _unclassified = "Unclassified" if _cur_lang == "en" else "未分类"
         for ev in events:
-            ev["activity"] = labels.get(ev["id"], "未分类")
+            ev["activity"] = labels.get(ev["id"], _unclassified)
 
     # Per-day active minutes
     per_day_minutes: dict[str, float] = {d: 0.0 for d in days}

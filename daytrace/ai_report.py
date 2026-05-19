@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v14"  # v14 = bilingual output (zh + en in every field)
+AI_VERSION = "v15"  # v15 = bilingual activity labels (zh + en)
 
 
 # ----- Shape validators ------------------------------------------------
@@ -774,54 +774,64 @@ def _previous_project_summary(con: sqlite3.Connection, date: str, project: str):
 # ---- channel: ai_activity_labels --------------------------------------
 
 ACTIVITY_LABEL_SYSTEM = (
-    "你是 DayTrace 的事件活动分类助手。把当天每条事件按‘活动类型’归类，类别"
-    "不要预设, 你自己根据事件内容自由归纳; 但**每天用到的类别数尽量控制在 5-10 个**, "
-    "重复使用相同的类别名字（用中文短词, 如 ‘开发’、‘学习’、‘写作’、‘沟通’、‘调试’、"
-    "‘阅读’、‘规划’、‘杂项’ 等）。严格只输出 JSON, 不要 Markdown。"
+    "你是 DayTrace 的事件活动分类助手。把当天每条事件按‘活动类型’归类。"
+    "类别不预设, 你自己根据事件内容自由归纳; **每天用到的类别数尽量控制在 5-10 个**, "
+    "同一天内重复使用相同的类别名(中文短词, 例: '开发' '学习' '写作' '沟通' '调试' "
+    "'阅读' '规划' '杂项')。\n\n"
+    "**双语输出**: 每个 event 的 label 是 {\"zh\": \"开发\", \"en\": \"Coding\"} 形式的对象。"
+    "两种语言独立给出同一类别的自然短词(不是逐字翻译); 同一类别每次出现都用同样的 zh/en 短词。\n\n"
+    "严格只输出 JSON, 不要 Markdown。"
 )
 
 
 ACTIVITY_LABEL_CHUNK = 80  # events per LLM call; big days are split + merged
 
 
-def _classify_chunk(date: str, items: list[tuple[str, str]]) -> tuple[dict[str, str], int, int, float, str]:
-    """Send one chunk of events to the LLM, return (labels, tokens_in, tokens_out, cost, model).
-
-    items: list of (event_id, prompt_line).
-    """
+def _classify_chunk(date: str, items: list[tuple[str, str]]) -> tuple[dict[str, dict], int, int, float, str]:
+    """Send one chunk of events to the LLM, return (labels, tokens_in,
+    tokens_out, cost, model). The labels map is event_id → {zh, en}
+    (bilingual)."""
     lines = [line for _, line in items]
     user = (
         f"【日期】{date}\n\n"
         "【事件清单, 每行: id | 时间 | 来源/项目 | 标题】\n"
         + "\n".join(lines)
         + "\n\n"
-        "【输出 JSON】\n"
+        "【输出 JSON, 双语 schema】\n"
         "{\n"
-        '  "labels": { "<event_id>": "<活动类型中文>" }\n'
+        '  "labels": { "<event_id>": {"zh": "<中文短词>", "en": "<English short word>"} }\n'
         "}\n\n"
-        "要求: 每个 event_id 必须有一个 label, label 用中文短词, 同一天内重复使用。"
-        "**只输出 JSON, 不要思考说明。**"
+        "要求: 每个 event_id 必须有一个 label 对象, zh/en 都要给出, 同一天内重复使用"
+        "相同的 zh/en 短词。**只输出 JSON, 不要思考说明。**"
     )
     resp = ai_client.call_json(
         system=ACTIVITY_LABEL_SYSTEM,
         user=user,
-        max_tokens=6000,
+        max_tokens=8000,  # bumped: bilingual ~doubles output
     )
-    # The model sometimes ignores the "labels" wrapper and just returns
-    # {event_id: label} at the top level. Accept either shape.
-    labels_map: dict[str, str] | None = None
+    labels_map: dict[str, dict] | None = None
     if isinstance(resp.json, dict):
         candidate = resp.json.get("labels")
         if isinstance(candidate, dict):
             labels_map = candidate
         else:
-            # Treat top-level dict as the map iff every value is a string
-            # (event_ids look like 'codex-input-...' so they're safe keys).
-            if all(isinstance(v, str) for v in resp.json.values()):
+            # Top-level dict accepted iff values look like our bilingual shape
+            if all(isinstance(v, (dict, str)) for v in resp.json.values()):
                 labels_map = resp.json
     if not isinstance(labels_map, dict):
         raise ValueError(f"ai_activity_labels: bad shape from LLM: {type(resp.json).__name__}")
-    return labels_map, resp.tokens_in, resp.tokens_out, resp.cost_usd, resp.model
+    # Normalize each value to {zh, en}; tolerate legacy string-shaped values
+    # by treating them as zh.
+    normalized: dict[str, dict] = {}
+    for eid, val in labels_map.items():
+        if isinstance(val, dict):
+            normalized[eid] = {
+                "zh": (val.get("zh") or "").strip(),
+                "en": (val.get("en") or "").strip(),
+            }
+        elif isinstance(val, str):
+            normalized[eid] = {"zh": val.strip(), "en": ""}
+    return normalized, resp.tokens_in, resp.tokens_out, resp.cost_usd, resp.model
 
 
 def compute_ai_activity_labels(events: list[dict[str, Any]], ctx: ChannelContext) -> ChannelResult:
@@ -863,17 +873,18 @@ def compute_ai_activity_labels(events: list[dict[str, Any]], ctx: ChannelContext
     items.sort(key=lambda p: p[1])
 
     chunks = [items[i:i + ACTIVITY_LABEL_CHUNK] for i in range(0, len(items), ACTIVITY_LABEL_CHUNK)]
-    all_labels: dict[str, str] = {}
+    all_labels: dict[str, dict] = {}  # eid → {zh, en}
     total_in = total_out = 0
     total_cost = 0.0
     model_used = ""
     for chunk in chunks:
         labels_map, tin, tout, cost, model = _classify_chunk(ctx.date, chunk)
-        # Defensive normalize
         for eid, lab in labels_map.items():
-            if not lab:
+            if not isinstance(lab, dict):
                 continue
-            all_labels[eid] = str(lab).strip() or "未分类"
+            zh = (lab.get("zh") or "").strip() or "未分类"
+            en = (lab.get("en") or "").strip()  # may be empty; renderer falls back to zh
+            all_labels[eid] = {"zh": zh, "en": en}
         total_in += tin
         total_out += tout
         total_cost += cost
@@ -882,11 +893,12 @@ def compute_ai_activity_labels(events: list[dict[str, Any]], ctx: ChannelContext
     seen_ids = {eid for eid, _ in items}
     rows = [
         {
-            "event_id": eid,
-            "label": lab,
-            "source": "ai",
+            "event_id":   eid,
+            "label":      lab["zh"],   # back-compat column = zh
+            "label_json": lab,          # new bilingual map
+            "source":     "ai",
             "confidence": 0.7,
-            "model": model_used,
+            "model":      model_used,
         }
         for eid, lab in all_labels.items()
         if eid in seen_ids
