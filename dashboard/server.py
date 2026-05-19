@@ -28,6 +28,11 @@ DEFAULT_DB = Path(__file__).resolve().parents[1] / "data" / "daytrace.sqlite"
 # {"zh": "...", "en": "..."}. The translation function is `T`.
 
 _STRINGS: dict[str, dict[str, str]] = {
+    # Language switcher pill labels — one entry per language declared
+    # in config/i18n.yaml. Adding a third language? Add lang_label_<code> here.
+    "lang_label_zh":  {"zh": "中",     "en": "中"},
+    "lang_label_en":  {"zh": "EN",     "en": "EN"},
+
     # Page titles / nav
     "nav_daily":      {"zh": "日报",   "en": "Daily"},
     "nav_weekly":     {"zh": "周报",   "en": "Weekly"},
@@ -234,6 +239,53 @@ def _load_strings_from_yaml() -> None:
         print(f"[i18n] failed to load config/strings.yaml: {e}")
 
 
+# ───── System-wide language configuration (config/i18n.yaml) ────────────
+# Drives the language switcher, AI prompts, and fallback behavior. Edit
+# the YAML to change supported languages; everything reads from here.
+
+_I18N_CONFIG: dict = {
+    "languages": ["zh", "en"],
+    "fallback":  "en",
+    "default":   "zh",
+}
+
+
+def _load_i18n_config() -> None:
+    """Merge `config/i18n.yaml` over the in-code defaults."""
+    try:
+        import yaml as _y
+        from pathlib import Path as _P
+        path = _P(__file__).resolve().parents[1] / "config" / "i18n.yaml"
+        if not path.exists():
+            return
+        data = _y.safe_load(path.read_text(encoding="utf-8")) or {}
+        if isinstance(data.get("languages"), list):
+            _I18N_CONFIG["languages"] = [str(x) for x in data["languages"]]
+        if isinstance(data.get("fallback"), str):
+            _I18N_CONFIG["fallback"] = data["fallback"]
+        if isinstance(data.get("default"), str):
+            _I18N_CONFIG["default"] = data["default"]
+    except Exception as e:
+        print(f"[i18n] failed to load config/i18n.yaml: {e}")
+
+
+_load_i18n_config()
+
+
+def supported_languages() -> list[str]:
+    """Public accessor for the language list — used by the switcher,
+    secrets export, AI prompt builders, etc."""
+    return list(_I18N_CONFIG.get("languages", ["zh", "en"]))
+
+
+def default_language() -> str:
+    return _I18N_CONFIG.get("default", "zh")
+
+
+def fallback_language() -> str:
+    return _I18N_CONFIG.get("fallback", "en")
+
+
 # Merge config/strings.yaml over the hard-coded defaults at import time.
 # Users can extend or override any label without touching the source file
 # (and add new languages by adding extra keys per entry).
@@ -241,16 +293,29 @@ _load_strings_from_yaml()
 
 
 def T(key: str, lang: str | None = None, **fmt) -> str:
-    """Translate a key for the given language. Falls back to zh.
-    When `lang` is None, reads the per-request ContextVar (which the
-    HTTP handler sets at the start of each GET). Format args are
-    substituted via `str.format` if provided."""
+    """Translate a key for the given language.
+
+    Resolution order:
+      1. exact match for `lang`
+      2. configured fallback language (config/i18n.yaml `fallback:`)
+      3. any non-empty value the key has (so a partially-translated
+         entry never crashes the render)
+      4. the key itself (rather than the empty string — easier to spot
+         a missing key in the rendered HTML).
+
+    Reads the per-request ContextVar when `lang` is None."""
     if lang is None:
         lang = _CURRENT_LANG.get()
     entry = _STRINGS.get(key)
     if entry is None:
-        return key  # never crash on a missing key
-    val = entry.get(lang) or entry.get("zh") or key
+        return key
+    val = entry.get(lang) or entry.get(fallback_language())
+    if not val:
+        for v in entry.values():
+            if v:
+                val = v
+                break
+    val = val or key
     return val.format(**fmt) if fmt else val
 
 
@@ -278,16 +343,18 @@ def L(value, lang: str | None = None) -> str:
 
 
 def _lang_from_request(handler) -> str:
-    """Parse the daytrace_lang cookie from a BaseHTTPRequestHandler.
-    Defaults to 'zh'. Acceptable values: 'zh' / 'en'."""
+    """Parse the daytrace_lang cookie. Accepts any language declared in
+    config/i18n.yaml; falls back to the configured default. The cookie
+    value is forced to lower-case so case-insensitive matches work."""
+    supported = supported_languages()
     raw = (handler.headers.get("Cookie") or "")
     for piece in raw.split(";"):
         p = piece.strip()
         if p.startswith("daytrace_lang="):
             v = p.split("=", 1)[1].strip().lower()
-            if v in ("zh", "en"):
+            if v in supported:
                 return v
-    return "zh"
+    return default_language()
 
 STYLE = """
 :root { color-scheme: light; --bg:#f7f5ef; --card:#fffaf0; --ink:#202124; --muted:#6b645c; --line:#e7dfd0; --accent:#2f6fed; --purple:#7b61ff; --green:#16a34a; --orange:#f59e0b; --red:#ef4444; }
@@ -298,16 +365,19 @@ header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(
 .header-spacer { /* 1fr eater so right-rail right-aligns */ }
 /* Right-rail nav: page toggle + db btn + lang toggle, kept on one row. */
 .page-nav { display:inline-flex; align-items:center; gap:8px; flex-wrap:nowrap; }
-.page-toggle { display:inline-flex; gap:0; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
-.page-toggle-pill { font-size:13px; font-weight:700; padding:5px 16px; border-radius:999px; color:#3b352e; cursor:pointer; transition:background .12s, color .12s; text-decoration:none; }
+.page-toggle { display:inline-flex; align-items:center; gap:0; height:30px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:2px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
+.page-toggle-pill { display:inline-flex; align-items:center; height:24px; font-size:13px; font-weight:700; padding:0 14px; border-radius:999px; color:#3b352e; cursor:pointer; transition:background .12s, color .12s; text-decoration:none; }
 .page-toggle-pill:hover { background:rgba(0,0,0,.04); }
 .page-toggle-pill.active { background:var(--ink); color:white; }
-.page-db-btn { display:inline-flex; align-items:center; padding:6px 14px; border:1px solid var(--line); background:white; border-radius:999px; font-size:12.5px; font-weight:650; color:var(--ink); text-decoration:none; }
+/* Database button — matches the toggle containers so the right rail
+   reads as one consistent cluster, not a white pill jammed between
+   two cream segmented controls. */
+.page-db-btn { display:inline-flex; align-items:center; height:30px; padding:0 14px; border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:999px; font-size:13px; font-weight:650; color:var(--ink); text-decoration:none; box-shadow:0 4px 10px rgba(65,45,10,.04); }
 .page-db-btn:hover { background:#fdf6e3; }
 /* Language toggle — segmented control with two pills. Mirrors the look
    of the dim-tabs / unit-tabs elsewhere in the dashboard so it reads as
    a deliberate switch rather than a stray button. */
-.page-lang-toggle { display:inline-flex; align-items:center; gap:0; padding:3px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; margin-left:6px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
+.page-lang-toggle { display:inline-flex; align-items:center; gap:0; height:30px; padding:2px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; margin-left:0; box-shadow:0 4px 10px rgba(65,45,10,.04); }
 .page-lang-toggle .lang-opt { display:inline-flex; align-items:center; justify-content:center; min-width:30px; height:24px; padding:0 10px; border-radius:999px; font-size:12px; font-weight:700; color:#3b352e; text-decoration:none; cursor:pointer; transition:background .12s, color .12s; }
 .page-lang-toggle .lang-opt:hover { background:rgba(0,0,0,.04); }
 .page-lang-toggle .lang-opt.active { background:var(--ink); color:white; }
@@ -913,16 +983,21 @@ def layout(title: str, subtitle: str, active: str, content: str, date_control: s
         '<a class="page-db-btn" target="_blank" rel="noopener" '
         f'href="/events" title="{esc(T("nav_open_db_t", lang))}">{esc(T("nav_open_db", lang))} ↗</a>'
     )
-    # Language switcher — two pills, the active one highlighted, the other
-    # clickable. Clicking sets the cookie and reloads the same URL.
-    lang_switcher = (
-        '<div class="page-lang-toggle">'
-        f'<a class="lang-opt{" active" if lang == "zh" else ""}" '
-        f'href="#" data-lang="zh">中</a>'
-        f'<a class="lang-opt{" active" if lang == "en" else ""}" '
-        f'href="#" data-lang="en">EN</a>'
-        '</div>'
-    )
+    # Language switcher — one pill per language declared in
+    # config/i18n.yaml. Active language highlighted; clicking another
+    # sets the cookie and reloads.
+    _lang_pills: list[str] = []
+    for code in supported_languages():
+        # Display label looks up `lang_label_<code>` in _STRINGS; defaults
+        # to the uppercased code so adding a language is zero-config.
+        display = T(f"lang_label_{code}") or code.upper()
+        if display == f"lang_label_{code}":
+            display = code.upper()
+        _lang_pills.append(
+            f'<a class="lang-opt{" active" if lang == code else ""}" '
+            f'href="#" data-lang="{esc(code)}">{esc(display)}</a>'
+        )
+    lang_switcher = '<div class="page-lang-toggle">' + "".join(_lang_pills) + '</div>'
     # Wrap the right-rail children in a single nav container so the header
     # grid (5 columns) doesn't push any of them onto a second row.
     nav = (

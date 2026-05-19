@@ -1,0 +1,29 @@
+# DayTrace i18n configuration.
+#
+# Declares the languages this DayTrace installation supports. Drives:
+#   • the 中/EN switcher in the dashboard header (one pill per language)
+#   • the AI prompts (each text field is emitted in every configured
+#     language so /today and /weekly can switch instantly without
+#     re-running the AI)
+#   • config/strings.yaml expectations (every key should have an entry
+#     per configured language; missing entries fall back to `fallback`)
+#
+# To add a new language:
+#   1. Add the ISO 639-1 code to `languages:` below
+#   2. Run `make sync-tasks` (or wait for the daily cron) — it'll
+#      retranslate Feishu task titles into the new language
+#   3. Bump AI_VERSION in daytrace/ai_report.py to invalidate cached
+#      bilingual payloads, then the next AI run produces all 3+ languages
+#   4. Add string overrides to config/strings.yaml
+
+languages:
+  - zh
+  - en
+
+# When the user picks a language we have no translation for, fall back
+# to this language's value. (Not "untranslated"-mode — a real human
+# language is friendlier than a fallback marker.)
+fallback: en
+
+# Default language for new visitors who haven't set the cookie yet.
+default: zh
