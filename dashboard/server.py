@@ -877,10 +877,13 @@ body.events-page form { height:100%; }
 .timeline-card .tl-meta { margin-top:8px; color:var(--muted); font-size:11px; }
 .timeline-card .tl-empty { margin-top:8px; color:var(--muted); font-size:12px; text-align:center; padding:18px; }
 /* Legends */
-.timeline-card .tl-legend { display:none; flex-wrap:wrap; gap:6px 14px; margin-top:10px; font-size:12px; color:#4d4438; }
-.timeline-card .tl-legend.show { display:flex; }
-.timeline-card .tl-legend-item { display:inline-flex; align-items:center; gap:5px; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.timeline-card .tl-swatch { width:10px; height:10px; border-radius:3px; flex:none; }
+/* Legend swatches are global — both the daily/weekly histogram legend
+   AND the swimlane filter strip use them. Previously scoped to
+   .timeline-card only, which left the histogram legend with 0×0 dots. */
+.tl-legend { display:none; flex-wrap:wrap; gap:6px 14px; margin-top:10px; font-size:12px; color:#4d4438; }
+.tl-legend.show { display:flex; }
+.tl-legend-item { display:inline-flex; align-items:center; gap:5px; max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.tl-swatch { width:10px; height:10px; border-radius:3px; flex:none; }
 /* Floating tooltip (one per card, repositioned on hover) */
 .timeline-card .tl-tooltip { position:absolute; pointer-events:none; z-index:10; background:rgba(34,28,18,.95); color:#fff7e8; border-radius:10px; padding:8px 10px; box-shadow:0 10px 26px rgba(0,0,0,.28); font-size:11.5px; max-width:320px; line-height:1.45; }
 .timeline-card .tl-tooltip[hidden] { display:none; }
