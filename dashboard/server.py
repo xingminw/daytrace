@@ -619,11 +619,13 @@ body.events-page form { height:100%; }
      • narrative blockquote stays cream like the rest of the page */
 .daily-timeline-card { margin-top:12px; }
 /* dt-bulk uses the unified .dim-tabs chrome — cream outer pill,
-   transparent inner buttons, active state via the script if needed.
-   No active state here (these are momentary actions, not modes). */
+   transparent inner buttons. Active pill = the current state (default
+   all-expanded since columns render <details open>); flips when the
+   user clicks the other button. */
 .daily-timeline-card .dt-bulk { display:inline-flex; align-items:center; gap:4px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
 .daily-timeline-card .dt-bulk-btn { font-size:12.5px; padding:4px 12px; border-radius:999px; border:none; background:transparent; color:#3b352e; font-weight:650; cursor:pointer; font-family:inherit; transition:background .12s, color .12s; }
 .daily-timeline-card .dt-bulk-btn:hover { background:rgba(0,0,0,.04); }
+.daily-timeline-card .dt-bulk-btn.active { background:var(--ink); color:white; }
 .dt-grid { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; align-items:start; }
 .dt-col { background:transparent; padding:10px 10px 12px; border-top:2px solid #f0d68b; min-width:0; }
 .dt-col[open] { background:rgba(255,247,232,0.5); border-radius:0 0 8px 8px; }
@@ -2376,7 +2378,8 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
         return ""
     toggle_html = (
         '<div class="dt-bulk" style="margin-left:auto;">'
-        f'<button type="button" class="dt-bulk-btn" data-dt-bulk="expand">{esc(T("expand_all"))}</button>'
+        # Default to expanded — every <details class="dt-col" open>.
+        f'<button type="button" class="dt-bulk-btn active" data-dt-bulk="expand">{esc(T("expand_all"))}</button>'
         f'<button type="button" class="dt-bulk-btn" data-dt-bulk="collapse">{esc(T("collapse_all"))}</button>'
         '</div>'
     )
@@ -2385,7 +2388,11 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
         'document.querySelectorAll(".daily-timeline-card .dt-bulk-btn").forEach(function(b){'
         'b.addEventListener("click",function(){'
         'var open=b.getAttribute("data-dt-bulk")==="expand";'
-        'b.closest(".daily-timeline-card").querySelectorAll("details.dt-col").forEach(function(d){d.open=open;});'
+        'var card=b.closest(".daily-timeline-card");'
+        'card.querySelectorAll("details.dt-col").forEach(function(d){d.open=open;});'
+        # Sync active state — clicked button becomes active, sibling unsets.
+        'card.querySelectorAll(".dt-bulk-btn").forEach(function(x){x.classList.remove("active");});'
+        'b.classList.add("active");'
         '});});})();</script>'
     )
     return (
