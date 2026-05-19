@@ -1691,7 +1691,7 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
             body_html = '<div class="dt-body">' + "".join(inner) + '</div>'
 
         cols.append(
-            '<details class="dt-col"><summary>'
+            '<details class="dt-col" open><summary>'
             '<div class="dt-col-head">'
             f'<span class="dt-day-name">{esc(wd)}</span>'
             f'<span class="dt-date">{esc(d[5:])}</span>'
@@ -1709,7 +1709,7 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
         '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:12px;">'
         '<h3 style="margin:0;">每日时间轴</h3>'
         '<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">Daily</span>'
-        '<span class="muted small" style="margin-left:6px;">点击任一天展开当日叙事</span>'
+        '<span class="muted small" style="margin-left:6px;">本周 7 天叙事并列展示;点击星期头可以跳到当日完整 dashboard</span>'
         '</div>'
         '<div class="dt-grid">'
         + "".join(cols)
