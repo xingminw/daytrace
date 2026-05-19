@@ -371,14 +371,13 @@ header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(
 .header-spacer { /* 1fr eater so right-rail right-aligns */ }
 /* Right-rail nav: page toggle + db btn + lang toggle, kept on one row. */
 .page-nav { display:inline-flex; align-items:center; gap:8px; flex-wrap:nowrap; }
-/* Flat segmented control — no outer "box around buttons" frame.
-   Each pill carries its own subtle border + cream surface so the
-   group reads as a row of independent buttons instead of nested
-   chrome. Active pill = dark ink fill. */
-.page-toggle { display:inline-flex; align-items:center; gap:4px; height:30px; background:transparent; border:none; border-radius:0; padding:0; box-shadow:none; }
-.page-toggle-pill { display:inline-flex; align-items:center; height:28px; font-size:13px; font-weight:700; padding:0 14px; border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:999px; color:#3b352e; cursor:pointer; transition:background .12s, color .12s; text-decoration:none; }
-.page-toggle-pill:hover { background:#fff7e8; }
-.page-toggle-pill.active { background:var(--ink); color:white; border-color:var(--ink); }
+/* Unified segmented control — same chrome as .dim-tabs / .unit-tabs
+   so every toggle on the page (来源/项目/任务, 小时/条目/字数, 日报/周报,
+   中/EN, Expand/Collapse) reads as the SAME widget. */
+.page-toggle { display:inline-flex; align-items:center; gap:4px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
+.page-toggle-pill { display:inline-flex; align-items:center; font-size:12.5px; padding:4px 14px; border-radius:999px; border:none; background:transparent; color:#3b352e; font-weight:650; cursor:pointer; transition:background .12s, color .12s; text-decoration:none; }
+.page-toggle-pill:hover { background:rgba(0,0,0,.04); }
+.page-toggle-pill.active { background:var(--ink); color:white; }
 /* Database button — matches the toggle containers so the right rail
    reads as one consistent cluster, not a white pill jammed between
    two cream segmented controls. */
@@ -387,10 +386,10 @@ header { padding:8px 18px; border-bottom:1px solid var(--line); background:rgba(
 /* Language toggle — segmented control with two pills. Mirrors the look
    of the dim-tabs / unit-tabs elsewhere in the dashboard so it reads as
    a deliberate switch rather than a stray button. */
-.page-lang-toggle { display:inline-flex; align-items:center; gap:4px; height:30px; padding:0; background:transparent; border:none; border-radius:0; margin-left:0; box-shadow:none; }
-.page-lang-toggle .lang-opt { display:inline-flex; align-items:center; justify-content:center; min-width:34px; height:28px; padding:0 10px; border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:999px; font-size:12px; font-weight:700; color:#3b352e; text-decoration:none; cursor:pointer; transition:background .12s, color .12s; }
-.page-lang-toggle .lang-opt:hover { background:#fff7e8; }
-.page-lang-toggle .lang-opt.active { background:var(--ink); color:white; border-color:var(--ink); }
+.page-lang-toggle { display:inline-flex; align-items:center; gap:4px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
+.page-lang-toggle .lang-opt { display:inline-flex; align-items:center; justify-content:center; min-width:30px; padding:4px 12px; border-radius:999px; border:none; background:transparent; font-size:12.5px; font-weight:650; color:#3b352e; text-decoration:none; cursor:pointer; transition:background .12s, color .12s; }
+.page-lang-toggle .lang-opt:hover { background:rgba(0,0,0,.04); }
+.page-lang-toggle .lang-opt.active { background:var(--ink); color:white; }
 h1 { margin:0; font-size:20px; letter-spacing:-0.03em; white-space:nowrap; }.sub { color:var(--muted); font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 nav { display:flex; gap:6px; flex-wrap:nowrap; justify-content:flex-end; justify-self:end; margin-left:auto; } nav a { padding:5px 9px; border:1px solid var(--line); border-radius:999px; background:rgba(255,250,240,.94); color:#3b352e; font-weight:650; font-size:13px; white-space:nowrap; } nav a:hover { background:#fff7e8; } nav a.active { background:var(--ink); color:white; border-color:var(--ink); }
 main { padding:12px 18px 28px; max-width:none; margin:0 auto; min-height:calc(100vh - 51px); }
@@ -567,8 +566,12 @@ body.events-page form { height:100%; }
      • top accent line (per-weekday color) — only structure cue
      • narrative blockquote stays cream like the rest of the page */
 .daily-timeline-card { margin-top:12px; }
-.daily-timeline-card .dt-bulk-btn { font-size:11.5px; padding:3px 10px; border-radius:999px; border:1px solid var(--line); background:rgba(255,250,240,.94); color:#3b352e; font-weight:650; cursor:pointer; font-family:inherit; }
-.daily-timeline-card .dt-bulk-btn:hover { background:#fff7e8; }
+/* dt-bulk uses the unified .dim-tabs chrome — cream outer pill,
+   transparent inner buttons, active state via the script if needed.
+   No active state here (these are momentary actions, not modes). */
+.daily-timeline-card .dt-bulk { display:inline-flex; align-items:center; gap:4px; background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:999px; padding:3px; box-shadow:0 4px 10px rgba(65,45,10,.04); }
+.daily-timeline-card .dt-bulk-btn { font-size:12.5px; padding:4px 12px; border-radius:999px; border:none; background:transparent; color:#3b352e; font-weight:650; cursor:pointer; font-family:inherit; transition:background .12s, color .12s; }
+.daily-timeline-card .dt-bulk-btn:hover { background:rgba(0,0,0,.04); }
 .dt-grid { display:grid; grid-template-columns:repeat(7, 1fr); gap:6px; align-items:start; }
 .dt-col { background:transparent; padding:10px 10px 12px; border-top:2px solid #f0d68b; min-width:0; }
 .dt-col[open] { background:rgba(255,247,232,0.5); border-radius:0 0 8px 8px; }
@@ -2155,7 +2158,7 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
     if not any_data:
         return ""
     toggle_html = (
-        '<div class="dt-bulk" style="margin-left:auto; display:inline-flex; gap:4px;">'
+        '<div class="dt-bulk" style="margin-left:auto;">'
         f'<button type="button" class="dt-bulk-btn" data-dt-bulk="expand">{esc(T("expand_all"))}</button>'
         f'<button type="button" class="dt-bulk-btn" data-dt-bulk="collapse">{esc(T("collapse_all"))}</button>'
         '</div>'
