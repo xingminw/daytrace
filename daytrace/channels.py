@@ -249,11 +249,19 @@ def regenerate_day(
     # 1) Day-level header row
     _upsert_day_report(con, date, events_hash, total_events, events)
 
-    # 2) Day-level channels in dependency order
-    for spec in topo_sort(DAY_CHANNELS):
+    # 2a) Day-level NON-AI (stats) channels first — cheap, and the AI
+    # day-level channels (ai_overview) consume per-project ai_summary
+    # rows as input, so we want to defer those AI ones until after
+    # per-project channels have run. Stats channels are split out and
+    # finish here.
+    day_specs_sorted = topo_sort(DAY_CHANNELS)
+    day_stats_specs = [s for s in day_specs_sorted if s.generator != "ai"]
+    day_ai_specs   = [s for s in day_specs_sorted if s.generator == "ai"]
+
+    def _run_day_spec(spec):
         if spec.generator == "ai" and not include_ai:
             report.day_channels_skipped.append(spec.name)
-            continue
+            return
         existing = con.execute(
             "SELECT value_json, source_hash, generator_version, error FROM day_channel"
             " WHERE date = ? AND channel = ?",
@@ -261,7 +269,7 @@ def regenerate_day(
         ).fetchone()
         if not force and _is_fresh(existing, spec, events_hash):
             report.day_channels_skipped.append(spec.name)
-            continue
+            return
         try:
             raw = DAY_COMPUTE[spec.name](
                 events,
@@ -282,6 +290,9 @@ def regenerate_day(
                 spec, events_hash, str(exc),
             )
             report.errors.append({"channel": spec.name, "scope": "day", "error": str(exc)})
+
+    for spec in day_stats_specs:
+        _run_day_spec(spec)
 
     # 3) Per-project rows + channels.
     # Clean up rows for projects that no longer appear in this day's events
@@ -347,6 +358,12 @@ def regenerate_day(
                     "channel": spec.name, "scope": "day_project",
                     "project": project, "error": str(exc),
                 })
+
+    # 4) Day-level AI channels (deferred from step 2 so they can read the
+    # per-project ai_summary rows from step 3 as input). ai_overview
+    # specifically pulls per-project summaries for its narrative now.
+    for spec in day_ai_specs:
+        _run_day_spec(spec)
 
     con.commit()
     return report

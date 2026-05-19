@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v16"  # v16 = en fields must be pure English (no CJK characters)
+AI_VERSION = "v17"  # v17 = ai_overview drops highlights; reads per-project ai_summary as input
 
 
 # ----- Shape validators ------------------------------------------------
@@ -153,9 +153,11 @@ def validate_overview(payload):
     else:
         trend_obj = None
 
-    highlights   = _bilingual_list(payload.get("highlights"))
+    # v17: `highlights` is no longer requested from the model — the Projects
+    # card on the dashboard sources per-project ai_summary directly, so the
+    # ai_overview channel doesn't duplicate that work. Cached v14-v16 rows
+    # may still contain it; we just ignore it (the renderer won't read it).
     work_pattern = _bilingual_list(payload.get("work_pattern"))
-    # v7 used `recommendations`; older v7 cache may have `concerns`.
     raw_suggestions = payload.get("suggestions")
     if raw_suggestions is None:
         raw_suggestions = payload.get("recommendations")
@@ -167,7 +169,6 @@ def validate_overview(payload):
         "headline":     headline,
         "overview":     overview_obj,
         "trend":        trend_obj,
-        "highlights":   highlights,
         "work_pattern": work_pattern,
         "suggestions":  suggestions,
     }
@@ -492,36 +493,37 @@ OVERVIEW_SYSTEM = (
     "英文对照, 用简短英文意译 (例: 'paper-review project', 'i18n rollout'), 不要"
     "保留汉字。Same rule for narrative, headline, work_pattern, suggestions: "
     "the `en` value contains zero Chinese characters.\n\n"
-    "输入会按顺序给你:\n"
-    "  1. 活跃任务清单 (飞书任务表)\n"
-    "  2. 近 N 天基线 (用于和今天对比)\n"
-    "  3. 今日骨架统计 (时长、专注块、切换、来源分布)\n"
-    "  4. 事件清单 (按时间, 预标 [task:X] / [proj:Y])\n\n"
-    "输出 6 个字段, 每个字段定位**严格不同**:\n"
-    "  • headline + overview.narrative — 今天整体怎么过的, 叙事段落\n"
+    "**v17 角色定位变化** — 项目级 ai_summary 已经在另一处生成 "
+    "(day_project_channel.ai_summary), 涵盖每个项目的'做了什么 / 下一步 / 状态'。"
+    "你现在**不再生成 highlights** — 那部分由项目卡片直接展示。你只负责**整天"
+    "维度**的 4 个字段:\n"
+    "  • headline + overview.narrative — 今天整体怎么过的, 跨项目串联的叙事\n"
     "  • trend — 和昨天比的整体方向 (chip + 1 句)\n"
-    "  • **highlights (🚀 关键任务进展)** — 今天**已经做了**的具体任务推进\n"
-    "  • **work_pattern (⏰ 时间安排回顾)** — 今天的**时间数据 vs 基线**, "
-    "必须 grounded 在数字 (例: ‘23:31 收工, 比平时晚 1h’); 至少 1 条\n"
-    "  • **suggestions (🔔 任务跟进提醒)** — **明天/未来**该盯的任务 "
-    "(deadline / N 天没碰 / 未提交); 不要回顾今天该做啥\n\n"
+    "  • work_pattern (⏰ 时间安排回顾) — 今天的**时间数据 vs 基线**, "
+    "必须 grounded 在数字 (例: '23:31 收工, 比平时晚 1h'); 至少 1 条\n"
+    "  • suggestions (🔔 任务跟进提醒) — **明天/未来**该盯的任务 "
+    "(deadline 临近 / N 天没碰 / 未提交); 不要回顾今天\n\n"
+    "**输入会按顺序给你**:\n"
+    "  1. 活跃任务清单 (飞书任务表)\n"
+    "  2. 今日 per-project 摘要 — 每个项目今天的概要 / 做了什么 / 下一步\n"
+    "     (这是 narrative 的事实来源。narrative 引用项目时, 用这里的措辞统一性)\n"
+    "  3. 近 N 天基线 (用于和今天对比)\n"
+    "  4. 今日骨架统计 (时长、专注块、切换、来源分布)\n"
+    "  5. 事件清单 (按时间, 预标 [task:X] / [proj:Y])\n\n"
     "**写作风格**:\n"
-    "  • narrative 要像跟熟人讲今天发生了什么, 不是写工作日报。带温度 "
-    "(‘一头扎进 X’, ‘反复拉扯’, ‘临收工还在调’), 有画面 (具体提到某个工具/PR/"
-    "deadline), 有节奏 (上午…下午…傍晚…)。**禁止**通报体 (‘今天主要做了…, "
-    "完成了…’)。\n"
-    "  • bullet 写法多样化, 不要每条都是 ‘任务名:动作’ 死板模板。可以 "
-    "‘任务 X, 评分模型 v2 PR 合掉, scoring 终于稳了’ 这种带感觉的描述。\n\n"
+    "  • narrative 像跟熟人讲今天发生了什么。带温度 ('一头扎进 X', '反复拉扯', "
+    "'临收工还在调'), 有画面 (具体提到工具 / PR / deadline), 有节奏 (上午…下午"
+    "…傍晚…)。**禁止**通报体。可以借用 per-project 摘要里的关键词, 但要重新"
+    "串成一个流畅的故事, 不是把几个摘要简单拼接。\n"
+    "  • bullet 写法多样化, 不要每条都是 '任务名:动作' 模板。\n\n"
     "**任务视角硬规则**:\n"
-    "  • narrative / highlights / suggestions 里提到的活动, 必须用任务清单"
-    "**完整标题** (例: ‘DayTrace 应用开发’, 不是 ‘DayTrace’ 或 ‘daytrace’)。\n"
-    "  • [proj:Y] 是游离工作, narrative 一笔带过, 不进 highlights/suggestions。\n\n"
+    "  • narrative / suggestions 里提到的活动, 必须用任务清单**完整标题** "
+    "(例: 'DayTrace 应用开发')。\n"
+    "  • [proj:Y] 是游离工作, narrative 一笔带过, 不进 suggestions。\n\n"
     "**禁止**:\n"
-    "  ❌ highlights 和 work_pattern 内容重叠\n"
+    "  ❌ 重新生成 highlights / what_was_done — 那已经由项目摘要提供\n"
     "  ❌ suggestions 写回顾性内容\n"
-    "  ❌ work_pattern 写空话 ('合理作息'、'减少切换') — 必须带基线对比\n"
-    "  ❌ 用项目名代替任务名\n"
-    "  ❌ 对数据本身/系统/工具提建议\n"
+    "  ❌ work_pattern 写空话 — 必须带基线对比\n"
     "  ❌ 泛化效率说教、数字复述\n\n"
     "严格只输出 JSON, 不要 Markdown 代码块, 不要解释。"
 )
@@ -529,11 +531,15 @@ OVERVIEW_SYSTEM = (
 
 def _overview_user(
     date: str, stats_text: str, events_text: str, tasks_text: str,
-    baseline_text: str,
+    baseline_text: str, project_summaries_text: str = "",
 ) -> str:
     tasks_block = (
         f"【活跃任务清单 — 来自飞书任务表, 优先以任务视角描述】\n{tasks_text}\n\n"
         if tasks_text else "【活跃任务清单】(无)\n\n"
+    )
+    project_block = (
+        f"【今日 per-project 摘要 — narrative 的事实来源】\n{project_summaries_text}\n\n"
+        if project_summaries_text else ""
     )
     baseline_block = (
         f"【基线 — 用于 work_pattern 对比, 不要照搬】\n{baseline_text}\n\n"
@@ -542,27 +548,25 @@ def _overview_user(
     return (
         f"【日期】{date}\n\n"
         f"{tasks_block}"
+        f"{project_block}"
         f"{baseline_block}"
         f"【今日骨架统计】\n{stats_text}\n\n"
         f"【事件清单, 按时间; 前缀 [task:X] 表示已关联到任务 X, [proj:Y] 表示游离项目】\n{events_text}\n\n"
         "**重要 — EN 字段纯英文要求**: 上面任务清单里 `中文名 / English name` "
         "的行, en 输出里 **必须用 English name**, 禁止把中文名抄进英文 bullet。"
-        "narrative/headline/highlights/work_pattern/suggestions 的 en 字段里 "
+        "narrative/headline/work_pattern/suggestions 的 en 字段里 "
         "**不允许出现任何汉字**。\n\n"
         "【输出 JSON — 双语 schema】\n"
         "每个文本字段都用 {\"zh\": \"...\", \"en\": \"...\"} 的双语对象,"
-        "**两种语言要表达同一份内容、同一个判断**,不是一个翻译另一个 ——"
-        "都从原始数据独立生成,保持各自语言的自然表达。"
-        "英文是给国际读者看的,中文是给本人看的,语气都要像跟熟人讲,"
-        "都用具体任务全名/工具名/数字。\n\n"
-        "Shape:\n"
+        "**两种语言表达同一份内容**,不是一个翻译另一个。\n\n"
+        "Shape (v17 — 不再有 highlights 字段):\n"
         '{\n'
         '  "headline": {"zh": "≤30 字, 一句话抓住今天的主线",\n'
         '               "en": "≤40 chars, one sentence headline"},\n'
         '  "overview": {\n'
         '    "narrative": {\n'
-        '      "zh": "**4-6 句, 150-260 字** 的叙事段落。像跟熟人讲今天发生了啥: 早上怎么进入, 中间在哪儿转弯/卡住/惊喜, 傍晚 / 临收工怎么收尾。具体提到任务全名、用到的工具(Codex / Claude Code / git)、某次提交或讨论。**禁止**: bullet 格式, 通报体, 重复 highlights 的具体产出。",\n'
-        '      "en": "**4-6 sentences, 200-360 chars**: a story of the day — how you got into it, where it turned/stuck/surprised, how it wound down. Name the tasks (full Feishu titles), tools (Codex / Claude Code / git), specific commits or discussions. NO bullets, NO status-report tone (\'today I worked on X, Y, Z\'), and do not repeat the highlights bullets."\n'
+        '      "zh": "**4-6 句, 150-260 字** 跨项目叙事段落。借助上面 per-project 摘要里的关键词, 但要重新串成流畅故事: 早上怎么进入, 中间在哪儿转弯/卡住/惊喜, 傍晚怎么收尾。具体提到任务全名、工具(Codex / Claude Code / git)、某次提交或讨论。**禁止**: bullet 格式, 通报体, 直接复制 per-project 摘要里的句子。",\n'
+        '      "en": "**4-6 sentences, 200-360 chars**: a story of the day across projects. Borrow keywords from the per-project summaries above but weave them into one flow — morning entry, midday pivot/stuck-point/surprise, how the day wound down. Name the tasks (full Feishu titles), tools (Codex / Claude Code / git), specific commits. NO bullets, NO status-report tone, do NOT verbatim-copy from per-project summaries."\n'
         '    }\n'
         '  },\n'
         '  "trend": {\n'
@@ -570,10 +574,6 @@ def _overview_user(
         '    "comparison": {"zh": "1 句 (≤60 字) 工作重心/节奏 vs 昨天怎么变",\n'
         '                   "en": "1 sentence (≤90 chars) on how focus/pace shifted vs yesterday"}\n'
         '  },\n'
-        '  "highlights":   [\n'
-        '    {"zh": "**2-4 条** 今天真正推进的飞书任务+动作 (用任务全名)。bullet 风格多样化, 每条 ≤50 字",\n'
-        '     "en": "2-4 concrete advances on Feishu tasks (full task names), varied bullet phrasing, ≤80 chars each"}\n'
-        '  ],\n'
         '  "work_pattern": [\n'
         '    {"zh": "**1-4 条** 基于【今日骨架统计 vs 近 N 天均值】的具体观察, 必须 grounded 在数字 (例: \'23:31 收工, 比平时晚 1h\')。每条 ≤60 字。❌ 空话禁止",\n'
         '     "en": "1-4 observations comparing today\'s time data vs the N-day baseline, MUST be grounded in numbers (e.g. \'wrapped at 23:31, 1h later than your average\'). ≤100 chars each. NO generic advice"}\n'
@@ -586,6 +586,58 @@ def _overview_user(
     )
 
 
+def _load_project_summaries_text(con, date: str) -> str:
+    """Read all per-project ai_summary rows for this date and format them
+    as a compact bullet list for the overview prompt. Each entry includes
+    the project name, what got done (≤2 bullets), the next step, and
+    status — enough for the meta-narrative to weave projects together
+    without re-reading the raw events."""
+    try:
+        rows = con.execute(
+            """
+            SELECT p.project, p.event_count, p.active_minutes,
+                   c.value_json AS summary_json
+              FROM day_project_report p
+              LEFT JOIN day_project_channel c
+                ON c.date = p.date AND c.project = p.project
+               AND c.channel = 'ai_summary'
+             WHERE p.date = ?
+             ORDER BY p.event_count DESC
+            """,
+            (date,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return ""
+    if not rows:
+        return ""
+    lines: list[str] = []
+    for r in rows:
+        s = None
+        if r["summary_json"]:
+            try:
+                s = json.loads(r["summary_json"])
+            except json.JSONDecodeError:
+                s = None
+        head = f"- [{r['project']}] {(r['active_minutes'] or 0)/60:.1f}h · {r['event_count']} events"
+        if isinstance(s, dict):
+            txt = (s.get("summary") or "").strip()
+            wwd = s.get("what_was_done") or []
+            ns = s.get("next_steps") or []
+            status = s.get("status") or ""
+            if status:
+                head += f" · status={status}"
+            lines.append(head)
+            if txt:
+                lines.append(f"    summary: {txt}")
+            for w in wwd[:2]:
+                lines.append(f"    did: {w}")
+            if ns:
+                lines.append(f"    next: {ns[0]}")
+        else:
+            lines.append(head)
+    return "\n".join(lines)
+
+
 def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> ChannelResult:
     if not events:
         return ChannelResult(value={
@@ -593,7 +645,7 @@ def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> Ch
             "overview":  {"narrative": {"zh": "今天没有记录到事件。",
                                          "en": "No events recorded today."}},
             "trend": None,
-            "highlights": [], "work_pattern": [], "suggestions": [],
+            "work_pattern": [], "suggestions": [],
         })
     if not ai_client.is_available():
         return ChannelResult(value=None)  # written as JSON null, error=None
@@ -603,9 +655,16 @@ def compute_ai_overview(events: list[dict[str, Any]], ctx: ChannelContext) -> Ch
     tasks_text = _load_active_task_context(ctx.con)
     baseline = _compute_recent_baseline(ctx.con, ctx.date)
     baseline_text = _format_baseline(baseline)
+    # v17: pull per-project ai_summary rows (already computed because
+    # ai_overview is registered AFTER the project channels in the daily
+    # dependency graph) so the narrative can borrow from them.
+    project_summaries_text = _load_project_summaries_text(ctx.con, ctx.date)
     resp = ai_client.call_json_validated(
         system=OVERVIEW_SYSTEM,
-        user=_overview_user(ctx.date, stats_text, events_text, tasks_text, baseline_text),
+        user=_overview_user(
+            ctx.date, stats_text, events_text, tasks_text, baseline_text,
+            project_summaries_text=project_summaries_text,
+        ),
         validator=validate_overview,
         max_tokens=5000,  # bilingual output roughly doubles tokens
     )
