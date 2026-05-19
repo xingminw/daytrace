@@ -995,8 +995,8 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         # Default to shifted-yesterday rather than "most recent with any data" —
         # today's shifted-day is usually still in flight at the time the user
         # opens the dashboard, so yesterday is the page they actually want.
-        from datetime import datetime as _dt, date as _dt_date, timedelta as _td
-        from daytrace import stats as _stats
+        from datetime import datetime as _dt, timedelta as _td
+        from daytrace import stats as _stats  # noqa: F401 — referenced via module attribute below
         now = _dt.now()
         ref = now.date() if now.hour >= _stats.DAY_BOUNDARY_HOUR else (now.date() - _td(days=1))
         date = (ref - _td(days=1)).isoformat()
@@ -3955,7 +3955,6 @@ def _tasks_panel_one(
         )
 
         # Sortable data-* attrs: numeric where applicable, "" → fallback to bottom
-        from datetime import date as _date_mod
         due_sort = wi.get("due_date") or "9999-12-31"
         priority_sort = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}.get(priority, 9)
         status_sort = {"进行中": 0, "待办": 1, "完成": 2}.get(status, 9)
@@ -4883,7 +4882,6 @@ def _apply_audit_aliases(db_path: Path, picks: list[tuple[str, str]]) -> dict:
 
     Returns {"added": N, "removed": M, "links_inserted": K}.
     """
-    import yaml
     from daytrace.work_items import DEFAULT_ALIASES, load_aliases, rebuild_links
 
     existing = load_aliases()

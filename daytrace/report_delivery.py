@@ -16,7 +16,6 @@ Errors raise; the CLI converts them to non-zero exit codes.
 from __future__ import annotations
 
 import json
-import os
 import smtplib
 import subprocess
 from email.message import EmailMessage
