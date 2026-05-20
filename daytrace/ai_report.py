@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v18"  # v18 = restore highlights w/ task-focus rule; suggestions emphasize milestones
+AI_VERSION = "v19"  # v19 = bilingual per-project summaries / continuity
 
 
 # ----- Shape validators ------------------------------------------------
@@ -202,11 +202,14 @@ def validate_project_summary_batch(payload):
     for proj, body in by_project.items():
         if not isinstance(body, dict):
             raise ShapeError(f"by_project[{proj!r}] must be an object")
+        summary = _bilingual_str(body.get("summary"))
+        if summary is None:
+            raise ShapeError(f"by_project[{proj!r}].summary missing")
         cleaned[proj] = {
-            "summary":       _require_str(body, "summary"),
-            "what_was_done": _require_list_of_str(body, "what_was_done", default_empty=True),
+            "summary":       summary,
+            "what_was_done": _bilingual_list(body.get("what_was_done")),
             "status":        str(body.get("status") or "unknown"),
-            "next_steps":    _require_list_of_str(body, "next_steps", default_empty=True),
+            "next_steps":    _bilingual_list(body.get("next_steps")),
         }
     return {"by_project": cleaned}
 
@@ -223,7 +226,7 @@ def validate_project_continuity_batch(payload):
         if not isinstance(body, dict):
             raise ShapeError(f"by_project[{proj!r}] must be an object")
         cleaned[proj] = {
-            "relation_to_previous": body.get("relation_to_previous"),
+            "relation_to_previous": _bilingual_str(body.get("relation_to_previous"), allow_empty=True),
             "momentum": str(body.get("momentum") or "steady"),
         }
     return {"by_project": cleaned}
@@ -739,7 +742,11 @@ def _previous_day_overview(con: sqlite3.Connection, date: str):
 
 PROJECT_SUMMARY_SYSTEM = (
     "你是 DayTrace 项目进展助手。基于当日按项目分组的事件清单, 对每个项目"
-    "输出当天进展。严格只输出 JSON, 键为项目名, 不要 Markdown。"
+    "输出当天进展。\n\n"
+    "**双语输出**: summary / what_was_done / next_steps 里的每个文本都必须是"
+    "{\"zh\": \"...\", \"en\": \"...\"} 对象。两种语言独立生成同一份内容。\n"
+    "**en 字段必须是纯英文**: 不要复制中文项目名或中文事件内容;必要时用简短英文意译。\n\n"
+    "严格只输出 JSON, 键为项目名, 不要 Markdown。"
 )
 
 
@@ -764,13 +771,15 @@ def compute_ai_project_summary_batch(events, ctx: ChannelContext) -> ChannelResu
         f"【日期】{ctx.date}\n\n"
         f"【项目分组事件】\n" + "\n\n".join(groups_text_parts) + "\n\n"
         "【输出 JSON, 顶层键为 by_project, 值为以项目名为键的字典】\n"
+        "注意: 所有文本字段都用 {\"zh\": \"...\", \"en\": \"...\"}; "
+        "status 仍然用英文枚举字符串。\n"
         '{\n'
         '  "by_project": {\n'
         '    "<项目名>": {\n'
-        '      "summary": "≤50 字, 这个项目今天做了什么",\n'
-        '      "what_was_done": ["2-5 条要点, 每条 ≤30 字"],\n'
+        '      "summary": {"zh": "≤50 字, 这个项目今天做了什么", "en": "≤80 chars, what moved today in this project"},\n'
+        '      "what_was_done": [{"zh": "2-5 条要点, 每条 ≤30 字", "en": "2-5 bullets, ≤70 chars each"}],\n'
         '      "status": "in_progress|done|blocked|explored",\n'
-        '      "next_steps": ["0-3 条, 每条 ≤30 字"]\n'
+        '      "next_steps": [{"zh": "0-3 条, 每条 ≤30 字", "en": "0-3 bullets, ≤70 chars each"}]\n'
         '    }\n'
         '  }\n'
         '}'
@@ -789,7 +798,8 @@ def compute_ai_project_summary_batch(events, ctx: ChannelContext) -> ChannelResu
 
 PROJECT_CONTINUITY_SYSTEM = (
     "你是 DayTrace 项目跨天助手。对比每个项目今天和它上一次活跃时的情况, "
-    "输出连续性判断。严格只输出 JSON, 不要 Markdown。"
+    "输出连续性判断。relation_to_previous 必须是 {\"zh\":..., \"en\":...} "
+    "双语对象,en 字段必须是纯英文。严格只输出 JSON, 不要 Markdown。"
 )
 
 
@@ -823,7 +833,7 @@ def compute_ai_project_continuity_batch(events, ctx: ChannelContext) -> ChannelR
         '{\n'
         '  "by_project": {\n'
         '    "<项目名>": {\n'
-        '      "relation_to_previous": "1-2 句; 若 null 上下文则写 ‘项目首次出现’",\n'
+        '      "relation_to_previous": {"zh": "1-2 句; 若 null 上下文则写 项目首次出现", "en": "1-2 sentences; say first seen if no prior context"},\n'
         '      "momentum": "rising|steady|dropping|new|paused"\n'
         '    }\n'
         '  }\n'

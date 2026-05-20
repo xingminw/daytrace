@@ -83,7 +83,8 @@ def test_validate_project_summary_batch_accepts_and_normalizes():
     assert set(out["by_project"]) == {"A", "B"}
     assert out["by_project"]["A"]["status"] == "in_progress"
     assert out["by_project"]["B"]["status"] == "unknown"  # default
-    assert out["by_project"]["B"]["next_steps"] == ["再跑一次"]
+    assert out["by_project"]["B"]["summary"] == {"zh": "继续 Y", "en": ""}
+    assert out["by_project"]["B"]["next_steps"] == [{"zh": "再跑一次", "en": ""}]
 
 
 def test_validate_project_continuity_batch_keeps_relation_null():

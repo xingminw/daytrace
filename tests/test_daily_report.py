@@ -285,7 +285,7 @@ def test_ai_path_uses_mocked_deepseek_and_records_cost(tmp_path, monkeypatch):
 
     # Per-project slices read the batch correctly
     by_proj = {p["project"]: p for p in payload["projects"]}
-    assert by_proj["A"]["channels"]["ai_summary"]["summary"] == "在 A 上推进了 X"
+    assert by_proj["A"]["channels"]["ai_summary"]["summary"] == {"zh": "在 A 上推进了 X", "en": ""}
     # No prior day exists → continuity short-circuits to "new" without API call.
     assert by_proj["A"]["channels"]["ai_continuity"]["momentum"] == "new"
 

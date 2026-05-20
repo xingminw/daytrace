@@ -277,6 +277,11 @@ _STRINGS: dict[str, dict[str, str]] = {
     "tasks_col_source":  {"zh": "源",          "en": "Source"},
     "tasks_col_progress":{"zh": "本期进展",    "en": "Latest progress"},
     "tasks_col_next":    {"zh": "下一步",      "en": "Next step"},
+    "tasks_ai_details":  {"zh": "展开原文",    "en": "Details"},
+    "tasks_ai_summary":  {"zh": "概要",        "en": "Summary"},
+    "tasks_ai_done":     {"zh": "做了什么",    "en": "What was done"},
+    "tasks_ai_status":   {"zh": "状态",        "en": "Status"},
+    "tasks_ai_next":     {"zh": "下一步",      "en": "Next steps"},
 }
 
 
@@ -654,11 +659,39 @@ body.events-page form { height:100%; }
 .insights-col ul li { font-size:14.5px; line-height:1.65; color:#362f27; margin-bottom:8px; }
 .insights-col ul li:last-child { margin-bottom:0; }
 .insights-col .muted { font-size:13.5px; }
-/* Tasks table — AI summary cells. Two-line clamp so the table row
-   stays compact but you still see enough; full text on hover via
-   the title attribute. */
+/* Tasks table — AI summary cells. Compact by default; click to unfold
+   the original AI payload fields inside the cell. */
 .col-ai-progress, .col-ai-next { font-size:12px; line-height:1.4; color:#3b352e; vertical-align:top; padding-top:8px; }
 .ai-cell-text { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+.task-row.expandable { cursor:pointer; }
+.task-row.expandable .tasks-title-cell::after {
+  content:"▾"; color:var(--muted); font-size:10px; margin-left:8px;
+}
+.task-row.expandable.row-expanded .tasks-title-cell::after { content:"▴"; }
+.task-ai-row[hidden] { display:none; }
+.task-ai-row td {
+  padding:0 0 12px 0; border-top:none;
+}
+.task-ai-card {
+  margin:0 0 0 312px; padding:10px 12px;
+  border:1px dashed var(--line); border-radius:8px;
+  background:rgba(255,255,255,.38);
+  display:grid; grid-template-columns:1fr 1fr; gap:14px;
+}
+.ai-cell-expanded {
+  color:#4d463d;
+}
+.ai-cell-expanded .ai-section { margin-top:6px; }
+.ai-cell-expanded .ai-section:first-child { margin-top:0; }
+.ai-cell-expanded .ai-label {
+  display:block; color:var(--muted); font-size:10.5px; font-weight:700;
+  margin-bottom:2px;
+}
+.ai-cell-expanded ul { margin:3px 0 0 16px; padding:0; }
+.ai-cell-expanded li { margin:2px 0; }
+@media (max-width: 980px) {
+  .task-ai-card { margin-left:0; grid-template-columns:1fr; }
+}
 /* Projects card CSS removed — per-project AI now lives as Latest /
    Next columns inside the unified Tasks table (see .col-ai-progress). */
 /* Daily timeline card — 7 cols side by side, each a <details> that
@@ -3007,10 +3040,10 @@ def _render_project_row(row: dict, channels: dict[str, str | None]) -> str:
     #   1) 概要 + 做了什么  (summary + what_was_done bullets)
     #   2) 下一步             (next_steps bullets)
     #   3) 对比上次           (continuity momentum + relation_to_previous)
-    summary_text = summary.get("summary") if isinstance(summary, dict) else ""
-    what_was_done = summary.get("what_was_done") if isinstance(summary, dict) else None
+    summary_text = L(summary.get("summary")) if isinstance(summary, dict) else ""
+    what_was_done = _ai_list(summary.get("what_was_done")) if isinstance(summary, dict) else None
     status = summary.get("status") if isinstance(summary, dict) else None
-    next_steps = summary.get("next_steps") if isinstance(summary, dict) else None
+    next_steps = _ai_list(summary.get("next_steps")) if isinstance(summary, dict) else None
 
     summary_cell_parts: list[str] = []
     if status:
@@ -3038,7 +3071,7 @@ def _render_project_row(row: dict, channels: dict[str, str | None]) -> str:
     if isinstance(continuity, dict) and continuity:
         cont_cell = (
             f'{_momentum_chip(continuity.get("momentum"))}'
-            f'<div class="cont-text">{esc(continuity.get("relation_to_previous") or "")}</div>'
+            f'<div class="cont-text">{esc(L(continuity.get("relation_to_previous")))}</div>'
         )
 
     return (
@@ -5394,6 +5427,99 @@ def _latest_ai_summary_per_work_item(
     return out
 
 
+def _ai_list(items: Any) -> list[str]:
+    if not isinstance(items, list):
+        return []
+    out: list[str] = []
+    for x in items:
+        text = _L_ai_project_text(x).strip() if isinstance(x, (dict, str)) else str(x or "").strip()
+        if text:
+            out.append(text)
+    return out
+
+
+def _L_ai_project_text(value: Any) -> str:
+    """Project-summary cells should not leak Chinese fallback on EN pages.
+
+    Legacy cached project summaries were plain zh strings. For the main
+    daily/weekly narrative we intentionally fall back across languages, but
+    these table cells sit in an otherwise-English table; showing zh here is
+    more confusing than showing an empty cell until the v19 bilingual cache
+    is regenerated.
+    """
+    lang = _CURRENT_LANG.get()
+    if isinstance(value, dict):
+        v = (value.get(lang) or "").strip()
+        if v:
+            return v
+        if lang == "zh":
+            return (value.get("en") or "").strip()
+        return ""
+    if isinstance(value, str):
+        return value.strip() if lang == "zh" else ""
+    return ""
+
+
+def _ai_project_summary_view(latest: dict | None) -> dict[str, Any]:
+    """Return compact leads plus one row-level expansion body for a
+    project-summary payload."""
+    if not isinstance(latest, dict):
+        return {"progress": "", "next": "", "details": "", "has_details": False}
+
+    summary = _L_ai_project_text(latest.get("summary")).strip()
+    status = str(latest.get("status") or "").strip()
+    done = _ai_list(latest.get("what_was_done"))
+    next_steps = _ai_list(latest.get("next_steps"))
+
+    progress_lead = summary or (done[0] if done else "")
+    next_lead = next_steps[0] if next_steps else ""
+
+    progress_sections: list[str] = []
+    if summary:
+        progress_sections.append(
+            f'<div class="ai-section"><span class="ai-label">{esc(T("tasks_ai_summary"))}</span>'
+            f'{esc(summary)}</div>'
+        )
+    if done:
+        progress_sections.append(
+            f'<div class="ai-section"><span class="ai-label">{esc(T("tasks_ai_done"))}</span>'
+            '<ul>' + "".join(f"<li>{esc(x)}</li>" for x in done) + '</ul></div>'
+        )
+    if status:
+        progress_sections.append(
+            f'<div class="ai-section"><span class="ai-label">{esc(T("tasks_ai_status"))}</span>'
+            f'{esc(status)}</div>'
+        )
+
+    next_sections: list[str] = []
+    if next_steps:
+        next_sections.append(
+            f'<div class="ai-section"><span class="ai-label">{esc(T("tasks_ai_next"))}</span>'
+            '<ul>' + "".join(f"<li>{esc(x)}</li>" for x in next_steps) + '</ul></div>'
+        )
+    if status:
+        next_sections.append(
+            f'<div class="ai-section"><span class="ai-label">{esc(T("tasks_ai_status"))}</span>'
+            f'{esc(status)}</div>'
+        )
+
+    has_details = bool(progress_sections or next_sections)
+    details = ""
+    if has_details:
+        details = (
+            '<div class="task-ai-card">'
+            '<div class="ai-cell-expanded">' + "".join(progress_sections) + '</div>'
+            '<div class="ai-cell-expanded">' + "".join(next_sections) + '</div>'
+            '</div>'
+        )
+    return {
+        "progress": progress_lead,
+        "next": next_lead,
+        "details": details,
+        "has_details": has_details,
+    }
+
+
 def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
     """┃ Tasks panel ┃ — unified single-table view of all work_items
     (任务 + 审稿 in one rows-list), with a top tab bar to filter by
@@ -5426,7 +5552,7 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
     all_items.sort(key=_sort_key)
 
     rows_html: list[str] = []
-    for wi in all_items:
+    for idx, wi in enumerate(all_items):
         rid = wi["record_id"]
         st = stats.get(rid, {})
         minutes = st.get("minutes", 0)
@@ -5474,21 +5600,23 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         )
 
         # AI summary columns: pull from latest ai_summary for this record's
-        # (date, project) over the window. Reviews collapse into a single
-        # dim bucket so they don't have per-item AI — leave their cells "—".
+        # (date, project) over the window. The cell shows a compact lead
+        # line and expands to the original generated fields.
         latest = ai_summaries.get(rid) if isinstance(ai_summaries.get(rid), dict) else None
-        summary_text = (latest or {}).get("summary") or ""
-        next_steps = (latest or {}).get("next_steps") or []
-        next_text = next_steps[0] if next_steps else ""
-
+        ai_view = _ai_project_summary_view(latest)
+        progress_text = ai_view["progress"]
+        next_text = ai_view["next"]
         progress_cell = (
-            f'<div class="ai-cell-text" title="{esc(summary_text)}">{esc(summary_text)}</div>'
-            if summary_text else '<span class="muted">—</span>'
+            f'<div class="ai-cell-text" title="{esc(progress_text)}">{esc(progress_text)}</div>'
+            if progress_text else '<span class="muted">—</span>'
         )
         next_cell = (
             f'<div class="ai-cell-text" title="{esc(next_text)}">{esc(next_text)}</div>'
             if next_text else '<span class="muted">—</span>'
         )
+        ai_row_id = f"task-ai-{idx}"
+        expandable_class = " expandable" if ai_view["has_details"] else ""
+        ai_row_attr = f' data-ai-row="{ai_row_id}"' if ai_view["has_details"] else ""
 
         due_sort = wi.get("due_date") or "9999-12-31"
         priority_sort = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}.get(priority, 9)
@@ -5496,7 +5624,7 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         last_sort = last_iso or "0000"
 
         rows_html.append(
-            f'<tr class="task-row" data-status="{esc(status)}" '
+            f'<tr class="task-row{expandable_class}" data-status="{esc(status)}" '
             f'data-status-sort="{status_sort}" '
             f'data-priority-sort="{priority_sort}" '
             f'data-table="{esc(tk)}" '
@@ -5504,7 +5632,8 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
             f'data-events="{ev_count}" '
             f'data-due-sort="{esc(due_sort)}" '
             f'data-last-sort="{esc(last_sort)}" '
-            f'data-title="{esc(wi.get("title") or "")}">'
+            f'data-title="{esc(wi.get("title") or "")}"'
+            f'{ai_row_attr}>'
             f'<td>{_chip(table_labels.get(tk, tk), _TABLE_KEY_COLOR.get(tk))}</td>'
             f'<td>{_chip(priority, _PRIORITY_COLOR.get(priority)) or chr(0x2014)}</td>'
             f'<td>{_chip(_localized_status(status), _STATUS_COLOR.get(status))}</td>'
@@ -5514,6 +5643,12 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
             f'<td class="col-ai-progress">{progress_cell}</td>'
             f'<td class="col-ai-next">{next_cell}</td>'
             '</tr>'
+            + (
+                f'<tr class="task-ai-row" id="{ai_row_id}" hidden '
+                f'data-parent-table="{esc(tk)}" data-parent-status="{esc(status)}">'
+                f'<td colspan="8">{ai_view["details"]}</td></tr>'
+                if ai_view["has_details"] else ""
+            )
         )
 
     # Tab bar (全部 / 任务 / 审稿) filters rows by data-table attr in JS.
@@ -5584,13 +5719,18 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         'var bar=document.querySelector(\'[data-role="tasks-table-pick"]\');'
         'var cb=panel.querySelector(\'[data-role="tasks-show-completed"]\');'
         'var pick="all";'
+        'function detailRow(r){return r.dataset.aiRow?document.getElementById(r.dataset.aiRow):null;}'
+        'function rowVisible(r){return r.style.display!=="none";}'
         'function applyVis(){'
         'var showDone=cb&&cb.checked;'
         'panel.querySelectorAll(".task-row").forEach(function(r){'
         'var t=r.dataset.table;'
         'var showTable=(pick==="all"||t===pick);'
         'var doneOk=(showDone||r.dataset.status!=="完成");'
-        'r.style.display=(showTable&&doneOk)?"":"none";});'
+        'var visible=showTable&&doneOk;'
+        'r.style.display=visible?"":"none";'
+        'var d=detailRow(r);if(d){d.hidden=!(visible&&r.classList.contains("row-expanded"));}'
+        '});'
         '}'
         'if(bar){bar.querySelectorAll(".dim-tab").forEach(function(btn){'
         'btn.addEventListener("click",function(){'
@@ -5613,7 +5753,15 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         'function applySort(key,dir){'
         'var rows=Array.prototype.slice.call(panel.querySelectorAll(".task-row"));'
         'rows.sort(function(a,b){var va=getKey(a,key),vb=getKey(b,key);if(va===vb)return 0;return (va>vb?1:-1)*dir;});'
-        'rows.forEach(function(r){tbody.appendChild(r);});}'
+        'rows.forEach(function(r){tbody.appendChild(r);var d=detailRow(r);if(d)tbody.appendChild(d);});}'
+        'panel.querySelectorAll(".task-row.expandable").forEach(function(r){'
+        'r.addEventListener("click",function(e){'
+        'if(e.target.closest("a,button,input,select,label"))return;'
+        'var d=detailRow(r);if(!d)return;'
+        'var open=!r.classList.contains("row-expanded");'
+        'r.classList.toggle("row-expanded",open);'
+        'd.hidden=!(open&&rowVisible(r));'
+        '});});'
         'panel.querySelectorAll("thead th[data-sort]").forEach(function(th){'
         'th.addEventListener("click",function(){'
         'var key=th.dataset.sort;'
