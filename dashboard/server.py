@@ -1206,10 +1206,26 @@ def json_response(handler: BaseHTTPRequestHandler, obj, status=200):
 
 
 def html_response(handler: BaseHTTPRequestHandler, body: str, status=200):
-    data = body.encode("utf-8")
-    data, gzipped = _maybe_gzip(handler, data)
+    raw = body.encode("utf-8")
+    # ETag of the uncompressed payload — gzip is just transport.
+    import hashlib
+    etag = '"' + hashlib.sha1(raw).hexdigest()[:16] + '"'
+    # 304 short-circuit: if client sent matching If-None-Match, send no body.
+    # Over slow Tailscale DERP this saves a 48 KB-ish payload + serialization.
+    inm = handler.headers.get("If-None-Match", "")
+    if inm and etag in inm:
+        handler.send_response(304)
+        handler.send_header("ETag", etag)
+        # 5-minute fresh window: a dashboard reload within 5min skips the
+        # network entirely (browser uses its cached body).
+        handler.send_header("Cache-Control", "private, max-age=300")
+        handler.end_headers()
+        return
+    data, gzipped = _maybe_gzip(handler, raw)
     handler.send_response(status)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("ETag", etag)
+    handler.send_header("Cache-Control", "private, max-age=300")
     if gzipped:
         handler.send_header("Content-Encoding", "gzip")
         handler.send_header("Vary", "Accept-Encoding")
