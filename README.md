@@ -1,6 +1,13 @@
-# DayTrace
+<p align="left">
+  <img src="docs/assets/logo-wordmark.svg" alt="DayTrace" height="40">
+</p>
 
-**Master your work data in the age of AI tools.**
+**Your day, traced from the signals your AI tools already emit.**
+
+> 🌐 [Live demo](https://xingminw.github.io/daytrace/demo/) ·
+> [Landing page](https://xingminw.github.io/daytrace/) ·
+> [中文版](https://xingminw.github.io/daytrace/index.zh.html) /
+> [README](README.zh.md)
 
 Codex, Claude Code, Cursor, DeepSeek — these are how your real work
 happens now. They generate enormous, fragmentary signal about what you
@@ -15,8 +22,6 @@ written in your voice, owned entirely on your machine.
 
 > Built for one person (the author) on macOS. Open-source so you can
 > steal the parts you like.
-
-> 🌐 [中文 README](README.zh.md)
 
 ```
 collectors                SQLite events           AI overview          delivery
@@ -34,16 +39,29 @@ day writes the narrative. One Mac is the hub; other machines feed it
 via SSH. No DayTrace cloud, no telemetry, no third party touches your
 data without your config saying so.
 
+## What it looks like
+
+<p align="center">
+  <a href="https://xingminw.github.io/daytrace/demo/">
+    <img src="docs/assets/screenshots/daily-en.png" alt="DayTrace daily report — demo page rendered with mock data" width="780">
+  </a>
+  <br>
+  <em>Daily report — <a href="https://xingminw.github.io/daytrace/demo/">live demo</a> ·
+  <a href="https://xingminw.github.io/daytrace/demo/weekly.html">Weekly view</a> ·
+  <a href="https://xingminw.github.io/daytrace/demo/index.zh.html">中文</a></em>
+</p>
+
 ## What you actually see
 
 - **A 4-tile dashboard** — events / active hours / longest focus / AI cost
 - **A short daily narrative** in your voice
-  > *"早上一头扎进 Daily briefing 开发项目, 跟 Codex 来回拉扯飞书工作区结构…
-  > 到了傍晚, 切到 DayTrace, 跟 Claude Code 讨论数据源…"*
+  > *"Spent the morning deep in paper-revision, going back and forth with
+  > Codex on the §4 wording. After lunch switched to daytrace and tuned the
+  > demo data generator. Evening pivoted to infra-cleanup…"*
 - **3-column Insights** that don't get cute:
-  - 🚀 关键任务进展 — real Feishu tasks moved today, with concrete actions
-  - ⏰ 时间安排回顾 — today vs a 7-day baseline (no generic productivity advice)
-  - 🔔 任务跟进提醒 — deadlines closing in, tasks gone N days without a touch
+  - 🚀 **Task progress** — real Feishu tasks moved today, with concrete actions
+  - ⏰ **Time pattern** — today vs a 7-day baseline (no generic productivity advice)
+  - 🔔 **Follow-ups** — deadlines closing in, tasks gone N days without a touch
 - **Charts that match the dashboard** — stacked bars by task, donut totals,
   embedded inline in the email and in the Feishu cloud document
 - **A per-day weekly timeline** so the week's narrative isn't a flat
@@ -86,7 +104,7 @@ make dashboard      # open http://127.0.0.1:8765/today
 ```
 daytrace/          core library
   schema.py          canonical TraceEvent shape
-  db.py              SQLite schema + queries (18 tables, version 12)
+  db.py              SQLite schema + queries (18 tables, version 15)
   channels.py        channel registry + dependency orchestrator
   stats.py           deterministic stats channels (7 day, 6 day-project)
   ai_client.py       thin DeepSeek HTTPS client (stdlib only)

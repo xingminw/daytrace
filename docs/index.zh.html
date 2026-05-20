@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DayTrace — AI 工具替你留下的痕迹，反过来讲清你这一天</title>
+  <meta name="description" content="本地优先的个人轨迹系统。悄悄收 AI、git、文档每天产生的痕迹，对齐你的真实任务，最后写成一份你自己愿意读的日报。">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <meta property="og:title" content="DayTrace">
+  <meta property="og:description" content="本地优先的个人轨迹系统。AI 工具替你留下的痕迹，反过来讲清你这一天。">
+  <meta property="og:type" content="website">
+  <style>
+    :root {
+      --ink: #0b1220;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --accent: #7aa2f7;
+      --accent-soft: #e6efff;
+      --green: #95e6cb;
+      --code-bg: #0b1220;
+      --code-fg: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+    }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+    header {
+      padding: 28px 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    header .brand { display: flex; align-items: center; gap: 12px; }
+    header .brand img { display: block; height: 30px; }
+    header nav a {
+      color: var(--muted);
+      text-decoration: none;
+      margin-left: 18px;
+      font-size: 14px;
+    }
+    header nav a:hover { color: var(--ink); }
+    .lang-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      border: 1px solid var(--line); border-radius: 999px;
+      padding: 3px 4px; margin-left: 18px;
+    }
+    .lang-pill a {
+      margin: 0; padding: 4px 10px; border-radius: 999px;
+      font-size: 12.5px; font-weight: 650; color: var(--muted);
+    }
+    .lang-pill a.active { background: var(--ink); color: #fff; }
+    .lang-pill a:hover:not(.active) { color: var(--ink); }
+
+    .hero {
+      padding: 48px 0 36px;
+      border-bottom: 1px solid var(--line);
+    }
+    .hero h1 {
+      font-size: 38px;
+      line-height: 1.2;
+      margin: 0 0 14px;
+      letter-spacing: -0.3px;
+    }
+    .hero .sub {
+      font-size: 18px;
+      color: var(--muted);
+      margin: 0 0 28px;
+      max-width: 640px;
+    }
+    .hero .cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--ink);
+      color: #fff;
+      text-decoration: none;
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 15px;
+    }
+    .hero .cta:hover { background: #1f2937; }
+    .hero .cta.secondary {
+      background: var(--card);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      margin-left: 8px;
+      font-weight: 500;
+    }
+    .hero .cta.secondary:hover { border-color: var(--ink); }
+
+    section { padding: 40px 0; border-bottom: 1px solid var(--line); }
+    section h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 1.4px;
+      color: var(--muted);
+      margin: 0 0 18px;
+    }
+
+    .pipeline {
+      background: var(--code-bg);
+      color: var(--code-fg);
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      padding: 22px 24px;
+      border-radius: 10px;
+      overflow-x: auto;
+      line-height: 1.6;
+      margin: 0;
+    }
+    .pipeline .accent { color: var(--accent); }
+    .pipeline .green  { color: var(--green); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .card .head { font-weight: 700; margin-bottom: 6px; font-size: 15px; }
+    .card .body { color: var(--muted); font-size: 14px; }
+
+    .quote {
+      background: var(--accent-soft);
+      border-left: 3px solid var(--accent);
+      padding: 14px 18px;
+      border-radius: 4px;
+      color: var(--ink);
+      font-style: italic;
+      margin: 0;
+    }
+
+    pre.code {
+      background: var(--code-bg);
+      color: var(--code-fg);
+      padding: 16px 18px;
+      border-radius: 8px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      overflow-x: auto;
+      line-height: 1.6;
+    }
+    pre.code .comment { color: #8aa0c7; }
+    pre.code .accent  { color: var(--accent); }
+
+    footer {
+      padding: 28px 0 60px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    footer a { color: var(--muted); }
+
+    @media (max-width: 640px) {
+      .hero h1 { font-size: 28px; }
+      .hero .sub { font-size: 16px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <img src="assets/logo-wordmark.svg" alt="DayTrace">
+    </div>
+    <nav>
+      <a href="demo/index.zh.html">在线 demo</a>
+      <a href="https://github.com/xingminw/daytrace">GitHub</a>
+      <span class="lang-pill">
+        <a href="index.html">EN</a>
+        <a href="index.zh.html" class="active">中</a>
+      </span>
+    </nav>
+  </header>
+
+  <section class="hero" style="border-bottom:none; padding-bottom:24px">
+    <h1>AI 工具替你留下的痕迹，反过来讲清你这一天。</h1>
+    <p class="sub">
+      你现在真正干活的地方都在 Codex、Claude Code、Cursor、DeepSeek 这些工具里。
+      它们每天替你产生海量痕迹，但几乎没有系统在替<em>你</em>把它们收起来。<br>
+      DayTrace 干的就是这件事：<strong>本地优先</strong>、数据只在你机器上，
+      把 AI 工具、git、文档每天产生的信号都收回来，对齐你真实的任务，
+      最后还你一份 <em>你自己愿意读</em> 的日报。
+    </p>
+    <a class="cta" href="demo/index.zh.html">看在线 demo →</a>
+    <a class="cta secondary" href="https://github.com/xingminw/daytrace">GitHub 源码</a>
+  </section>
+
+  <section>
+    <h2>整体长这样</h2>
+    <pre class="pipeline">采集器                    SQLite 事件库          AI 总结              送出去
+─────────────             ──────────────         ────────────         ─────────────
+<span class="accent">claude_code</span>      ┐       events                 narrative            实时 dashboard
+<span class="accent">codex</span>            ├──►    day_report      ──►    highlights    ──►    （经 Tailscale）
+<span class="accent">git</span>              │       day_channel            work_pattern         飞书云文档
+<span class="accent">docs</span>             │       work_items             suggestions          Gmail (HTML)
+<span class="accent">hermes（飞书）</span>   │       event_work_…           trend                内嵌图表
+<span class="accent">ssh 远端</span>         ┘                              <span class="green">DeepSeek</span></pre>
+  </section>
+
+  <section>
+    <h2>你直接能看到的</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="head">一眼看完的 4 块</div>
+        <div class="body">事件数 / 活跃时长 / 最长专注块 / AI 花费 —— 进页面 1 秒掌握今天大致样子。</div>
+      </div>
+      <div class="card">
+        <div class="head">用你自己口气写的日报</div>
+        <div class="body">不是机器人的"今日完成 X 件事"，而是顺着你真实做过的事，像同事讲给你听。</div>
+      </div>
+      <div class="card">
+        <div class="head">Insights 不来虚的</div>
+        <div class="body">任务推进、今日 vs 7 日基线、临近 deadline 提醒。没有"今天要更专注哦"那种假关心。</div>
+      </div>
+      <div class="card">
+        <div class="head">图表和 dashboard 同一套配色</div>
+        <div class="body">按任务堆叠的柱状图、总量 donut，直接嵌进邮件和飞书云文档里。</div>
+      </div>
+      <div class="card">
+        <div class="head">周回顾 = 7 张日卡片</div>
+        <div class="body">一周横着摊开，七天各是一段故事，不是被压扁的一行表。</div>
+      </div>
+      <div class="card">
+        <div class="head">整个系统就一个 SQLite 文件</div>
+        <div class="body">所有记录都在那里。没有云、没有埋点、没有第三方碰你的数据。</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>语气长这样</h2>
+    <p class="quote">
+      "上午一头扎进 paper-revision，跟 Codex 来回拉扯 §4 实验设置的措辞……
+      午后切到 daytrace，盯着 demo 数据生成器，把假数据的味道调到尽量像真的……
+      傍晚转头清理 infra-cleanup 里那批没人用的 IAM 角色。"
+    </p>
+    <p style="margin-top:14px"><a href="demo/index.zh.html" style="color:var(--accent); text-decoration:none; font-weight:600">→ 在真实的一天上看一眼</a></p>
+  </section>
+
+  <section>
+    <h2>快速上手</h2>
+    <pre class="code"><span class="comment"># clone、装依赖、指向你的数据。</span>
+git clone https://github.com/xingminw/daytrace
+cd daytrace
+make install
+
+<span class="comment"># 配 DeepSeek + Gmail（可选，但日报里 AI 那块要靠它）。</span>
+mkdir -p ~/.daytrace
+cat &gt; ~/.daytrace/secrets.env &lt;&lt;'EOF'
+DEEPSEEK_API_KEY=sk-...
+DAYTRACE_GMAIL_USER=
+DAYTRACE_GMAIL_APP_PASSWORD=
+DAYTRACE_EMAIL_TO=
+EOF
+chmod 600 ~/.daytrace/secrets.env
+
+<span class="comment"># 跑一下。</span>
+make daily        <span class="comment"># 采集 + 给昨天写总结</span>
+make dashboard    <span class="comment"># 打开 http://127.0.0.1:8765/today</span></pre>
+  </section>
+
+  <section>
+    <h2>文档</h2>
+    <div class="grid">
+      <div class="card"><div class="head"><a href="architecture.zh.md" style="color:var(--ink)">架构 →</a></div>
+        <div class="body">流水线、模块地图、channel 注册表、多机 hub 模型。</div></div>
+      <div class="card"><div class="head"><a href="setup.zh.md" style="color:var(--ink)">部署 →</a></div>
+        <div class="body">安装、每份配置文件、密钥、定时任务、投递链路。</div></div>
+      <div class="card"><div class="head"><a href="data-model.zh.md" style="color:var(--ink)">数据模型 →</a></div>
+        <div class="body">每张 SQLite 表、events_hash 缓存契约、schema 迁移。</div></div>
+      <div class="card"><div class="head"><a href="demo/index.zh.html" style="color:var(--ink)">在线 demo →</a></div>
+        <div class="body">用假数据跑出来的日报和周报，效果跟真实页面一致。</div></div>
+    </div>
+  </section>
+
+  <footer>
+    DayTrace — MIT 协议。本来是给一个人用的工具，开源出来你顺手拿走想要的部分就行。<br>
+    <a href="https://github.com/xingminw/daytrace">github.com/xingminw/daytrace</a>
+    · <a href="index.html">English landing</a>
+  </footer>
+
+</div>
+</body>
+</html>

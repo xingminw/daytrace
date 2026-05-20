@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DayTrace — your day, traced from the signals your AI tools already emit</title>
+  <meta name="description" content="Local-first personal trace system. Quietly collects what Codex, Claude Code, git, and your docs emit, joins it to your tasks, and turns it into a daily narrative you actually want to read.">
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+  <meta property="og:title" content="DayTrace">
+  <meta property="og:description" content="A local-first personal trace system. Your day, traced from the signals your AI tools already emit.">
+  <meta property="og:type" content="website">
+  <style>
+    :root {
+      --ink: #0b1220;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --accent: #7aa2f7;
+      --accent-soft: #e6efff;
+      --green: #95e6cb;
+      --code-bg: #0b1220;
+      --code-fg: #e2e8f0;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", sans-serif;
+      font-size: 16px;
+      line-height: 1.55;
+    }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+    header {
+      padding: 28px 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    header .brand { display: flex; align-items: center; gap: 12px; }
+    header .brand img { display: block; height: 30px; }
+    header nav a {
+      color: var(--muted);
+      text-decoration: none;
+      margin-left: 18px;
+      font-size: 14px;
+    }
+    header nav a:hover { color: var(--ink); }
+    .lang-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      border: 1px solid var(--line); border-radius: 999px;
+      padding: 3px 4px; margin-left: 18px;
+    }
+    .lang-pill a {
+      margin: 0; padding: 4px 10px; border-radius: 999px;
+      font-size: 12.5px; font-weight: 650; color: var(--muted);
+    }
+    .lang-pill a.active { background: var(--ink); color: #fff; }
+    .lang-pill a:hover:not(.active) { color: var(--ink); }
+
+    .hero {
+      padding: 48px 0 36px;
+      border-bottom: 1px solid var(--line);
+    }
+    .hero h1 {
+      font-size: 40px;
+      line-height: 1.15;
+      margin: 0 0 14px;
+      letter-spacing: -0.5px;
+    }
+    .hero .sub {
+      font-size: 19px;
+      color: var(--muted);
+      margin: 0 0 28px;
+      max-width: 620px;
+    }
+    .hero .cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--ink);
+      color: #fff;
+      text-decoration: none;
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 15px;
+    }
+    .hero .cta:hover { background: #1f2937; }
+    .hero .cta.secondary {
+      background: var(--card);
+      color: var(--ink);
+      border: 1px solid var(--line);
+      margin-left: 8px;
+      font-weight: 500;
+    }
+    .hero .cta.secondary:hover { border-color: var(--ink); }
+
+    section { padding: 40px 0; border-bottom: 1px solid var(--line); }
+    section h2 {
+      font-size: 13px;
+      text-transform: uppercase;
+      letter-spacing: 1.4px;
+      color: var(--muted);
+      margin: 0 0 18px;
+    }
+
+    .pipeline {
+      background: var(--code-bg);
+      color: var(--code-fg);
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      padding: 22px 24px;
+      border-radius: 10px;
+      overflow-x: auto;
+      line-height: 1.6;
+      margin: 0;
+    }
+    .pipeline .accent { color: var(--accent); }
+    .pipeline .green  { color: var(--green); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 18px 20px;
+    }
+    .card .head { font-weight: 700; margin-bottom: 6px; font-size: 15px; }
+    .card .body { color: var(--muted); font-size: 14px; }
+
+    .quote {
+      background: var(--accent-soft);
+      border-left: 3px solid var(--accent);
+      padding: 14px 18px;
+      border-radius: 4px;
+      color: var(--ink);
+      font-style: italic;
+      margin: 0;
+    }
+
+    pre.code {
+      background: var(--code-bg);
+      color: var(--code-fg);
+      padding: 16px 18px;
+      border-radius: 8px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      overflow-x: auto;
+      line-height: 1.6;
+    }
+    pre.code .comment { color: #8aa0c7; }
+    pre.code .accent  { color: var(--accent); }
+
+    footer {
+      padding: 28px 0 60px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    footer a { color: var(--muted); }
+
+    @media (max-width: 640px) {
+      .hero h1 { font-size: 30px; }
+      .hero .sub { font-size: 16px; }
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <img src="assets/logo-wordmark.svg" alt="DayTrace">
+    </div>
+    <nav>
+      <a href="demo/">Live demo</a>
+      <a href="https://github.com/xingminw/daytrace">GitHub</a>
+      <span class="lang-pill">
+        <a href="index.html" class="active">EN</a>
+        <a href="index.zh.html">中</a>
+      </span>
+    </nav>
+  </header>
+
+  <section class="hero" style="border-bottom:none; padding-bottom:24px">
+    <h1>Your day, traced from the signals your AI tools already emit.</h1>
+    <p class="sub">
+      Codex, Claude Code, Cursor, DeepSeek — these are how your real work happens now.
+      DayTrace is a <strong>local-first personal trace system</strong> that quietly
+      collects the same signal your AI tools already emit, joins it to your local
+      code and tasks, and turns it into a daily narrative you actually want to read.
+    </p>
+    <a class="cta" href="demo/">View the live demo →</a>
+    <a class="cta secondary" href="https://github.com/xingminw/daytrace">Source on GitHub</a>
+  </section>
+
+  <section>
+    <h2>The shape of it</h2>
+    <pre class="pipeline">collectors                SQLite events           AI overview          delivery
+─────────────             ──────────────         ────────────         ─────────────
+<span class="accent">claude_code</span>      ┐       events                 narrative            live dashboard
+<span class="accent">codex</span>            ├──►    day_report      ──►    highlights    ──►    (via Tailscale)
+<span class="accent">git</span>              │       day_channel            work_pattern         Feishu Docs
+<span class="accent">docs</span>             │       work_items             suggestions          Gmail (HTML)
+<span class="accent">hermes (Feishu)</span>  │       event_work_…           trend                inline charts
+<span class="accent">ssh remotes</span>      ┘                              <span class="green">DeepSeek</span></pre>
+  </section>
+
+  <section>
+    <h2>What you actually see</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="head">4-tile dashboard</div>
+        <div class="body">events / active hours / longest focus / AI cost — at a glance.</div>
+      </div>
+      <div class="card">
+        <div class="head">A daily narrative in your voice</div>
+        <div class="body">Not a robotic recap. Anchored on real tasks, written like a friend.</div>
+      </div>
+      <div class="card">
+        <div class="head">Insights that don't get cute</div>
+        <div class="body">Task progress, today-vs-7-day baseline, deadline reminders. No fake "productivity advice."</div>
+      </div>
+      <div class="card">
+        <div class="head">Charts that match the dashboard</div>
+        <div class="body">Stacked bars by task, donut totals, inline-embedded in email and Feishu cloud doc.</div>
+      </div>
+      <div class="card">
+        <div class="head">A weekly timeline you can scan</div>
+        <div class="body">Per-day cards make the week a sequence, not a flat list.</div>
+      </div>
+      <div class="card">
+        <div class="head">Single SQLite file</div>
+        <div class="body">One file is the whole system of record. No cloud. No telemetry. No third party.</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>The voice</h2>
+    <p class="quote">
+      "Spent the morning deep in paper-revision, going back and forth with Codex
+      on the §4 experimental-setup wording. After lunch I switched to daytrace
+      and tuned the demo data generator so the fake events read like real ones.
+      Evening pivoted to infra-cleanup — pruned four unused IAM roles via
+      terraform. Three threads moved a step each; none closed; the paper
+      deadline is now Friday."
+    </p>
+    <p style="margin-top:14px"><a href="demo/" style="color:var(--accent); text-decoration:none; font-weight:600">→ See it on a real day</a></p>
+  </section>
+
+  <section>
+    <h2>Quick start</h2>
+    <pre class="code"><span class="comment"># Clone, install, point at your data sources.</span>
+git clone https://github.com/xingminw/daytrace
+cd daytrace
+make install
+
+<span class="comment"># Set up DeepSeek + Gmail credentials (optional but recommended).</span>
+mkdir -p ~/.daytrace
+cat &gt; ~/.daytrace/secrets.env &lt;&lt;'EOF'
+DEEPSEEK_API_KEY=sk-...
+DAYTRACE_GMAIL_USER=
+DAYTRACE_GMAIL_APP_PASSWORD=
+DAYTRACE_EMAIL_TO=
+EOF
+chmod 600 ~/.daytrace/secrets.env
+
+<span class="comment"># Run it.</span>
+make daily        <span class="comment"># collect + summarize yesterday</span>
+make dashboard    <span class="comment"># open http://127.0.0.1:8765/today</span></pre>
+  </section>
+
+  <section>
+    <h2>Docs</h2>
+    <div class="grid">
+      <div class="card"><div class="head"><a href="architecture.md" style="color:var(--ink)">Architecture →</a></div>
+        <div class="body">Pipeline, module map, channel registry, multi-device hub.</div></div>
+      <div class="card"><div class="head"><a href="setup.md" style="color:var(--ink)">Setup →</a></div>
+        <div class="body">Install, every config file, secrets, scheduled tasks, delivery.</div></div>
+      <div class="card"><div class="head"><a href="data-model.md" style="color:var(--ink)">Data model →</a></div>
+        <div class="body">Every SQLite table, the events_hash cache contract, migrations.</div></div>
+      <div class="card"><div class="head"><a href="demo/" style="color:var(--ink)">Live demo →</a></div>
+        <div class="body">A rendered daily and weekly report, populated with believable fake data.</div></div>
+    </div>
+  </section>
+
+  <footer>
+    DayTrace — MIT licensed. Built for one person; open-sourced so you can steal the parts you like.<br>
+    <a href="https://github.com/xingminw/daytrace">github.com/xingminw/daytrace</a>
+    · <a href="../README.zh.md">中文 README</a>
+  </footer>
+
+</div>
+</body>
+</html>

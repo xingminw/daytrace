@@ -51,3 +51,7 @@ data/
 
 # Feishu drive folder tokens — auto-generated on first upload, machine-local
 config/feishu_drive.yaml
+
+# Committed branding + GitHub-Pages screenshots (override *.png / *.svg above).
+!docs/assets/**
+

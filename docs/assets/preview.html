@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>DayTrace Logo Preview</title>
+  <style>
+    body {
+      font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+      background: #f6f7f9;
+      color: #0b1220;
+      margin: 0;
+      padding: 32px 48px;
+    }
+    h1 { font-size: 14px; color: #6b7280; margin: 0 0 6px; }
+    h2 {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #6b7280;
+      margin: 32px 0 12px;
+    }
+    .row { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; }
+    .swatch {
+      padding: 16px 20px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      gap: 14px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 0 0 1px rgba(0,0,0,0.04);
+    }
+    .light { background: #ffffff; }
+    .dark  { background: #0b1220; color: #e2e8f0; }
+    .terminal {
+      background: #0b1220;
+      color: #95e6cb;
+      padding: 18px 22px;
+      border-radius: 8px;
+      font-size: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .terminal::before { content: '$'; color: #7aa2f7; }
+    img.logo { display: block; }
+  </style>
+</head>
+<body>
+  <h1>DayTrace · logo preview</h1>
+
+  <h2>Icon — 16 / 32 / 64 / 128 px (default brand color)</h2>
+  <div class="row">
+    <div class="swatch light"><img class="logo" src="logo.svg" width="16"  height="16"></div>
+    <div class="swatch light"><img class="logo" src="logo.svg" width="32"  height="32"></div>
+    <div class="swatch light"><img class="logo" src="logo.svg" width="64"  height="64"></div>
+    <div class="swatch light"><img class="logo" src="logo.svg" width="128" height="128"></div>
+  </div>
+
+  <h2>Icon on dark — 64 px</h2>
+  <div class="row">
+    <div class="swatch dark"><img class="logo" src="logo.svg" width="64" height="64"></div>
+    <div class="swatch dark"><img class="logo" src="favicon.svg" width="64" height="64"></div>
+  </div>
+
+  <h2>Wordmark — light bg</h2>
+  <div class="row">
+    <div class="swatch light"><img class="logo" src="logo-wordmark.svg" height="40"></div>
+  </div>
+
+  <h2>Wordmark — dark bg</h2>
+  <div class="row">
+    <div class="swatch dark"><img class="logo" src="logo-wordmark-dark.svg" height="40"></div>
+  </div>
+
+  <h2>In context — terminal prompt</h2>
+  <div class="row">
+    <div class="terminal"><img class="logo" src="logo.svg" width="18" height="18">daytrace --today</div>
+  </div>
+
+  <h2>Mono variant (intended for inline SVG + CSS theming)</h2>
+  <div class="row">
+    <div class="swatch light" style="color:#0b1220"><img class="logo" src="logo-mono.svg" width="48" height="48"></div>
+    <div class="swatch light" style="color:#7aa2f7"><img class="logo" src="logo-mono.svg" width="48" height="48"></div>
+    <span style="font-size:11px;color:#6b7280;max-width:340px">
+      Note: <code>currentColor</code> only resolves when SVG is inlined into the page.
+      Loaded via <code>&lt;img&gt;</code>, mono renders as the SVG's default (black).
+      Use <code>logo.svg</code> instead for HTML &lt;img&gt; usage.
+    </span>
+  </div>
+</body>
+</html>
