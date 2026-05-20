@@ -8,6 +8,7 @@ import json
 from datetime import date as dt_date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import sqlite3
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 import sys
@@ -273,6 +274,9 @@ _STRINGS: dict[str, dict[str, str]] = {
     "page_timeline":   {"zh": "时间线",    "en": "Timeline"},
     "page_chart":      {"zh": "Chart",     "en": "Chart"},
     "tasks_show_total":{"zh": "{n} 条", "en": "{n}"},
+    "tasks_col_source":  {"zh": "源",          "en": "Source"},
+    "tasks_col_progress":{"zh": "本期进展",    "en": "Latest progress"},
+    "tasks_col_next":    {"zh": "下一步",      "en": "Next step"},
 }
 
 
@@ -556,7 +560,19 @@ body.events-page form { height:100%; }
 .top-chart-card .tc-pane { display:none; }
 .top-chart-card[data-tc-view="chart"] .tc-pane[data-pane="chart"] { display:block; }
 .top-chart-card[data-tc-view="dist"]  .tc-pane[data-pane="dist"]  { display:block; }
-.card { background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:14px; padding:12px; box-shadow:0 8px 18px rgba(65,45,10,.05); }
+.card { background:rgba(255,250,240,.94); border:1px solid var(--line); border-radius:14px; padding:14px 16px; box-shadow:0 8px 18px rgba(65,45,10,.05); }
+/* Unified card header — single source of truth for every panel head:
+   .card-title + optional .card-tag chip + .card-hint + .card-right
+   slot for controls. See _card_head() helper. */
+.card-head { display:flex; align-items:baseline; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+.card-title { margin:0; font-size:17px; font-weight:700; color:var(--ink); line-height:1.3; }
+.card-tag { display:inline-flex; font-size:11.5px; font-weight:650; padding:2px 10px; border-radius:999px; white-space:nowrap; }
+.card-tag-narrative { background:rgba(123,97,255,0.14); color:#7b61ff; }
+.card-tag-data      { background:rgba(47,111,237,0.12); color:#2f6fed; }
+.card-tag-config    { background:rgba(245,158,11,0.16); color:#a06800; }
+.card-tag-item      { background:rgba(22,163,74,0.14);  color:#16a34a; }
+.card-hint { color:var(--muted); font-size:12.5px; }
+.card-right { margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .metric { font-size:26px; font-weight:850; letter-spacing:-0.04em; }.metric-small { font-size:18px; font-weight:850; }.label { color:var(--muted); margin-top:3px; font-size:12px; } section { margin-top:12px; } h2 { font-size:16px; margin:0 0 8px; } h3 { margin:0 0 5px; font-size:14px; }
 .bar { display:flex; align-items:center; gap:10px; margin:9px 0; }.bar-name { width:170px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }.bar-track { flex:1; height:10px; border-radius:999px; background:#ece3d2; overflow:hidden; }.bar-fill { height:100%; background:linear-gradient(90deg,#2f6fed,#7b61ff); border-radius:999px; }.bar-count { width:42px; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
 .filters { display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin:0 0 8px; } input,select,button { border:1px solid var(--line); background:rgba(255,250,240,.94); border-radius:8px; padding:5px 7px; font:inherit; font-size:12px; color:var(--ink); } button { background:var(--accent); color:white; border-color:var(--accent); cursor:pointer; }.checkbox { display:flex; gap:4px; align-items:center; }
@@ -626,25 +642,25 @@ body.events-page form { height:100%; }
    identical structure (title + bullet list) so they read as peers; thin
    vertical dashed rules separate them. Collapses to 1 col on narrow. */
 .insights-card { margin-top:12px; }
-/* Insights card sits in the LEFT slot of row-2 grid; two sections
-   stack vertically (work_pattern then suggestions). */
-.insights-stack { display:flex; flex-direction:column; gap:14px; }
-.insights-section + .insights-section { border-top:1px dashed #eadfcd; padding-top:12px; }
-.insights-section h4 { margin:0 0 8px; font-size:14px; font-weight:700; color:#4d4438; letter-spacing:.02em; cursor:help; }
-.insights-section ul { margin:0; padding-left:20px; }
-.insights-section ul li { font-size:14px; line-height:1.6; color:#362f27; margin-bottom:6px; }
-.insights-section ul li:last-child { margin-bottom:0; }
-.insights-section .muted { font-size:13px; }
-/* Projects card (right slot of row-2): stack of compact per-project
-   cards, each summarizing what happened + status + 1-line next step. */
-.projects-card .proj-card-stack { display:flex; flex-direction:column; gap:10px; }
-.projects-card .proj-card { padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:#fffaf0; }
-.projects-card .proj-card-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
-.projects-card .proj-meta { margin-left:auto; font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; }
-.projects-card .proj-time { color:var(--ink); font-weight:700; }
-.projects-card .proj-summary { font-size:13px; color:#3b352e; line-height:1.5; margin-top:6px; }
-.projects-card .proj-next { font-size:12px; color:#4d4438; margin-top:6px; line-height:1.45; }
-.projects-card .proj-next-label { color:#7b61ff; font-weight:650; text-transform:uppercase; font-size:10.5px; letter-spacing:.05em; margin-right:4px; }
+/* Insights card: full-width 3-column layout (rolled back to pre-v17).
+   Per-project AI now lives inside the Tasks table (Latest/Next cols),
+   so Insights again has space for all 3 themes. */
+.insights-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:0; align-items:start; }
+.insights-col { padding:0 18px; border-left:1px dashed #eadfcd; min-width:0; }
+.insights-col:first-child { padding-left:0; border-left:none; }
+.insights-col:last-child  { padding-right:0; }
+.insights-col h4 { margin:0 0 10px; font-size:14px; font-weight:700; color:#4d4438; letter-spacing:.02em; cursor:help; }
+.insights-col ul { margin:0; padding-left:20px; }
+.insights-col ul li { font-size:14.5px; line-height:1.65; color:#362f27; margin-bottom:8px; }
+.insights-col ul li:last-child { margin-bottom:0; }
+.insights-col .muted { font-size:13.5px; }
+/* Tasks table — AI summary cells. Two-line clamp so the table row
+   stays compact but you still see enough; full text on hover via
+   the title attribute. */
+.col-ai-progress, .col-ai-next { font-size:12px; line-height:1.4; color:#3b352e; vertical-align:top; padding-top:8px; }
+.ai-cell-text { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+/* Projects card CSS removed — per-project AI now lives as Latest /
+   Next columns inside the unified Tasks table (see .col-ai-progress). */
 /* Daily timeline card — 7 cols side by side, each a <details> that
    shows weekday + headline by default and unfolds the narrative on
    click. Visual style:
@@ -686,9 +702,9 @@ body.events-page form { height:100%; }
 @media (max-width:720px)  { .dt-grid { grid-template-columns:repeat(2, 1fr); } }
 @media (max-width:480px)  { .dt-grid { grid-template-columns:1fr; } }
 @media (max-width:900px) {
-  /* responsive shim retained for very narrow screens — insights and
-     projects now stack the same way at any width since they're already
-     in single-column flow inside their cards. */
+  .insights-grid { grid-template-columns:1fr; gap:14px; }
+  .insights-col { padding:0; border-left:none; border-top:1px dashed #eadfcd; padding-top:12px; }
+  .insights-col:first-child { border-top:none; padding-top:0; }
 }
 .dr-bullets { margin:0; padding-left:18px; font-size:13px; line-height:1.55; }
 .dr-bullets li { margin:3px 0; }
@@ -985,6 +1001,40 @@ SOURCE_LABELS = {"codex": "Codex", "git": "GitHub", "github": "GitHub", "hermes"
 
 def esc(x) -> str:
     return html.escape("" if x is None else str(x))
+
+
+def _card_head(
+    title: str,
+    *,
+    tag: str = "",
+    tag_color: str = "narrative",
+    hint: str = "",
+    right_html: str = "",
+) -> str:
+    """Standardized card header — every dashboard panel uses this so
+    title size, chip color semantics, hint placement, and the right-rail
+    controls slot are identical across cards.
+
+    Args:
+      title:     plain text (caller decides whether to T()-translate)
+      tag:       short chip label (e.g. "Report"); empty hides the chip
+      tag_color: "narrative" (紫) / "data" (蓝) / "config" (黄) / "item" (绿)
+      hint:      muted explanatory text shown right after title/tag
+      right_html: pre-rendered HTML for the right-aligned controls slot
+                  (segment pills, toggle buttons, action links — anything)
+
+    Returns:  <div class="card-head"> … </div>
+    """
+    parts = [f'<h3 class="card-title">{esc(title)}</h3>']
+    if tag:
+        parts.append(
+            f'<span class="card-tag card-tag-{tag_color}">{esc(tag)}</span>'
+        )
+    if hint:
+        parts.append(f'<span class="card-hint">{esc(hint)}</span>')
+    if right_html:
+        parts.append(f'<div class="card-right">{right_html}</div>')
+    return f'<div class="card-head">{"".join(parts)}</div>'
 
 
 def source_row_class(source: str | None) -> str:
@@ -1718,20 +1768,22 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     unit_label_daily = dict(_units()).get(unit, unit)
     dim_label_daily = dict(_dimensions()).get(mode, mode)
     # ┃ Chart panel ┃ — histogram (24 hourly bars) + distribution (donut+bars)
-    daily_top_chart_card = (
-        f'<div class="card top-chart-card" id="top-chart" data-tc-view="{esc(top_view)}">'
-        '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">'
-        f'<h3 style="margin:0;">{esc(T("chart_per_hour"))} {esc(unit_label_daily)} <span class="muted small" style="font-weight:500;">· {esc(T("dim_label"))}: {esc(dim_label_daily)}</span></h3>'
-        f'<span class="tag source" style="background:rgba(47,111,237,0.12); color:#2f6fed;">{esc(T("chart_panel_tag"))}</span>'
-        '<div style="margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
+    chart_right = (
         f'<span class="muted small" style="font-weight:600;">{esc(T("unit_label"))}</span>'
         f'<div class="unit-tabs">{unit_pill_links}</div>'
         f'{top_chart_switcher}'
-        '</div>'
-        '</div>'
-        f'<div class="tc-pane" data-pane="chart">{histogram_body}</div>'
-        f'<div class="tc-pane" data-pane="dist">{distribution_body}</div>'
-        '</div>'
+    )
+    daily_top_chart_card = (
+        f'<div class="card top-chart-card" id="top-chart" data-tc-view="{esc(top_view)}">'
+        + _card_head(
+            f"{T('chart_per_hour')} {unit_label_daily}",
+            tag=T("chart_panel_tag"), tag_color="data",
+            hint=f"· {T('dim_label')}: {dim_label_daily}",
+            right_html=chart_right,
+        )
+        + f'<div class="tc-pane" data-pane="chart">{histogram_body}</div>'
+        + f'<div class="tc-pane" data-pane="dist">{distribution_body}</div>'
+        + '</div>'
     )
 
     # Right column under chart used to host a highlights/concerns mini-card;
@@ -1787,13 +1839,10 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     # ┃ Timeline panel ┃ — 24h swim-lane + filter pills
     daily_swim_card = (
         f'<section class="card weekly-viz" id="chart" data-view="swim" data-filter="{esc(sf)}">'
-        '<div style="display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap;">'
-        f'<h3 style="margin:0;">{esc(T("page_timeline"))}</h3>'
-        '<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">Timeline</span>'
-        '</div>'
-        + daily_filter_bar +
-        '<div class="wv-pane" data-pane="swim" style="display:block;">' + swim_body + '</div>'
-        '</section>'
+        + _card_head(T("page_timeline"), tag=T("tag_timeline"), tag_color="narrative")
+        + daily_filter_bar
+        + '<div class="wv-pane" data-pane="swim" style="display:block;">' + swim_body + '</div>'
+        + '</section>'
     )
 
     # Page JS — handles dim/unit pill live-URL nav (scroll preservation),
@@ -1894,28 +1943,20 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     #   │ Timeline panel           │  ← swim-lane + filter pills
     #   │ (weekly-viz)             │
     #   └──────────────────────────┘
-    # Project cards section dropped — the chart/distribution panels above
-    # already convey project-level breakdowns at the page level.
+    # Per-project AI summaries live INSIDE the Tasks table now (Latest/
+    # Next columns), so the dedicated Projects card was removed. Layout:
+    #   row 1: Report | Chart
+    #   row 2: Insights (full-width, 3-col rollback)
+    #   row 3: Swim · Tasks (with AI cols) · Audit
     tasks_panel_html = _tasks_panel(con, [date or ""], boundary_h) if date else ""
     audit_html = _alignment_audit_card(con, [date or ""]) if date else ""
-    projects_card_html = (
-        _render_projects_card(con, [date], is_weekly=False) if date else ""
-    )
 
-    # Two-row 2-col grid:
-    #   row 1: Report (lede + narrative)  |  Chart (24h histogram / dist)
-    #   row 2: Insights (work_pattern + follow-ups)  |  Projects (per-item)
-    # Each row is its own `.report-grid` so the columns don't have to
-    # equal-height across rows — they stack naturally.
     content = f"""
 <section class="report-grid">
-  <div class="card daily-report"><div class="bucket-head"><h2>{esc(T("daily_title"))} · {esc(date or T("no_date"))}</h2><span class="tag source">{esc(T("report_tag"))}</span></div>{rich_daily_body}</div>
+  <div class="card daily-report">{_card_head(f"{T('daily_title')} · {date or T('no_date')}", tag=T('report_tag'), tag_color='narrative')}{rich_daily_body}</div>
   <div class="right-column">{right_column_body}</div>
 </section>
-<section class="report-grid">
-  <div class="left-column">{insights_card_html}</div>
-  <div class="right-column">{projects_card_html}</div>
-</section>
+{insights_card_html}
 {daily_swim_card}
 {tasks_panel_html}
 {audit_html}
@@ -2169,14 +2210,15 @@ def table_switcher_html(active: str, qs: dict[str, list[str]]) -> str:
     more_label = T("db_less") if extras_open else T("db_more")
     extras_html = (
         '<span class="table-switcher-divider" aria-hidden="true"></span>'
-        f'<button type="button" class="table-tab table-more-toggle"'
-        f' data-extras-toggle{"" if not extras_open else " aria-expanded=\"true\""}>'
+        '<button type="button" class="table-tab table-more-toggle"'
+        + (' data-extras-toggle aria-expanded="true"' if extras_open else ' data-extras-toggle')
+        + '>'
         f'<span class="tmt-label">{esc(more_label)}</span>'
-        f' <span class="tmt-caret">{"▴" if extras_open else "▾"}</span>'
-        '</button>'
-        f'<div class="table-switcher-extras" {"" if extras_open else "hidden"}>'
-        f'{extra_pills}'
-        '</div>'
+        + ' <span class="tmt-caret">' + ('▴' if extras_open else '▾') + '</span>'
+        + '</button>'
+        + '<div class="table-switcher-extras"' + ('' if extras_open else ' hidden') + '>'
+        + extra_pills
+        + '</div>'
     ) if extra_pills else ""
     return (
         '<section class="table-switcher-wrap">'
@@ -2465,7 +2507,7 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
     if not any_data:
         return ""
     toggle_html = (
-        '<div class="dt-bulk" style="margin-left:auto;">'
+        '<div class="dt-bulk">'
         # Default to expanded — every <details class="dt-col" open>.
         f'<button type="button" class="dt-bulk-btn active" data-dt-bulk="expand">{esc(T("expand_all"))}</button>'
         f'<button type="button" class="dt-bulk-btn" data-dt-bulk="collapse">{esc(T("collapse_all"))}</button>'
@@ -2485,13 +2527,13 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
     )
     return (
         '<section class="card daily-timeline-card">'
-        '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:12px;">'
-        f'<h3 style="margin:0;">{esc(T("timeline_title"))}</h3>'
-        f'<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">{esc(T("timeline_tag"))}</span>'
-        f'<span class="muted small" style="margin-left:6px;">{esc(T("timeline_hint"))}</span>'
-        + toggle_html +
-        '</div>'
-        '<div class="dt-grid">'
+        + _card_head(
+            T("timeline_title"),
+            tag=T("timeline_tag"), tag_color="narrative",
+            hint=T("timeline_hint"),
+            right_html=toggle_html,
+        )
+        + '<div class="dt-grid">'
         + "".join(cols)
         + '</div>'
         + bulk_script +
@@ -2500,36 +2542,37 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
 
 
 def _render_insights_card(overview_payload: dict | None, *, continuity: dict | None = None) -> str:
-    """Two-section Insights card. Lives in the LEFT column of the row-2
-    grid (next to Projects · Tasks). The third column "关键任务进展" was
-    dropped per redesign — that information now lives in the Projects
-    card on the right, sourced from per-project ai_summary, so Insights
-    can stay focused on whole-day signals:
+    """Full-width 3-column Insights card (rolled back from v17's 2-section
+    version). Per-project AI summaries now appear *inside* the Tasks table
+    as Latest/Next columns, so Insights can stay focused on whole-day
+    signals while still surfacing the 3 high-level themes.
 
-      ⏰ 时间安排回顾   (work_pattern — today vs 7d baseline)
-      🔔 任务跟进提醒   (suggestions — forward-looking task watch list)
+      🚀 关键任务进展   highlights  — one task per bullet, today's advance
+      ⏰ 时间安排回顾   work_pattern — today vs 7-day baseline, grounded in numbers
+      🔔 任务跟进提醒   suggestions  — forward-looking milestones / deadlines
     """
     if not overview_payload:
         return ""
 
+    highlights = overview_payload.get("highlights") or []
     work_pattern = overview_payload.get("work_pattern") or []
     suggestions = overview_payload.get("suggestions")
     if not suggestions:
-        # v7-v11 backward compat
         suggestions = overview_payload.get("recommendations") or []
 
-    if not (work_pattern or suggestions):
+    if not (highlights or work_pattern or suggestions):
         return ""
 
     import re as _re_local
     _strip_re = _re_local.compile(r"^[🚀⏰🔔📌✨📰💡📊🎯]\s*")
 
     _COL_KEYS = {
+        "highlights":   ("insights_progress", "tip_progress"),
         "work_pattern": ("insights_pattern",  "tip_pattern"),
         "suggestions":  ("insights_followup", "tip_followup"),
     }
 
-    def _section(emoji: str, key: str, items: list) -> str:
+    def _col(emoji: str, key: str, items: list) -> str:
         label_key, tip_key = _COL_KEYS[key]
         texts = [L(x) for x in items]
         cleaned = [_strip_re.sub("", t.lstrip()).strip() for t in texts if t]
@@ -2538,7 +2581,7 @@ def _render_insights_card(overview_payload: dict | None, *, continuity: dict | N
             else f'<div class="muted">{esc(T("insights_none"))}</div>'
         )
         return (
-            '<div class="insights-section">'
+            '<div class="insights-col">'
             f'<h4 title="{esc(T(tip_key))}">{emoji} {esc(T(label_key))}</h4>'
             f'{body_html}'
             '</div>'
@@ -2546,196 +2589,15 @@ def _render_insights_card(overview_payload: dict | None, *, continuity: dict | N
 
     return (
         '<section class="card insights-card">'
-        '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:10px;">'
-        f'<h3 style="margin:0;">{esc(T("insights_title"))}</h3>'
-        f'<span class="muted small">{esc(T("insights_hint"))}</span>'
-        '</div>'
-        '<div class="insights-stack">'
-        + _section("⏰", "work_pattern", work_pattern)
-        + _section("🔔", "suggestions",  suggestions)
+        + _card_head(T("insights_title"), tag="AI", tag_color="narrative", hint=T("insights_hint"))
+        + '<div class="insights-grid">'
+        + _col("🚀", "highlights",   highlights)
+        + _col("⏰", "work_pattern", work_pattern)
+        + _col("🔔", "suggestions",  suggestions)
         + '</div>'
         '</section>'
     )
 
-
-def _render_projects_card(con, dates: list[str], *, is_weekly: bool = False) -> str:
-    """Per-project recap card. Sits in the RIGHT column of the row-2
-    grid. Pulls from day_project_report (event counts, active minutes,
-    task chips) + day_project_channel.ai_summary / ai_continuity for the
-    narrative and next-step bullets.
-
-    Daily: one card per project for the single date, sorted by event count.
-    Weekly: aggregate per project across the 7-day window — sum events +
-    active minutes, take the most-recent day's ai_summary as the headline
-    snippet, list which days this project was touched.
-    """
-    if not dates:
-        return ""
-    placeholders = ",".join("?" for _ in dates)
-    rows = con.execute(
-        f"""
-        SELECT date, project, event_count, active_minutes, tasks
-          FROM day_project_report
-         WHERE date IN ({placeholders})
-         ORDER BY event_count DESC, date DESC
-        """, dates,
-    ).fetchall()
-    if not rows:
-        return ""
-
-    _lang = _CURRENT_LANG.get()
-
-    # Daily mode: one row per (date, project) — but dates has just 1 item,
-    # so this is effectively per-project for the day.
-    # Weekly mode: aggregate per project across all dates in the window.
-    if is_weekly:
-        from collections import defaultdict
-        agg: dict[str, dict] = defaultdict(
-            lambda: {"events": 0, "minutes": 0, "tasks": {}, "days": []}
-        )
-        for r in rows:
-            p = r["project"]
-            agg[p]["events"] += r["event_count"]
-            agg[p]["minutes"] += r["active_minutes"] or 0
-            agg[p]["days"].append(r["date"])
-            for t in (_safe_load_json(r["tasks"]) or []):
-                if not isinstance(t, dict):
-                    continue
-                key = t.get("title") or ""
-                if not key:
-                    continue
-                existing = agg[p]["tasks"].get(key)
-                if existing:
-                    existing["n"] += t.get("n", 0)
-                else:
-                    agg[p]["tasks"][key] = dict(t)
-        items = sorted(
-            agg.items(), key=lambda kv: -kv[1]["events"],
-        )
-    else:
-        items = [
-            (r["project"], {
-                "events": r["event_count"],
-                "minutes": r["active_minutes"] or 0,
-                "tasks": {
-                    (t.get("title") or ""): t
-                    for t in (_safe_load_json(r["tasks"]) or [])
-                    if isinstance(t, dict) and t.get("title")
-                },
-                "days": [r["date"]],
-            })
-            for r in rows
-        ]
-
-    # For each project, fetch the most recent ai_summary + ai_continuity
-    # (any date in `dates`). Pull both channels in one query.
-    channels_by_project: dict[str, dict[str, str]] = {}
-    if items:
-        plist = [p for p, _ in items]
-        ph_p = ",".join("?" for _ in plist)
-        rows2 = con.execute(
-            f"""
-            SELECT date, project, channel, value_json
-              FROM day_project_channel
-             WHERE date IN ({placeholders})
-               AND project IN ({ph_p})
-               AND channel IN ('ai_summary', 'ai_continuity')
-             ORDER BY date DESC
-            """,
-            list(dates) + plist,
-        ).fetchall()
-        for r in rows2:
-            slot = channels_by_project.setdefault(r["project"], {})
-            # Only keep the latest non-empty value per channel.
-            if r["channel"] not in slot and r["value_json"]:
-                slot[r["channel"]] = r["value_json"]
-
-    cards: list[str] = []
-    for project, agg_row in items:
-        ch = channels_by_project.get(project, {})
-        summary = _safe_load_json(ch.get("ai_summary")) or {}
-        continuity = _safe_load_json(ch.get("ai_continuity")) or {}
-        status = summary.get("status")
-        summary_text = summary.get("summary") or ""
-        next_steps = summary.get("next_steps") or []
-        next_text = next_steps[0] if next_steps else ""
-
-        # Project chip → link to event DB filtered by project + date range.
-        sf = min(agg_row["days"]) if agg_row["days"] else ""
-        st = max(agg_row["days"]) if agg_row["days"] else ""
-        project_chip = (
-            f'<a class="project-chip" href="/events?project={esc(project)}'
-            f'&start_from={esc(sf)}&start_to={esc(st)}">'
-            f'{esc(project)}</a>'
-        )
-
-        # Task chips (top 3 by event count)
-        task_list = list(agg_row["tasks"].values())
-        task_list.sort(key=lambda t: -(t.get("n") or 0))
-        task_chips: list[str] = []
-        for t in task_list[:3]:
-            ttl_en = (t.get("title_en") or "").strip()
-            ttl_zh = (t.get("title") or "").strip()
-            label = ttl_en if (_lang == "en" and ttl_en) else ttl_zh
-            n = t.get("n") or 0
-            task_chips.append(
-                f'<span class="task-chip" title="{esc(ttl_zh)} · {n} events">'
-                f'{esc(label)}'
-                + (f' <span class="muted">·{n}</span>' if n else '')
-                + '</span>'
-            )
-        if len(task_list) > 3:
-            task_chips.append(
-                f'<span class="task-chip muted">+{len(task_list) - 3}</span>'
-            )
-        tasks_html = (
-            '<div class="task-chip-row">' + "".join(task_chips) + '</div>'
-            if task_chips else ""
-        )
-
-        status_html = _status_chip(status) if status else ""
-        momentum_html = (
-            _momentum_chip(continuity.get("momentum"))
-            if isinstance(continuity, dict) and continuity.get("momentum") else ""
-        )
-        active_h = agg_row["minutes"] / 60.0
-        meta_html = (
-            f'<span class="proj-meta">'
-            f'<span class="proj-time">{active_h:.1f}h</span>'
-            f' · <span class="proj-events">{agg_row["events"]} ev</span>'
-            f'</span>'
-        )
-
-        cards.append(
-            '<div class="proj-card">'
-            '<div class="proj-card-head">'
-            f'{project_chip}'
-            f'{status_html}'
-            f'{momentum_html}'
-            f'{meta_html}'
-            '</div>'
-            f'{tasks_html}'
-            + (f'<div class="proj-summary">{esc(summary_text)}</div>' if summary_text else "")
-            + (
-                f'<div class="proj-next"><span class="proj-next-label">{esc(T("projects_next"))}:</span> {esc(next_text)}</div>'
-                if next_text else ""
-            )
-            + '</div>'
-        )
-
-    hint = T("projects_hint_w") if is_weekly else T("projects_hint")
-    return (
-        '<section class="card projects-card">'
-        '<div style="display:flex; align-items:baseline; gap:10px; margin-bottom:10px; flex-wrap:wrap;">'
-        f'<h3 style="margin:0;">{esc(T("projects_title"))}</h3>'
-        f'<span class="tag source" style="background:rgba(22,163,74,0.12); color:#16a34a;">{esc(T("projects_tag"))}</span>'
-        f'<span class="muted small" style="margin-left:6px;">{esc(hint)}</span>'
-        '</div>'
-        '<div class="proj-card-stack">'
-        + "".join(cards)
-        + '</div>'
-        '</section>'
-    )
 
 
 # Back-compat shim — older callers (day_report_table) reference
@@ -5454,15 +5316,12 @@ def _alignment_audit_card(con, days: list[str]) -> str:
         'history.replaceState(null,"",u.toString());'
         '})();</script>'
     )
+    audit_summary_hint = f'{T("audit_summary", n=len(rows), ev=total_unmatched)} · {T("audit_window")} {window_label}'
     return (
-        '<section class="card" id="alignment-audit" style="margin-top:12px;">'
-        + audit_banner +
-        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">'
-        f'<h3 style="margin:0;">{esc(T("audit_title"))}</h3>'
-        f'<span class="tag source" style="background:rgba(245,158,11,0.16); color:#a06800;">{esc(T("audit_tag"))}</span>'
-        f'<span class="muted small">{esc(T("audit_summary", n=len(rows), ev=total_unmatched))} · {esc(T("audit_window"))} {esc(window_label)}</span>'
-        '</div>'
-        '<form method="POST" action="/api/work-items/alias" '
+        '<section class="card" id="alignment-audit">'
+        + audit_banner
+        + _card_head(T("audit_title"), tag=T("audit_tag"), tag_color="config", hint=audit_summary_hint)
+        + '<form method="POST" action="/api/work-items/alias" '
         'style="margin:0;">'
         '<table class="mini-table audit-table" style="width:100%; table-layout:fixed;">'
         '<colgroup>'
@@ -5492,42 +5351,177 @@ def _alignment_audit_card(con, days: list[str]) -> str:
     )
 
 
+def _latest_ai_summary_per_work_item(
+    con, days: list[str],
+) -> dict[str, dict]:
+    """For each work_item record_id, find its most recent ai_summary
+    payload in the given shifted-day window. Joins event_work_item_links
+    → events → day_project_channel via (date, project)."""
+    if not days:
+        return {}
+    days_ph = ",".join("?" for _ in days)
+    try:
+        rows = con.execute(
+            f"""
+            SELECT
+                l.record_id,
+                c.date,
+                c.project,
+                c.value_json
+              FROM event_work_item_links l
+              JOIN events e ON e.id = l.event_id
+              JOIN day_project_channel c
+                ON c.date = e.date
+               AND c.project = e.project_guess
+               AND c.channel = 'ai_summary'
+             WHERE e.date IN ({days_ph})
+             ORDER BY l.record_id, c.date DESC
+            """,
+            days,
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return {}
+    out: dict[str, dict] = {}
+    for r in rows:
+        rid = r["record_id"]
+        if rid in out:
+            continue  # already kept the most recent row (ORDER BY date DESC)
+        if r["value_json"]:
+            try:
+                out[rid] = json.loads(r["value_json"])
+            except json.JSONDecodeError:
+                continue
+    return out
+
+
 def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
-    """┃ Tasks panel ┃ container — one card per configured table + a top
-    selector pill bar to show only 任务 / 审稿 / 全部."""
+    """┃ Tasks panel ┃ — unified single-table view of all work_items
+    (任务 + 审稿 in one rows-list), with a top tab bar to filter by
+    source (all/tasks/reviews). Each row now carries the per-(date,
+    project) AI summary's latest progress + next-step as two extra
+    columns, so per-project AI lives inline with its parent task
+    instead of needing a separate Projects card."""
     has_wi = con.execute("SELECT 1 FROM work_items LIMIT 1").fetchone()
     if not has_wi:
         return ""
+    from daytrace.work_items import list_work_items
     stats = _compute_task_stats(con, days, boundary_hour)
-
-    # Discover present tables in priority order
-    table_order = []
-    for r in con.execute(
-        "SELECT DISTINCT table_key FROM work_items ORDER BY "
-        "CASE table_key WHEN 'tasks' THEN 0 WHEN 'reviews' THEN 1 ELSE 2 END"
-    ).fetchall():
-        table_order.append(r["table_key"])
-    if not table_order:
-        return ""
-
+    ai_summaries = _latest_ai_summary_per_work_item(con, days)
     table_labels = {"tasks": T("tasks_table_t"), "reviews": T("tasks_table_r")}
 
-    cards_html: list[str] = []
-    for tk in table_order:
-        card = _tasks_panel_one(
-            con, days, boundary_hour,
-            table_key=tk, label=table_labels.get(tk, tk),
-            stats=stats,
-        )
-        if card:
-            cards_html.append(card)
-    if not cards_html:
+    # Pull all work_items (任务 + 审稿 等) into a single ordered list.
+    all_items = list_work_items(con)
+    if not all_items:
         return ""
 
-    # Top selector pill bar — JS toggles visibility of each card and
-    # collapses/expands the 2-col grid accordingly.
+    # Stable sort: by table_key (tasks first, reviews next, others last),
+    # then by event_count desc within the window, then by due_date.
+    def _sort_key(wi):
+        tk = wi.get("table_key") or "tasks"
+        tk_order = {"tasks": 0, "reviews": 1}.get(tk, 2)
+        rid = wi.get("record_id")
+        ev = stats.get(rid, {}).get("event_count", 0) if rid else 0
+        due = wi.get("due_date") or "9999-12-31"
+        return (tk_order, -ev, due)
+    all_items.sort(key=_sort_key)
+
+    rows_html: list[str] = []
+    for wi in all_items:
+        rid = wi["record_id"]
+        st = stats.get(rid, {})
+        minutes = st.get("minutes", 0)
+        ev_count = st.get("event_count", 0)
+        last_iso = st.get("last_activity")
+        status = wi.get("status") or ""
+        priority = wi.get("priority") or ""
+        tk = wi.get("table_key") or "tasks"
+
+        ext = wi.get("external_links") or []
+        link_html = ""
+        if isinstance(ext, list) and ext:
+            link_html = (
+                f'<a href="{esc(ext[0])}" target="_blank" rel="noopener" '
+                f'title="{esc(ext[0])}" style="color:#2f6fed; font-size:10px; '
+                f'margin-left:6px;">↗</a>'
+            )
+        is_stale = (
+            status in ("进行中", "待办")
+            and priority in ("P0", "P1")
+            and ev_count == 0
+        )
+        subtitle = wi.get("subtitle") or wi.get("project_source") or ""
+        subtitle_html = (
+            f'<div style="font-size:10.5px; color:var(--muted); margin-top:2px;">{esc(subtitle)}</div>'
+            if subtitle else ""
+        )
+        title_html = (
+            '<div style="line-height:1.25;">'
+            f'<span style="font-weight:600; color:#3b352e;">{esc(_localized_task_title(dict(wi)))}</span>'
+            f'{link_html}'
+        )
+        if is_stale:
+            title_html += (
+                '<span style="margin-left:8px; color:#b32a2a; font-size:11px;" '
+                f'title="{esc(T("tasks_p_stale_tip"))}">⚠</span>'
+            )
+        title_html += f"{subtitle_html}</div>"
+
+        time_html = (
+            f'<span style="font-variant-numeric:tabular-nums; font-weight:700;">'
+            f'{_format_value(minutes / 60.0, "hours")}</span>'
+            if minutes > 0 else
+            '<span class="muted" style="font-variant-numeric:tabular-nums;">0</span>'
+        )
+
+        # AI summary columns: pull from latest ai_summary for this record's
+        # (date, project) over the window. Reviews collapse into a single
+        # dim bucket so they don't have per-item AI — leave their cells "—".
+        latest = ai_summaries.get(rid) if isinstance(ai_summaries.get(rid), dict) else None
+        summary_text = (latest or {}).get("summary") or ""
+        next_steps = (latest or {}).get("next_steps") or []
+        next_text = next_steps[0] if next_steps else ""
+
+        progress_cell = (
+            f'<div class="ai-cell-text" title="{esc(summary_text)}">{esc(summary_text)}</div>'
+            if summary_text else '<span class="muted">—</span>'
+        )
+        next_cell = (
+            f'<div class="ai-cell-text" title="{esc(next_text)}">{esc(next_text)}</div>'
+            if next_text else '<span class="muted">—</span>'
+        )
+
+        due_sort = wi.get("due_date") or "9999-12-31"
+        priority_sort = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}.get(priority, 9)
+        status_sort = {"进行中": 0, "待办": 1, "完成": 2}.get(status, 9)
+        last_sort = last_iso or "0000"
+
+        rows_html.append(
+            f'<tr class="task-row" data-status="{esc(status)}" '
+            f'data-status-sort="{status_sort}" '
+            f'data-priority-sort="{priority_sort}" '
+            f'data-table="{esc(tk)}" '
+            f'data-hours="{minutes / 60.0:.4f}" '
+            f'data-events="{ev_count}" '
+            f'data-due-sort="{esc(due_sort)}" '
+            f'data-last-sort="{esc(last_sort)}" '
+            f'data-title="{esc(wi.get("title") or "")}">'
+            f'<td>{_chip(table_labels.get(tk, tk), _TABLE_KEY_COLOR.get(tk))}</td>'
+            f'<td>{_chip(priority, _PRIORITY_COLOR.get(priority)) or chr(0x2014)}</td>'
+            f'<td>{_chip(_localized_status(status), _STATUS_COLOR.get(status))}</td>'
+            f'<td class="tasks-title-cell">{title_html}</td>'
+            f'<td style="text-align:right;">{time_html}</td>'
+            f'<td>{_due_chip_html(wi.get("due_date"))}</td>'
+            f'<td class="col-ai-progress">{progress_cell}</td>'
+            f'<td class="col-ai-next">{next_cell}</td>'
+            '</tr>'
+        )
+
+    # Tab bar (全部 / 任务 / 审稿) filters rows by data-table attr in JS.
+    present_table_keys = list(dict.fromkeys(
+        (wi.get("table_key") or "tasks") for wi in all_items
+    ))
     pills = [f'<button type="button" class="dim-tab active" data-table-pick="all">{esc(T("tasks_all"))}</button>']
-    for tk in table_order:
+    for tk in present_table_keys:
         pills.append(
             f'<button type="button" class="dim-tab" data-table-pick="{esc(tk)}">'
             f'{esc(table_labels.get(tk, tk))}</button>'
@@ -5538,36 +5532,116 @@ def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
         + "".join(pills) +
         '</div>'
     )
-    toggle_js = (
+
+    # Completed-tasks toggle
+    completed_count = sum(1 for wi in all_items if wi.get("status") == "完成")
+    completed_toggle = (
+        '<label class="tasks-show-done" style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); cursor:pointer; user-select:none; margin-left:auto;">'
+        '<input type="checkbox" data-role="tasks-show-completed" style="cursor:pointer;">'
+        f'{esc(T("tasks_show_done"))} ({completed_count})'
+        '</label>'
+    )
+
+    # Headers — sortable
+    def thead_cell(lab: str, sort_key: str, *, align: str = "left", default_dir: str = "asc") -> str:
+        return (
+            f'<th data-sort="{sort_key}" data-default-dir="{default_dir}" '
+            f'style="text-align:{align}; cursor:pointer; user-select:none;">'
+            f'{esc(lab)} <span class="sort-arrow" style="color:var(--muted); font-size:10px;">↕</span>'
+            '</th>'
+        )
+
+    colgroup = (
+        '<colgroup>'
+        '<col style="width:64px">'    # source chip
+        '<col style="width:48px">'    # P
+        '<col style="width:72px">'    # 状态
+        '<col>'                       # 任务 (auto)
+        '<col style="width:62px">'    # 时长
+        '<col style="width:108px">'   # 截止
+        '<col style="width:260px">'   # 本期进展
+        '<col style="width:220px">'   # 下一步
+        '</colgroup>'
+    )
+    thead = (
+        '<tr>'
+        + thead_cell(T("tasks_col_source") if "tasks_col_source" in _STRINGS else (T("dim_source") if _CURRENT_LANG.get() != "en" else "Source"), "table_key")
+        + thead_cell(T("tasks_col_p"),      "priority")
+        + thead_cell(T("tasks_col_status"), "status")
+        + thead_cell(T("tasks_col_title"),  "title")
+        + thead_cell(T("tasks_col_hours"),  "hours", align="right", default_dir="desc")
+        + thead_cell(T("tasks_col_due"),    "due")
+        + thead_cell(T("tasks_col_progress") if "tasks_col_progress" in _STRINGS else "本期进展", "progress")
+        + thead_cell(T("tasks_col_next") if "tasks_col_next" in _STRINGS else "下一步",          "nextstep")
+        + '</tr>'
+    )
+
+    sort_filter_js = (
         '<script>(function(){'
+        'var panel=document.getElementById("tasks-unified");'
+        'if(!panel)return;'
+        'var tbody=panel.querySelector("tbody");'
         'var bar=document.querySelector(\'[data-role="tasks-table-pick"]\');'
-        'if(!bar)return;'
-        'var grid=document.querySelector(".tasks-grid");'
-        'function apply(pick){'
-        'bar.querySelectorAll(".dim-tab").forEach(function(b){'
-        'b.classList.toggle("active",b.dataset.tablePick===pick);});'
-        'document.querySelectorAll(".tasks-card").forEach(function(c){'
-        'c.style.display=(pick==="all"||c.dataset.tableKey===pick)?"":"none";});'
-        # In "全部" mode keep grid 2-col (CSS hides 事件 + 最近活动 to fit).
-        # When user picks one table, expand to single column AND switch to
-        # "full" display mode (CSS shows the dropped columns).
-        'if(grid){'
-        'if(pick==="all"){grid.style.gridTemplateColumns="";grid.removeAttribute("data-display-mode");}'
-        'else{grid.style.gridTemplateColumns="1fr";grid.setAttribute("data-display-mode","full");}'
+        'var cb=panel.querySelector(\'[data-role="tasks-show-completed"]\');'
+        'var pick="all";'
+        'function applyVis(){'
+        'var showDone=cb&&cb.checked;'
+        'panel.querySelectorAll(".task-row").forEach(function(r){'
+        'var t=r.dataset.table;'
+        'var showTable=(pick==="all"||t===pick);'
+        'var doneOk=(showDone||r.dataset.status!=="完成");'
+        'r.style.display=(showTable&&doneOk)?"":"none";});'
         '}'
-        '}'
-        'bar.querySelectorAll(".dim-tab").forEach(function(btn){'
-        'btn.addEventListener("click",function(){apply(btn.dataset.tablePick);});});'
+        'if(bar){bar.querySelectorAll(".dim-tab").forEach(function(btn){'
+        'btn.addEventListener("click",function(){'
+        'pick=btn.dataset.tablePick;'
+        'bar.querySelectorAll(".dim-tab").forEach(function(b){b.classList.toggle("active",b.dataset.tablePick===pick);});'
+        'applyVis();});});}'
+        'if(cb)cb.addEventListener("change",applyVis);'
+        'var sortState={key:null,dir:1};'
+        'function getKey(row,key){'
+        'switch(key){'
+        'case"hours":return parseFloat(row.dataset.hours||"0");'
+        'case"events":return parseInt(row.dataset.events||"0",10);'
+        'case"priority":return parseInt(row.dataset.prioritySort||"9",10);'
+        'case"status":return parseInt(row.dataset.statusSort||"9",10);'
+        'case"due":return row.dataset.dueSort||"9999";'
+        'case"last":return row.dataset.lastSort||"0";'
+        'case"title":return (row.dataset.title||"").toLowerCase();'
+        'case"table_key":return row.dataset.table||"";'
+        '}return"";}'
+        'function applySort(key,dir){'
+        'var rows=Array.prototype.slice.call(panel.querySelectorAll(".task-row"));'
+        'rows.sort(function(a,b){var va=getKey(a,key),vb=getKey(b,key);if(va===vb)return 0;return (va>vb?1:-1)*dir;});'
+        'rows.forEach(function(r){tbody.appendChild(r);});}'
+        'panel.querySelectorAll("thead th[data-sort]").forEach(function(th){'
+        'th.addEventListener("click",function(){'
+        'var key=th.dataset.sort;'
+        'if(sortState.key===key){sortState.dir*=-1;}'
+        'else{sortState.key=key;sortState.dir=(th.dataset.defaultDir==="desc")?-1:1;}'
+        'panel.querySelectorAll(".sort-arrow").forEach(function(a){a.textContent="↕";});'
+        'var arrow=th.querySelector(".sort-arrow");if(arrow)arrow.textContent=sortState.dir>0?"↑":"↓";'
+        'applySort(sortState.key,sortState.dir);});});'
+        'applyVis();'
         '})();</script>'
     )
 
+    summary_line = T("tasks_n_rows", n=len(all_items))
+    # Place segment-pill bar AND completed-toggle in the right slot so
+    # the header reads as one composed control row instead of two.
+    right_html = pill_bar + completed_toggle
     return (
-        '<section style="margin-top:12px;" id="tasks-region">'
-        f'{pill_bar}'
-        '<div class="tasks-grid">'
-        + "".join(cards_html) +
-        '</div>'
-        + toggle_js
+        '<section class="card tasks-card" id="tasks-unified">'
+        + _card_head(
+            T("tasks_panel_t"), tag="Tasks", tag_color="data",
+            hint=summary_line, right_html=right_html,
+        )
+        + '<table class="mini-table" style="width:100%; table-layout:fixed;">'
+        + colgroup
+        + f'<thead>{thead}</thead>'
+        + f'<tbody>{"".join(rows_html)}</tbody>'
+        + '</table>'
+        + sort_filter_js
         + '</section>'
     )
 
@@ -5710,7 +5784,7 @@ def weekly_page(
     # parallel to the daily report card.
     weekly_report_card = (
         '<div class="card daily-report">'
-        f'<div class="bucket-head"><h2>{esc(T("nav_weekly"))} · {esc(week)}</h2><span class="tag source">{esc(T("report_tag"))}</span></div>'
+        + _card_head(f"{T('nav_weekly')} · {week}", tag=T('report_tag'), tag_color='narrative')
         + stats_strip
         + _ai_summary_body(ai_summary)
         + '</div>'
@@ -5746,19 +5820,22 @@ def weekly_page(
     unit_label = dict(_weekly_unit_opts()).get(unit, unit)
     dim_label  = dict(_weekly_dim_opts()).get(mode, mode)
     # ┃ Chart panel ┃ — histogram (7 daily bars) + distribution (donut+bars)
+    chart_right = (
+        f'<span class="muted small" style="font-weight:600;">{esc(T("unit_label"))}</span>'
+        f'{unit_pills}'
+        f'{top_chart_switcher}'
+    )
     top_histogram_card = (
         f'<div class="card top-chart-card" id="top-chart" data-tc-view="{esc(top_view)}">'
-        '<div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:6px;">'
-        f'<h3 style="margin:0;">{esc(T("chart_per_day"))} {esc(unit_label)} <span class="muted small" style="font-weight:500;">· {esc(T("dim_label"))}: {esc(dim_label)}</span></h3>'
-        f'<span class="tag source" style="background:rgba(47,111,237,0.12); color:#2f6fed;">{esc(T("chart_panel_tag"))}</span>'
-        '<div style="margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">'
-        f'<span class="muted small" style="font-weight:600;">{esc(T("unit_label"))}</span>{unit_pills}'
-        f'{top_chart_switcher}'
-        '</div>'
-        '</div>'
-        f'<div class="tc-pane" data-pane="chart">{main_chart_body}</div>'
-        f'<div class="tc-pane" data-pane="dist">{dist_view_body}</div>'
-        '</div>'
+        + _card_head(
+            f"{T('chart_per_day')} {unit_label}",
+            tag=T("chart_panel_tag"), tag_color="data",
+            hint=f"· {T('dim_label')}: {dim_label}",
+            right_html=chart_right,
+        )
+        + f'<div class="tc-pane" data-pane="chart">{main_chart_body}</div>'
+        + f'<div class="tc-pane" data-pane="dist">{dist_view_body}</div>'
+        + '</div>'
     )
 
     # Insights card (full-width row below the Report+Chart top row)
@@ -5829,15 +5906,15 @@ def weekly_page(
     bottom_card = (
         f'<section class="card weekly-viz" id="chart" data-view="{esc(view)}" '
         f'data-filter="{esc(sf)}">'
-        '<div style="display:flex; align-items:center; gap:12px; margin-bottom:6px; flex-wrap:wrap;">'
-        f'<h3 style="margin:0;">{esc(T("page_timeline"))}</h3>'
-        '<span class="tag source" style="background:rgba(123,97,255,0.14); color:#7b61ff;">Timeline</span>'
-        f'<div style="margin-left:auto;">{bottom_switcher_pills}</div>'
-        '</div>'
-        + shared_filter_bar +
-        '<div class="wv-pane" data-pane="swim">' + swim_body + '</div>'
-        '<div class="wv-pane" data-pane="heat">' + heat_body + '</div>'
-        '</section>'
+        + _card_head(
+            T("page_timeline"),
+            tag=T("tag_timeline"), tag_color="narrative",
+            right_html=bottom_switcher_pills,
+        )
+        + shared_filter_bar
+        + '<div class="wv-pane" data-pane="swim">' + swim_body + '</div>'
+        + '<div class="wv-pane" data-pane="heat">' + heat_body + '</div>'
+        + '</section>'
     )
 
     # Page-level JS:
@@ -6000,12 +6077,12 @@ def weekly_page(
         for d in days
     )
     day_links_html = (
-        '<section class="card" style="margin-top:12px;">'
-        '<div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">'
-        f'<h3 style="margin:0;">{esc(T("jump_to_day"))}</h3>'
-        f'<div class="day-jumps">{day_chips}</div>'
-        '</div>'
-        '</section>'
+        '<section class="card">'
+        + _card_head(
+            T("jump_to_day"), tag_color="narrative",
+            right_html=f'<div class="day-jumps">{day_chips}</div>',
+        )
+        + '</section>'
     )
 
     # Right column: just the histogram card. Insights moved to a full-width
@@ -6015,18 +6092,14 @@ def weekly_page(
     tasks_panel_html = _tasks_panel(con, days, bh)
     audit_html = _alignment_audit_card(con, days)
     daily_timeline_card = _render_weekly_daily_timeline_card(con, days)
-    projects_card_html = _render_projects_card(con, days, is_weekly=True)
     body = (
         # Row 1: Report | Chart
         '<section class="report-grid">'
         + weekly_report_card
         + '<div class="right-column">' + right_column_body + '</div>'
         + '</section>'
-        # Row 2: Insights | Projects · Tasks
-        + '<section class="report-grid">'
-        + '<div class="left-column">' + insights_card_html + '</div>'
-        + '<div class="right-column">' + projects_card_html + '</div>'
-        + '</section>'
+        # Row 2: Insights (full-width 3-col)
+        + insights_card_html
         # Timeline panel (swim/heat)
         + bottom_card
         + view_sync_js
