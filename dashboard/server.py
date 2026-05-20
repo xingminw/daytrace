@@ -1655,7 +1655,7 @@ def _mode_link(path: str, params: dict[str, str | None]) -> str:
 def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: str | None = None, style: str | None = None):
     valid_modes = {dim_id for dim_id, _ in DIMENSIONS}
     if mode not in valid_modes:
-        mode = "source"
+        mode = "project"
     valid_units = {u for u, _ in UNITS}
     if unit not in valid_units:
         unit = "count"
@@ -1772,11 +1772,11 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
         idx = dates_desc.index(date)
         if idx + 1 < len(dates_desc):
             prev_day = dates_desc[idx + 1]
-            href = _mode_link("/today", {"date": prev_day, "mode": mode if mode != "source" else None, "unit": unit if unit != "count" else None})
+            href = _mode_link("/today", {"date": prev_day, "mode": mode if mode != "project" else None, "unit": unit if unit != "count" else None})
             prev_link = f'<a class="hdr-nav-btn" title="前一天 {esc(prev_day)}" href="{esc(href)}">←</a>'
         if idx - 1 >= 0:
             next_day = dates_desc[idx - 1]
-            href = _mode_link("/today", {"date": next_day, "mode": mode if mode != "source" else None, "unit": unit if unit != "count" else None})
+            href = _mode_link("/today", {"date": next_day, "mode": mode if mode != "project" else None, "unit": unit if unit != "count" else None})
             next_link = f'<a class="hdr-nav-btn" title="后一天 {esc(next_day)}" href="{esc(href)}">→</a>'
     # Database button removed from the centered header — the right-rail
     # already has a Database pill (.page-db-btn). Keeping both gave the
@@ -1793,7 +1793,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     dim_pill_links = "".join(
         f'<a class="dim-tab{" active" if dim_id == mode else ""}" '
         f'data-param="mode" data-value="{dim_id}" '
-        f'href="{esc(_mode_link("/today", {"date": date, "mode": dim_id if dim_id != "source" else None, "unit": unit if unit != "count" else None}))}">'
+        f'href="{esc(_mode_link("/today", {"date": date, "mode": dim_id if dim_id != "project" else None, "unit": unit if unit != "count" else None}))}">'
         f'{label}</a>'
         for dim_id, label in _dimensions()
     )
@@ -1827,7 +1827,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
     unit_pill_links = "".join(
         f'<a class="unit-tab{" active" if u_id == unit else ""}" '
         f'data-param="unit" data-value="{u_id}" '
-        f'href="{esc(_mode_link("/today", {"date": date, "mode": mode if mode != "source" else None, "unit": u_id if u_id != "count" else None}))}">'
+        f'href="{esc(_mode_link("/today", {"date": date, "mode": mode if mode != "project" else None, "unit": u_id if u_id != "count" else None}))}">'
         f'{label}</a>'
         for u_id, label in _units()
     )
@@ -2036,7 +2036,7 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
 """
     # Header pattern: [←] [📅 picker] [→] [open db ↗] [dim pills]
     # — identical layout as weekly. "Open db" opens in a new tab.
-    cal_hidden = {"mode": mode if mode != "source" else None, "unit": unit if unit != "count" else None}
+    cal_hidden = {"mode": mode if mode != "project" else None, "unit": unit if unit != "count" else None}
     cal_hidden = {k: v for k, v in cal_hidden.items() if v}
     date_picker_html = calendar_control('/today', date, all_dates, hidden=cal_hidden, label_text="")
     header_controls = (
@@ -5868,7 +5868,7 @@ def weekly_page(
     if mode == "device_id":
         mode = "device"
     if mode not in valid_modes:
-        mode = "source"  # match daily's default for consistency
+        mode = "project"  # match daily's default for consistency
     if view not in valid_views:
         view = "swim"
     valid_top_views = {"chart", "dist"}
@@ -6438,7 +6438,7 @@ class Handler(BaseHTTPRequestHandler):
                 if date:
                     redirect_params["date"] = date
                 mode = qs.get("mode", [None])[0] or None
-                if mode and mode != "source":
+                if mode and mode != "project":
                     redirect_params["mode"] = mode
                 self.send_response(302)
                 self.send_header("Location", "/today" + (("?" + urlencode(redirect_params)) if redirect_params else ""))
