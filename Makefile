@@ -6,14 +6,20 @@ DB      ?= data/daytrace.sqlite
 PORT    ?= 8765
 DEVICE  ?= mac
 
-.PHONY: help install dashboard daily weekly export-daily export-weekly \
+.PHONY: help install install-config dashboard daily weekly export-daily export-weekly \
         sync-tasks deploy clean-feishu test status
 
 help:                  ## Show this help
 	@awk 'BEGIN{FS=":.*##"; printf "DayTrace targets:\n"} /^[a-zA-Z_-]+:.*##/ {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-install:               ## Install runtime dependencies
+install:               ## Install runtime dependencies (then run `make install-config`)
 	$(PY) -m pip install -r requirements.txt
+
+install-config:        ## Copy config/*.example.yaml templates to their real locations
+	@for f in config/*.example.yaml; do \
+		dst=$${f%.example.yaml}.yaml; \
+		[ -f $$dst ] && echo "  exists: $$dst (skipping)" || { cp $$f $$dst && echo "  created: $$dst"; }; \
+	done
 
 dashboard:             ## Start the local dashboard at $(PORT)
 	$(PY) dashboard/server.py --db $(DB) --port $(PORT)

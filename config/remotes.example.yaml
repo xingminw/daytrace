@@ -1,3 +1,6 @@
+# Copy to config/remotes.yaml and fill in your own remotes.
+# The real config/remotes.yaml is gitignored.
+#
 # config/remotes.yaml — single source of truth for "what other machines does
 # this hub pull from?".
 #
@@ -10,8 +13,9 @@
 # Adding a new remote: append a block here, then re-run `deploy` once. catchup
 # will start including it on the next nightly run.
 
-remotes:
-  - device_id: omen-wsl                            # must match config.device.id
-    ssh: mtl                                       # alias in ~/.ssh/config (was mtl-tail)
-    repo_path: /mnt/d/research-programs/daytrace   # checked-out daytrace clone
-    config: config/devices/omen-wsl.yaml           # collector config, relative to repo_path
+remotes: []
+# Example:
+#   - device_id: my-remote
+#     ssh: my-ssh-alias
+#     repo_path: /path/to/daytrace/clone
+#     config: config/devices/my-remote.yaml

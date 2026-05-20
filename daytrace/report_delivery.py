@@ -45,7 +45,7 @@ def _tailscale_dnsname() -> str | None:
         if result.returncode != 0:
             return None
         data = json.loads(result.stdout)
-        # `Self.DNSName` looks like `xingmins-macbook-air.tail24bb1.ts.net.`
+        # `Self.DNSName` looks like `your-mac.tailXXXX.ts.net.`
         name = (data.get("Self") or {}).get("DNSName", "").rstrip(".")
         return name or None
     except Exception:

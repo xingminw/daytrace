@@ -130,9 +130,6 @@ data/              全部 runtime —— sqlite、inbox 暂存、日志、报告
 - **[Data Model](docs/data-model.md)** ([中文](docs/data-model.zh.md))
   —— 每张 SQLite 表、`events_hash` 缓存失效契约、schema 迁移
 
-早期的设计草稿在 [`docs/archive/`](docs/archive/),保留作背景参考 ——
-描述的是早先的思路,不是当前实现。
-
 ## 许可
 
 [MIT](LICENSE) —— 想拿来干嘛都可以;弄坏了零件归你。

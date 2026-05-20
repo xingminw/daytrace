@@ -11,11 +11,10 @@
 
 set -u
 
-REPO=/Users/xingminwang/Projects/daytrace
-cd "$REPO"
+cd "$(cd "$(dirname "$0")/.." && pwd)" || exit 1
 
 # launchd seeds PATH minimally; restore enough to find python3, curl.
-export PATH="$HOME/.npm-global/bin:/opt/anaconda3/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="$HOME/.npm-global/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
 
 echo "=== $(date -Iseconds) DayTrace weekly start ==="
 

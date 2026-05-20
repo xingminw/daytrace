@@ -59,7 +59,7 @@ def epoch_to_local_iso(epoch: float) -> str:
 
 def cwd_from_project_dir(project_dir: Path) -> str:
     """The folder name encodes the cwd with slashes replaced by dashes:
-        -Users-xingminwang-Projects-daytrace  →  /Users/xingminwang/Projects/daytrace
+        -Users-alice-Projects-daytrace  →  /Users/alice/Projects/daytrace
     The leading dash means an absolute path."""
     name = project_dir.name
     if name.startswith("-"):

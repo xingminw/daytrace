@@ -21,7 +21,18 @@ will be a one-time browser auth.
 
 ## 2. Configuration files
 
-All config lives in `config/`. Each file is described below.
+All config lives in `config/`. The repo ships `*.example.yaml` templates;
+copy each to its real filename (gitignored) and fill in your own values:
+
+```bash
+make install-config
+# or manually:
+#   cp config/work_items.example.yaml        config/work_items.yaml
+#   cp config/work_item_aliases.example.yaml config/work_item_aliases.yaml
+#   cp config/remotes.example.yaml           config/remotes.yaml
+```
+
+Each file is described below.
 
 ### `config/devices/<device>.yaml` — what each machine collects
 
@@ -45,6 +56,8 @@ sources:
 
 ### `config/remotes.yaml` — which other machines feed this hub
 
+Copy `config/remotes.example.yaml` → `config/remotes.yaml` first.
+
 ```yaml
 remotes:
   - device_id: omen-wsl              # must match the remote's device.id
@@ -59,7 +72,9 @@ events back).
 
 ### `config/work_items.yaml` — Feishu Bitables to sync
 
-Each table tier has its own field-name → DayTrace-column map. See the
+Copy `config/work_items.example.yaml` → `config/work_items.yaml` and fill
+in your Feishu Bitable IDs. Each table tier has its own field-name →
+DayTrace-column map. See the
 heavily commented header of the file itself; the short version:
 
 ```yaml
@@ -82,10 +97,12 @@ table and rebuilds `event_work_item_links` against existing events.
 
 ### `config/work_item_aliases.yaml` — manual project → task overrides
 
+Copy `config/work_item_aliases.example.yaml` → `config/work_item_aliases.yaml`.
+
 ```yaml
 aliases:
-  "Daily Briefing": recvjP3BNUM48e
-  "DayTrace Joint": recvjKgrBShiWP
+  "My project alias": rec_REPLACE_ME_1
+  "Another alias":    rec_REPLACE_ME_2
 ```
 
 Used by `work_items.rebuild_links()` when URL/path matching fails. The
@@ -145,7 +162,7 @@ open http://127.0.0.1:8765/today
 
 ## 5. Scheduled tasks (macOS launchd)
 
-Three jobs ship under `deploy/`:
+Three jobs ship as templates under `deploy/`:
 
 | Job | Cadence | Script |
 |---|---|---|
@@ -153,14 +170,13 @@ Three jobs ship under `deploy/`:
 | `com.daytrace.daily`     | every day, 04:30 | `scripts/daytrace-daily.sh` → catchup + Feishu Docs export |
 | `com.daytrace.weekly`    | Monday, 06:00    | `scripts/daytrace-weekly.sh` → weekly render + Feishu + Gmail |
 
-Install:
+Install — `scripts/install_launchd.sh` substitutes `__REPO__` and
+`__PYTHON__` in each `deploy/*.plist.template`, writes the rendered
+plists to `~/Library/LaunchAgents/`, and bootstraps them. It's
+idempotent (unloads any existing copies first).
 
 ```bash
-for plist in deploy/com.daytrace.{dashboard,daily,weekly}.plist; do
-  cp "$plist" ~/Library/LaunchAgents/
-  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/$(basename "$plist")
-done
-
+bash scripts/install_launchd.sh
 launchctl list | grep daytrace   # confirm
 ```
 

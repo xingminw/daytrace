@@ -7,13 +7,13 @@
   If the Mac is asleep at fire time, launchd runs the job the next time
   the system wakes (KeepAlive default behavior for StartCalendarInterval).
 
-  Install:
-    cp deploy/com.daytrace.daily.plist ~/Library/LaunchAgents/
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.daytrace.daily.plist
+  Install: run `scripts/install_launchd.sh` from the repo root. It
+  substitutes __PYTHON__ and __REPO__ in this template and bootstraps
+  the resulting plist into ~/Library/LaunchAgents/.
 
   Inspect:
     launchctl list | grep daytrace
-    tail -f /Users/xingminwang/Projects/daytrace/data/logs/daily.log
+    tail -f __REPO__/data/logs/daily.log
 
   Unload:
     launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.daytrace.daily.plist
@@ -26,7 +26,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/bash</string>
-    <string>/Users/xingminwang/Projects/daytrace/scripts/daytrace-daily.sh</string>
+    <string>__REPO__/scripts/daytrace-daily.sh</string>
   </array>
 
   <key>StartCalendarInterval</key>
@@ -38,12 +38,12 @@
   </dict>
 
   <key>WorkingDirectory</key>
-  <string>/Users/xingminwang/Projects/daytrace</string>
+  <string>__REPO__</string>
 
   <key>StandardOutPath</key>
-  <string>/Users/xingminwang/Projects/daytrace/data/logs/daily.log</string>
+  <string>__REPO__/data/logs/daily.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/xingminwang/Projects/daytrace/data/logs/daily.log</string>
+  <string>__REPO__/data/logs/daily.log</string>
 
   <key>RunAtLoad</key>
   <false/>

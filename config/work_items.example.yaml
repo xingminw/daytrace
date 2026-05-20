@@ -1,3 +1,6 @@
+# Copy to config/work_items.yaml and fill in the REPLACE_ME values from
+# your Feishu Bitable. The real config/work_items.yaml is gitignored.
+#
 # config/work_items.yaml — Feishu Bitables to mirror locally.
 #
 # Boundary contract — three column tiers:
@@ -21,7 +24,7 @@
 # Disabling enabled=false hides the Tasks panel + 任务 dim option;
 # nothing else breaks.
 
-enabled: true
+enabled: false
 
 # 1..N tables. Each table gets a `key` (local id used as table_key in
 # SQLite + as a chip label) and a `field_map` mapping logical names →
@@ -31,8 +34,8 @@ tables:
 
   - key: tasks
     name: 任务
-    app_token: F9p4bjm24axBY8sd8macJIySnYe
-    table_id:  tbldFwiuV4K0l2Lp
+    app_token: REPLACE_ME_app_token_1
+    table_id:  REPLACE_ME_table_id_1
     as: user
     # Tier-1 reads: only what the Tasks panel + 任务 dim actually use.
     # Dropped sync of Agent 工作区, 用户原话, 备注, 下一步时间, 下一步动作,
@@ -50,8 +53,8 @@ tables:
 
   - key: reviews
     name: 审稿
-    app_token: FJTLbsd6RaP1omsbvYDcuN5ZnTe
-    table_id:  tblQW1NW564DUa1D
+    app_token: REPLACE_ME_app_token_2
+    table_id:  REPLACE_ME_table_id_2
     as: user
     # When true, every event linked to ANY record in this table is bucketed
     # under one shared dim value (`collapsed_label`) in the 任务 dim.

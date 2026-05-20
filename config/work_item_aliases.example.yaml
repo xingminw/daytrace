@@ -1,3 +1,6 @@
+# Copy to config/work_item_aliases.yaml and fill in your own aliases.
+# The real config/work_item_aliases.yaml is gitignored.
+#
 # config/work_item_aliases.yaml — manual project_guess → Feishu record_id map.
 # Used by daytrace.work_items.rebuild_links() as a deterministic override
 # for cases where URL matching doesn't find a link (e.g. chat-only projects).
@@ -8,9 +11,5 @@
 # (first column of the markdown table.)
 
 aliases:
-  "Daily Briefing": recvjP3BNUM48e
-  "DayTrace Joint": recvjKgrBShiWP
-  "Hermes 群聊测试": recvjKgrBShiWP
-  "Personal Recording": recvjKgrBShiWP
-  "daily-manager": recvjP3BNUM48e
-  "overleaf": recvjDyOoowGPZ
+  "My project alias": rec_REPLACE_ME_1
+  "Another alias":    rec_REPLACE_ME_2

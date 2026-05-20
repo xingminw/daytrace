@@ -20,7 +20,18 @@ Python ≥ 3.10。已在 macOS Sonoma + Sequoia 上测试。
 
 ## 2. 配置文件
 
-全在 `config/`。下面逐个说。
+全在 `config/`。仓库附带 `*.example.yaml` 模板,先拷贝成真实文件名
+(后者已 gitignore)再填值:
+
+```bash
+make install-config
+# 或手动:
+#   cp config/work_items.example.yaml        config/work_items.yaml
+#   cp config/work_item_aliases.example.yaml config/work_item_aliases.yaml
+#   cp config/remotes.example.yaml           config/remotes.yaml
+```
+
+下面逐个说。
 
 ### `config/devices/<device>.yaml` —— 每台机器采集什么
 
@@ -43,6 +54,8 @@ sources:
 
 ### `config/remotes.yaml` —— 哪些远端往这个 hub 喂数据
 
+先 `cp config/remotes.example.yaml config/remotes.yaml`。
+
 ```yaml
 remotes:
   - device_id: omen-wsl              # 必须等于远端的 device.id
@@ -56,7 +69,9 @@ Hub 用这个文件来跑 `run_daily.py deploy`(把代码推到每个 remote)和
 
 ### `config/work_items.yaml` —— 飞书多维表格同步
 
-每个表有自己的(字段名 → DayTrace 列)映射。文件顶部有详细注释;简要:
+先 `cp config/work_items.example.yaml config/work_items.yaml`,把 Feishu
+Bitable 的 ID 填进去。每个表有自己的(字段名 → DayTrace 列)映射。文件
+顶部有详细注释;简要:
 
 ```yaml
 tables:
@@ -78,10 +93,12 @@ tables:
 
 ### `config/work_item_aliases.yaml` —— 手动 project → task 兜底
 
+先 `cp config/work_item_aliases.example.yaml config/work_item_aliases.yaml`。
+
 ```yaml
 aliases:
-  "Daily Briefing": recvjP3BNUM48e
-  "DayTrace Joint": recvjKgrBShiWP
+  "My project alias": rec_REPLACE_ME_1
+  "Another alias":    rec_REPLACE_ME_2
 ```
 
 `work_items.rebuild_links()` 在 URL/路径匹配不上时用这个。Dashboard 的
@@ -137,7 +154,7 @@ open http://127.0.0.1:8765/today
 
 ## 5. 定时任务(macOS launchd)
 
-`deploy/` 下三个 plist:
+`deploy/` 下三个 plist 模板:
 
 | Job | 周期 | 脚本 |
 |---|---|---|
@@ -145,14 +162,12 @@ open http://127.0.0.1:8765/today
 | `com.daytrace.daily`     | 每天 04:30 | `scripts/daytrace-daily.sh` → catchup + 飞书 |
 | `com.daytrace.weekly`    | 每周一 06:00 | `scripts/daytrace-weekly.sh` → 周报 + 飞书 + Gmail |
 
-安装:
+安装 —— `scripts/install_launchd.sh` 会把 `deploy/*.plist.template` 里的
+`__REPO__` / `__PYTHON__` 替换好,写到 `~/Library/LaunchAgents/`,然后
+bootstrap 起来。脚本幂等(已加载的会先 unload)。
 
 ```bash
-for plist in deploy/com.daytrace.{dashboard,daily,weekly}.plist; do
-  cp "$plist" ~/Library/LaunchAgents/
-  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/$(basename "$plist")
-done
-
+bash scripts/install_launchd.sh
 launchctl list | grep daytrace   # 确认
 ```
 

@@ -134,9 +134,6 @@ Three docs, each written against the actual code:
 - **[Data Model](docs/data-model.md)** — every SQLite table, the
   `events_hash` cache invalidation contract, schema migrations
 
-Earlier design drafts live under [`docs/archive/`](docs/archive/) for
-context — they describe earlier thinking, not the current implementation.
-
 ## License
 
 [MIT](LICENSE) — do what you want; if it breaks, you keep both pieces.

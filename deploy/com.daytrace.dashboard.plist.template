@@ -6,9 +6,9 @@
   8765 so Tailscale Serve has something to proxy. KeepAlive=true means
   launchd respawns the process if it ever exits.
 
-  Install:
-    cp deploy/com.daytrace.dashboard.plist ~/Library/LaunchAgents/
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.daytrace.dashboard.plist
+  Install: run `scripts/install_launchd.sh` from the repo root. It
+  substitutes __PYTHON__ and __REPO__ in this template and bootstraps
+  the resulting plist into ~/Library/LaunchAgents/.
 
   Verify:
     curl http://127.0.0.1:8765/today
@@ -23,10 +23,10 @@
 
   <key>ProgramArguments</key>
   <array>
-    <string>/opt/anaconda3/bin/python3</string>
-    <string>/Users/xingminwang/Projects/daytrace/dashboard/server.py</string>
+    <string>__PYTHON__</string>
+    <string>__REPO__/dashboard/server.py</string>
     <string>--db</string>
-    <string>/Users/xingminwang/Projects/daytrace/data/daytrace.sqlite</string>
+    <string>__REPO__/data/daytrace.sqlite</string>
     <string>--host</string>
     <string>127.0.0.1</string>
     <string>--port</string>
@@ -34,18 +34,18 @@
   </array>
 
   <key>WorkingDirectory</key>
-  <string>/Users/xingminwang/Projects/daytrace</string>
+  <string>__REPO__</string>
 
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/anaconda3/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>/usr/local/bin:/usr/bin:/bin</string>
   </dict>
 
   <key>StandardOutPath</key>
-  <string>/Users/xingminwang/Projects/daytrace/data/logs/dashboard.log</string>
+  <string>__REPO__/data/logs/dashboard.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/xingminwang/Projects/daytrace/data/logs/dashboard.log</string>
+  <string>__REPO__/data/logs/dashboard.log</string>
 
   <key>RunAtLoad</key>
   <true/>

@@ -52,6 +52,16 @@ data/
 # Feishu drive folder tokens — auto-generated on first upload, machine-local
 config/feishu_drive.yaml
 
+# Personal config (real tokens / aliases / remotes). Tracked siblings are
+# config/*.example.yaml; copy them and fill in your own values.
+config/work_items.yaml
+config/work_item_aliases.yaml
+config/remotes.yaml
+
+# Rendered launchd plists (machine-specific paths). Tracked siblings are
+# deploy/*.plist.template; generate with scripts/install_launchd.sh.
+deploy/*.plist
+
 # Committed branding + GitHub-Pages screenshots (override *.png / *.svg above).
 !docs/assets/**
 
