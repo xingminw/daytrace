@@ -1197,6 +1197,41 @@ def html_response(handler: BaseHTTPRequestHandler, body: str, status=200):
     handler.wfile.write(data)
 
 
+# Inline SVG sparkline logo. Lives inside the <h1> so the brand mark sits
+# right before "DayTrace · …" without depending on any /static route.
+LOGO_INLINE_SVG = (
+    '<svg width="22" height="22" viewBox="0 0 32 32" fill="#7aa2f7"'
+    ' aria-hidden="true" focusable="false"'
+    ' style="vertical-align:-3px;margin-right:10px;flex-shrink:0">'
+    '<rect x="3" y="20" width="3" height="9"/>'
+    '<rect x="7" y="11" width="3" height="18"/>'
+    '<rect x="11" y="16" width="3" height="13"/>'
+    '<rect x="15" y="6" width="3" height="23"/>'
+    '<rect x="19" y="13" width="3" height="16"/>'
+    '<rect x="23" y="22" width="3" height="7"/>'
+    '<rect x="27" y="17" width="3" height="12"/>'
+    '</svg>'
+)
+# Same shape, inlined as a data: URI so we can use it for the <link rel="icon">
+# favicon without serving a separate static file. Dark-rounded background keeps
+# the icon legible on white *and* dark browser tabs.
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+    '<rect width="32" height="32" rx="6" fill="#0b1220"/>'
+    '<g fill="#7aa2f7">'
+    '<rect x="3" y="20" width="3" height="9"/>'
+    '<rect x="7" y="11" width="3" height="18"/>'
+    '<rect x="11" y="16" width="3" height="13"/>'
+    '<rect x="15" y="6" width="3" height="23"/>'
+    '<rect x="19" y="13" width="3" height="16"/>'
+    '<rect x="23" y="22" width="3" height="7"/>'
+    '<rect x="27" y="17" width="3" height="12"/>'
+    '</g></svg>'
+)
+from urllib.parse import quote as _url_quote
+FAVICON_DATA_URI = "data:image/svg+xml," + _url_quote(_FAVICON_SVG)
+
+
 def layout(title: str, subtitle: str, active: str, content: str, date_control: str = "", body_class: str | None = None, lang: str | None = None) -> str:
     # lang defaults to the per-request ContextVar (set in do_GET from the
     # daytrace_lang cookie). Pass lang= explicitly only when rendering
@@ -1244,10 +1279,14 @@ def layout(title: str, subtitle: str, active: str, content: str, date_control: s
     html_lang_attr = "zh-CN" if lang == "zh" else "en"
     script = """
 <script>
-// Language toggle: set cookie + reload when an inactive option is clicked
+// Language toggle: set cookie + reload when an inactive option is clicked.
+// If the link points somewhere real (static demo rewrites href to the
+// other-language .html file), let the browser navigate normally.
 document.addEventListener('click', (event) => {
   const btn = event.target.closest('.page-lang-toggle .lang-opt');
   if (btn) {
+    const href = btn.getAttribute('href');
+    if (href && href !== '#') return;  // static demo: let browser follow link
     event.preventDefault();
     if (btn.classList.contains('active')) return;  // already in this language
     const target = btn.getAttribute('data-lang') || 'zh';
@@ -1268,7 +1307,7 @@ document.addEventListener('keydown', (event) => {
   }
 });
 </script>"""
-    return f"""<!doctype html><html lang="{html_lang_attr}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(title)}</title><style>{STYLE}</style></head><body class="{body_class}"><header><h1>{esc(title)}</h1>{date_control}<div class="header-spacer"></div>{nav}</header><main>{content}</main>{script}</body></html>"""
+    return f"""<!doctype html><html lang="{html_lang_attr}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(title)}</title><link rel="icon" type="image/svg+xml" href="{FAVICON_DATA_URI}"><style>{STYLE}</style></head><body class="{body_class}"><header><h1>{LOGO_INLINE_SVG}{esc(title)}</h1>{date_control}<div class="header-spacer"></div>{nav}</header><main>{content}</main>{script}</body></html>"""
 
 
 def select_control(name: str, options: list[dict[str, str]], selected: str | bool | None, label: str = "") -> str:
