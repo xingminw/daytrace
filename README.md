@@ -43,11 +43,11 @@ data without your config saying so.
 
 <p align="center">
   <a href="https://xingminw.github.io/daytrace/demo/">
-    <img src="docs/assets/screenshots/daily-en.png" alt="DayTrace daily report — demo page rendered with mock data" width="780">
+    <img src="docs/assets/screenshots/weekly-en.png" alt="DayTrace weekly report — demo page rendered with mock 7-day data" width="780">
   </a>
   <br>
-  <em>Daily report — <a href="https://xingminw.github.io/daytrace/demo/">live demo</a> ·
-  <a href="https://xingminw.github.io/daytrace/demo/weekly.html">Weekly view</a> ·
+  <em>Weekly report — <a href="https://xingminw.github.io/daytrace/demo/">live demo</a> ·
+  <a href="https://xingminw.github.io/daytrace/demo/daily.html">Daily view</a> ·
   <a href="https://xingminw.github.io/daytrace/demo/index.zh.html">中文</a></em>
 </p>
 

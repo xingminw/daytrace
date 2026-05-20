@@ -1227,7 +1227,9 @@ def _fetch(url: str, lang: str = "zh") -> str:
 
 # Map of in-page routes that should resolve to a peer file in docs/demo/.
 # Per-language filename suffixes: zh → "", en → ".en"
-_NAV_PAGES = {"/today": "index", "/weekly": "weekly"}
+# Demo entry point = weekly view (most impressive at a glance: 7 days of
+# content, project rotation, per-day cards). Daily lives at daily.html.
+_NAV_PAGES = {"/today": "daily", "/weekly": "index"}
 
 
 def _rewrite_href(href: str, lang: str) -> str:
@@ -1264,9 +1266,10 @@ _LANG_OPT_RE = re.compile(
 
 
 def _rewrite_lang_pills(html: str, page: str) -> str:
-    # English is the default static page (no suffix); Chinese gets `.zh`.
-    other = {"en": "index.html"    if page == "today" else "weekly.html",
-             "zh": "index.zh.html" if page == "today" else "weekly.zh.html"}
+    # Weekly is the demo's default landing → index.html(.zh) is weekly.
+    # Daily lives at daily.html(.zh).
+    other = {"en": "daily.html"    if page == "today" else "index.html",
+             "zh": "daily.zh.html" if page == "today" else "index.zh.html"}
     def repl(m: re.Match) -> str:
         target_lang = m.group("lang")
         href = other.get(target_lang, "#")
@@ -1465,12 +1468,13 @@ def main():
             server_proc.kill()
 
     # English is the GH-Pages default (international audience); Chinese
-    # variants live at *.zh.html.
+    # variants live at *.zh.html. Weekly view is the demo's landing
+    # (most impressive at a glance) → it owns index.html(.zh).
     outputs = {
-        ("today", "en"):  OUT_DIR / "index.html",
-        ("today", "zh"):  OUT_DIR / "index.zh.html",
-        ("weekly", "en"): OUT_DIR / "weekly.html",
-        ("weekly", "zh"): OUT_DIR / "weekly.zh.html",
+        ("today",  "en"): OUT_DIR / "daily.html",
+        ("today",  "zh"): OUT_DIR / "daily.zh.html",
+        ("weekly", "en"): OUT_DIR / "index.html",
+        ("weekly", "zh"): OUT_DIR / "index.zh.html",
     }
     for (page, lang), raw in captures.items():
         html = scrub_html(raw, lang=lang, page=page)
@@ -1485,8 +1489,8 @@ def main():
         "rendered against synthetic data — no real activity is shown.\n\n"
         "Regenerate with `python scripts/build_demo.py`.\n\n"
         "Pages (English is the default; switch language via the 中/EN pills in the header):\n"
-        "- Daily report — [English](index.html) · [中文](index.zh.html)\n"
-        "- Weekly report — [English](weekly.html) · [中文](weekly.zh.html)\n",
+        "- Weekly report (landing) — [English](index.html) · [中文](index.zh.html)\n"
+        "- Daily report — [English](daily.html) · [中文](daily.zh.html)\n",
         encoding="utf-8",
     )
 
