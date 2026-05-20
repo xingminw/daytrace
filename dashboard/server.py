@@ -1179,10 +1179,27 @@ def event_limit_control(selected: str | None) -> str:
     return f'<select name="limit" onchange="this.form.submit()" title="Rows to show">{opts}</select>'
 
 
+def _maybe_gzip(handler: BaseHTTPRequestHandler, data: bytes) -> tuple[bytes, bool]:
+    """gzip the body when the client accepts it AND the payload is large
+    enough to benefit. ~5–10x reduction for our HTML — matters a lot over
+    Tailscale / slow wifi. Below 1 KB the gzip envelope is net-negative."""
+    if len(data) < 1024:
+        return data, False
+    accept = handler.headers.get("Accept-Encoding", "")
+    if "gzip" not in accept.lower():
+        return data, False
+    import gzip
+    return gzip.compress(data, compresslevel=5), True
+
+
 def json_response(handler: BaseHTTPRequestHandler, obj, status=200):
     body = json.dumps(obj, ensure_ascii=False, indent=2).encode("utf-8")
+    body, gzipped = _maybe_gzip(handler, body)
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
+    if gzipped:
+        handler.send_header("Content-Encoding", "gzip")
+        handler.send_header("Vary", "Accept-Encoding")
     handler.send_header("Content-Length", str(len(body)))
     handler.end_headers()
     handler.wfile.write(body)
@@ -1190,8 +1207,12 @@ def json_response(handler: BaseHTTPRequestHandler, obj, status=200):
 
 def html_response(handler: BaseHTTPRequestHandler, body: str, status=200):
     data = body.encode("utf-8")
+    data, gzipped = _maybe_gzip(handler, data)
     handler.send_response(status)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
+    if gzipped:
+        handler.send_header("Content-Encoding", "gzip")
+        handler.send_header("Vary", "Accept-Encoding")
     handler.send_header("Content-Length", str(len(data)))
     handler.end_headers()
     handler.wfile.write(data)
