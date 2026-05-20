@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>DayTrace · social card</title>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&display=swap");
+    html, body { margin: 0; padding: 0; }
+    body {
+      width: 1280px; height: 640px;
+      background:
+        radial-gradient(ellipse 900px 500px at 80% 20%, rgba(122,162,247,.20), transparent 60%),
+        radial-gradient(ellipse 700px 400px at 15% 90%, rgba(149,230,203,.10), transparent 60%),
+        #0b1220;
+      color: #e2e8f0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      box-sizing: border-box;
+      padding: 72px 80px;
+      position: relative;
+      overflow: hidden;
+    }
+    .brand {
+      display: flex; align-items: center; gap: 18px;
+      margin-bottom: 36px;
+    }
+    .brand svg { width: 44px; height: 44px; }
+    .brand .name {
+      font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      font-weight: 700;
+      font-size: 38px;
+      letter-spacing: -0.5px;
+      color: #ffffff;
+    }
+    h1 {
+      font-size: 60px;
+      line-height: 1.12;
+      margin: 0 0 28px;
+      max-width: 1050px;
+      letter-spacing: -1px;
+      font-weight: 750;
+      color: #ffffff;
+    }
+    h1 .accent { color: #7aa2f7; }
+    .sub {
+      font-size: 22px;
+      line-height: 1.45;
+      color: #94a3b8;
+      max-width: 920px;
+      margin: 0 0 48px;
+    }
+    .footer {
+      display: flex; align-items: center; gap: 22px;
+      position: absolute;
+      left: 80px; bottom: 60px; right: 80px;
+      font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 15px;
+      color: #94a3b8;
+    }
+    .footer .chip {
+      padding: 6px 12px;
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 999px;
+    }
+    .footer .url {
+      margin-left: auto;
+      color: #7aa2f7;
+    }
+    .mini-spark {
+      position: absolute;
+      right: 80px; top: 80px;
+      opacity: 0.18;
+    }
+    .mini-spark svg { width: 220px; height: 220px; }
+  </style>
+</head>
+<body>
+  <div class="brand">
+    <svg viewBox="0 0 32 32" fill="#7aa2f7">
+      <rect x="3" y="20" width="3" height="9"/>
+      <rect x="7" y="11" width="3" height="18"/>
+      <rect x="11" y="16" width="3" height="13"/>
+      <rect x="15" y="6" width="3" height="23"/>
+      <rect x="19" y="13" width="3" height="16"/>
+      <rect x="23" y="22" width="3" height="7"/>
+      <rect x="27" y="17" width="3" height="12"/>
+    </svg>
+    <span class="name">DayTrace</span>
+  </div>
+
+  <h1>Your day, traced from the <span class="accent">signals your AI tools<br>already emit</span>.</h1>
+
+  <p class="sub">
+    A local-first personal trace system. Quietly collects what Codex, Claude Code,
+    git and your docs are emitting, joins it to your tasks, and writes a daily
+    narrative you actually want to read.
+  </p>
+
+  <div class="footer">
+    <span class="chip">local-first</span>
+    <span class="chip">SQLite</span>
+    <span class="chip">DeepSeek</span>
+    <span class="chip">MIT</span>
+    <span class="url">github.com/xingminw/daytrace</span>
+  </div>
+
+  <div class="mini-spark">
+    <svg viewBox="0 0 32 32" fill="#7aa2f7">
+      <rect x="3" y="20" width="3" height="9"/>
+      <rect x="7" y="11" width="3" height="18"/>
+      <rect x="11" y="16" width="3" height="13"/>
+      <rect x="15" y="6" width="3" height="23"/>
+      <rect x="19" y="13" width="3" height="16"/>
+      <rect x="23" y="22" width="3" height="7"/>
+      <rect x="27" y="17" width="3" height="12"/>
+    </svg>
+  </div>
+</body>
+</html>
