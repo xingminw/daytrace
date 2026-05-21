@@ -631,19 +631,26 @@ def _load_project_summaries_text(con, date: str) -> str:
                 s = None
         head = f"- [{r['project']}] {(r['active_minutes'] or 0)/60:.1f}h · {r['event_count']} events"
         if isinstance(s, dict):
-            txt = (s.get("summary") or "").strip()
-            wwd = s.get("what_was_done") or []
-            ns = s.get("next_steps") or []
+            def _zh(v):
+                # v19 made these fields bilingual ({"zh","en"} dicts).
+                # Fall back to plain strings for older cached rows.
+                if isinstance(v, dict):
+                    return (v.get("zh") or v.get("en") or "").strip()
+                return (v or "").strip() if isinstance(v, str) else ""
+            txt = _zh(s.get("summary"))
+            wwd = [_zh(w) for w in (s.get("what_was_done") or [])]
+            ns = [_zh(n) for n in (s.get("next_steps") or [])]
             status = s.get("status") or ""
             if status:
                 head += f" · status={status}"
             lines.append(head)
             if txt:
                 lines.append(f"    summary: {txt}")
-            for w in wwd[:2]:
+            for w in [w for w in wwd if w][:2]:
                 lines.append(f"    did: {w}")
-            if ns:
-                lines.append(f"    next: {ns[0]}")
+            ns_nonempty = [n for n in ns if n]
+            if ns_nonempty:
+                lines.append(f"    next: {ns_nonempty[0]}")
         else:
             lines.append(head)
     return "\n".join(lines)

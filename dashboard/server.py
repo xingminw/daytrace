@@ -5,6 +5,7 @@ import argparse
 import calendar
 import html
 import json
+import re
 from datetime import date as dt_date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -1034,6 +1035,17 @@ SOURCE_LABELS = {"codex": "Codex", "git": "GitHub", "github": "GitHub", "hermes"
 
 def esc(x) -> str:
     return html.escape("" if x is None else str(x))
+
+
+_BOLD_MD_RE = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+
+
+def esc_md(x) -> str:
+    """Like esc(), but also renders `**bold**` markdown as <strong>.
+
+    The AI overview prompt asks for bold emphasis in narrative/highlight
+    text; without this the literal asterisks leak through to the page."""
+    return _BOLD_MD_RE.sub(r"<strong>\1</strong>", esc(x))
 
 
 def _card_head(
@@ -2459,7 +2471,7 @@ def _render_overview_section(overview_payload: dict | None) -> str:
     if headline:
         parts.append(f'<div class="dr-headline">📰 {esc(headline)}</div>')
     if narrative:
-        parts.append(f'<p class="dr-narrative">{esc(narrative)}</p>')
+        parts.append(f'<p class="dr-narrative">{esc_md(narrative)}</p>')
     return "".join(parts)
 
 
@@ -2484,7 +2496,7 @@ def _render_trend_section(overview_payload: dict | None, continuity: dict | None
         _SECTION_SEP
         + '<div class="dr-trend">'
         + (_momentum_chip(direction) if direction else "")
-        + (f'<span class="dr-trend-text">{esc(comparison)}</span>' if comparison else "")
+        + (f'<span class="dr-trend-text">{esc_md(comparison)}</span>' if comparison else "")
         + '</div>'
     )
 
@@ -2496,7 +2508,7 @@ def _render_recommendations_section(overview_payload: dict | None) -> str:
     recs = overview_payload.get("recommendations") or []
     if not recs:
         return ""
-    items = "".join(f"<li>{esc(r)}</li>" for r in recs)
+    items = "".join(f"<li>{esc_md(r)}</li>" for r in recs)
     return (
         _SECTION_SEP
         + f'<ul class="dr-bullets dr-recommendations">{items}</ul>'
@@ -2542,7 +2554,7 @@ def _render_trend_closer(overview_payload: dict | None, continuity: dict | None)
         f'title="{esc(T("trend_tip"))}">'
         f'<span class="trend-label">{esc(T("trend_label"))}</span>'
         + (_momentum_chip(direction) if direction else "")
-        + (f'<span class="dr-trend-text">{esc(comparison)}</span>' if comparison else "")
+        + (f'<span class="dr-trend-text">{esc_md(comparison)}</span>' if comparison else "")
         + '</div>'
     )
 
@@ -2595,7 +2607,7 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
         if narrative or headline:
             inner: list[str] = []
             if narrative:
-                inner.append(f'<p class="dt-narrative">{esc(narrative)}</p>')
+                inner.append(f'<p class="dt-narrative">{esc_md(narrative)}</p>')
             inner.append(
                 f'<a class="dt-day-link" href="/today?date={esc(d)}">{esc(T("open_full_day"))}</a>'
             )
@@ -2686,7 +2698,7 @@ def _render_insights_card(overview_payload: dict | None, *, continuity: dict | N
         texts = [L(x) for x in items]
         cleaned = [_strip_re.sub("", t.lstrip()).strip() for t in texts if t]
         body_html = (
-            f'<ul>{"".join(f"<li>{esc(x)}</li>" for x in cleaned)}</ul>' if cleaned
+            f'<ul>{"".join(f"<li>{esc_md(x)}</li>" for x in cleaned)}</ul>' if cleaned
             else f'<div class="muted">{esc(T("insights_none"))}</div>'
         )
         return (
