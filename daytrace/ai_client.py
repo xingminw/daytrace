@@ -114,7 +114,7 @@ def call_json_validated(
     temperature: float = 0.4,
     max_tokens: int = 2048,
     timeout: float = 60.0,
-    transient_retries: int = 1,
+    transient_retries: int = 2,
     shape_retries: int = 1,
 ) -> LLMResponse:
     """Call the model, then validate the JSON shape. On shape failure, retry
@@ -160,7 +160,7 @@ def call_json(
     temperature: float = 0.4,
     max_tokens: int = 2048,
     timeout: float = 60.0,
-    retries: int = 1,
+    retries: int = 2,
 ) -> LLMResponse:
     """POST to /chat/completions with JSON response mode. Returns parsed JSON.
 
@@ -209,7 +209,10 @@ def call_json(
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
             last_err = LLMError(f"{type(e).__name__}: {e}")
         if attempt < retries:
-            time.sleep(0.5 * (attempt + 1))
+            # Exponential backoff (0.5s, 1.5s, 4.5s, …) caps the burst when
+            # DeepSeek is briefly down, while staying well under any sensible
+            # outer timeout budget.
+            time.sleep(0.5 * (3 ** attempt))
     assert last_err is not None
     raise last_err
 

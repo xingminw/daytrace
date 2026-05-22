@@ -346,15 +346,60 @@ def cmd_catchup(args: argparse.Namespace) -> int:
                 print(f"!!! regen {d} failed: {type(e).__name__}: {e}", flush=True)
                 regen_failures.append(d)
 
+    # ── Phase 3: heal stuck AI channels in the recent past ──────────────
+    # Catches days where an earlier regen tried the AI call, hit a transient
+    # DeepSeek timeout (network blip / API hiccup), wrote `error` and a NULL
+    # value_json, and was then never re-tried — because events_hash hadn't
+    # changed afterwards. The orchestrator's _is_fresh() already returns
+    # False for error/NULL rows; we just need to *trigger* a regen for
+    # those dates.
+    print(f"\n── phase-3: heal stuck AI channels (last 7 days) ──", flush=True)
+    stuck_rows = con.execute(
+        """
+        SELECT DISTINCT date FROM day_channel
+        WHERE generator = 'ai'
+          AND date >= date('now', '-7 days')
+          AND (error IS NOT NULL OR value_json IS NULL)
+        ORDER BY date
+        """
+    ).fetchall()
+    heal_failures: list[str] = []
+    heal_dates = [r[0] for r in stuck_rows]
+    if not heal_dates:
+        print("  nothing to heal", flush=True)
+    else:
+        print(f"  heal days: {heal_dates}", flush=True)
+        for d in heal_dates:
+            try:
+                with Step(f"heal/{d}", crash=True):
+                    rep = regenerate_day_from_db(con, d, include_ai=True)
+                    still_stuck = con.execute(
+                        "SELECT COUNT(*) FROM day_channel WHERE date=? "
+                        "AND generator='ai' AND (error IS NOT NULL OR value_json IS NULL)",
+                        (d,),
+                    ).fetchone()[0]
+                    cost = con.execute(
+                        "SELECT COALESCE(SUM(cost_usd),0) FROM day_channel "
+                        "WHERE date=? AND generator='ai'", (d,)
+                    ).fetchone()[0]
+                    print(f"    events={rep.total_events}  still_stuck={still_stuck}  ai_cost=${cost:.4f}", flush=True)
+                    if still_stuck:
+                        heal_failures.append(d)
+            except Exception as e:
+                print(f"!!! heal {d} failed: {type(e).__name__}: {e}", flush=True)
+                heal_failures.append(d)
+
     print(
         f"\ncatchup done: "
         f"pulls={len(pulls)-len(pull_failures)}/{len(pulls)} OK, "
-        f"regens={len(to_run)-len(regen_failures)}/{len(to_run)} OK"
+        f"regens={len(to_run)-len(regen_failures)}/{len(to_run)} OK, "
+        f"heals={len(heal_dates)-len(heal_failures)}/{len(heal_dates)} OK"
         + (f"\n  pull_failures={pull_failures}" if pull_failures else "")
-        + (f"\n  regen_failures={regen_failures}" if regen_failures else ""),
+        + (f"\n  regen_failures={regen_failures}" if regen_failures else "")
+        + (f"\n  heal_failures={heal_failures}" if heal_failures else ""),
         flush=True,
     )
-    return 1 if (pull_failures or regen_failures) else 0
+    return 1 if (pull_failures or regen_failures or heal_failures) else 0
 
 
 def cmd_work_items_sync(args: argparse.Namespace) -> int:
