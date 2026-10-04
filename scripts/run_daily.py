@@ -215,241 +215,26 @@ def _read_inbox_manifest_count(device_id: str, date: str) -> int | None:
 
 
 def cmd_catchup(args: argparse.Namespace) -> int:
-    """SSH-direct catchup with per-(device, date) state tracking.
-
-    Two phases:
-      1) PULL — for every (device, date) the plan says we still need,
-         either collect locally (hub) or ssh-collect+rsync from a remote.
-         Every attempt (success or failure) is recorded in device_pull_log,
-         so an unreachable remote shows up explicitly and gets retried on
-         the next run instead of silently being "fresh forever".
-      2) REGEN — import everything into events, then run pending_dates and
-         regenerate_day_from_db on any date whose events_hash changed.
-
-    Pre-reqs: ssh aliases configured (~/.ssh/config); each remote has a
-    checked-out daytrace repo at the path given in --remote.
-    """
-    from daytrace.db import connect, init_db
-    from daytrace.daily_report import (
-        pending_dates, plan_device_pulls, record_pull_attempt,
-        regenerate_day_from_db,
-    )
-
-    con = connect(args.db); init_db(con)
-
-    # --remote on CLI overrides the registry; otherwise pull every machine in
-    # config/remotes.yaml. Empty list = single-machine setup (no peers).
+    """Compatibility entrypoint for local-only collection and statistics."""
     if args.remote:
-        remote_specs = args.remote
-    else:
-        from daytrace.remotes import load_remotes, remotes_as_cli_specs
-        remote_specs = remotes_as_cli_specs(load_remotes(args.remotes_file))
-
-    remotes = [_parse_ssh_remote(s) for s in remote_specs]
-    remote_by_id = {r["device_id"]: r for r in remotes}
-    hub_device_id = _device_id_from_config(args.config)
-    all_device_ids = [hub_device_id] + list(remote_by_id.keys())
-
-    # ── Phase 1: pull per (device, date) ─────────────────────────────────
-    plan = plan_device_pulls(
-        con,
-        device_ids=all_device_ids,
-        target_date=args.date,
-        lookback_days=args.lookback_days,
-        hard_cutoff_days=args.hard_cutoff_days,
-        always_redo_recent=args.always_redo_recent,
-    )
-    pulls = plan["pulls"]
-    print(
-        f"catchup phase-1: target={plan['target_date']} window={plan['window']} "
-        f"devices={all_device_ids} pulls_planned={len(pulls)}",
-        flush=True,
-    )
-
-    pull_failures: list[tuple[str, str]] = []
-    for p in pulls:
-        dev = p["device_id"]; d = p["date"]; why = p["reason"]
-        print(f"\n── pull {dev} {d} ({why}) ──", flush=True)
-        try:
-            if dev == hub_device_id:
-                with Step(f"collect-local/{d}", crash=True):
-                    run_cmd(["python3", "scripts/collect_from_config.py",
-                             "--config", args.config, "--date", d])
-            else:
-                r = remote_by_id[dev]
-                with Step(f"pull-remote/{dev}/{d}", crash=True):
-                    remote_collect_and_pull(r, d)
-            count = _read_inbox_manifest_count(dev, d)
-            record_pull_attempt(
-                con, device_id=dev, date=d, success=True, event_count=count,
-            )
-        except Exception as e:
-            err = f"{type(e).__name__}: {e}"
-            print(f"  !! pull failed: {err}", flush=True)
-            record_pull_attempt(
-                con, device_id=dev, date=d, success=False, error=err,
-            )
-            pull_failures.append((dev, d))
-
-    # ── Phase 2: import + regen ──────────────────────────────────────────
-    print(f"\n── phase-2: import + regen ──", flush=True)
-    try:
-        with Step("import-inbox", crash=True):
-            run_cmd(["python3", "scripts/import_inbox.py"])
-    except Exception as e:
-        print(f"!!! import-inbox failed: {type(e).__name__}: {e}", flush=True)
-        return 1
-
-    # Sync work items + rebuild links. Best-effort — failure here doesn't
-    # block regen; the dashboard just sees stale or empty work_items.
-    try:
-        with Step("work-items-sync", crash=False):
-            from daytrace import work_items as wi
-            cfg = wi.load_config()
-            if cfg is None:
-                print("    (work_items disabled / no config; skipping)", flush=True)
-            else:
-                sync_stats = wi.sync_from_feishu(con, cfg)
-                total_fetched = sum(t.get("fetched", 0) for t in sync_stats.get("tables", []))
-                links = wi.rebuild_links(con, lookback_days=30)
-                print(
-                    f"    work_items: fetched={total_fetched} across "
-                    f"{len(sync_stats.get('tables', []))} table(s)  "
-                    f"links={links['links_inserted']}",
-                    flush=True,
-                )
-    except Exception as e:
-        print(f"    !! work-items-sync skipped: {type(e).__name__}: {e}",
-              flush=True)
-
-    rep_plan = pending_dates(
-        con, target_date=args.date,
-        lookback_days=args.lookback_days,
-        always_redo_recent=args.always_redo_recent,
-    )
-    to_run = rep_plan["to_run"]
-    regen_failures: list[str] = []
-    if not to_run:
-        print(f"  nothing to regenerate (target={rep_plan['target_date']})", flush=True)
-    else:
-        print(f"  regen days: {to_run}", flush=True)
-        for d in to_run:
-            try:
-                with Step(f"regen/{d}", crash=True):
-                    rep = regenerate_day_from_db(con, d, include_ai=True)
-                    cost = con.execute(
-                        "SELECT COALESCE(SUM(cost_usd),0) FROM day_channel "
-                        "WHERE date=? AND generator='ai'", (d,)
-                    ).fetchone()[0]
-                    print(f"    events={rep.total_events}  ai_cost=${cost:.4f}", flush=True)
-            except Exception as e:
-                print(f"!!! regen {d} failed: {type(e).__name__}: {e}", flush=True)
-                regen_failures.append(d)
-
-    # ── Phase 3: heal stuck AI channels in the recent past ──────────────
-    # Catches days where an earlier regen tried the AI call, hit a transient
-    # DeepSeek timeout (network blip / API hiccup), wrote `error` and a NULL
-    # value_json, and was then never re-tried — because events_hash hadn't
-    # changed afterwards. The orchestrator's _is_fresh() already returns
-    # False for error/NULL rows; we just need to *trigger* a regen for
-    # those dates.
-    print(f"\n── phase-3: heal stuck AI channels (last 7 days) ──", flush=True)
-    stuck_rows = con.execute(
-        """
-        SELECT DISTINCT date FROM day_channel
-        WHERE generator = 'ai'
-          AND date >= date('now', '-7 days')
-          AND (error IS NOT NULL OR value_json IS NULL)
-        ORDER BY date
-        """
-    ).fetchall()
-    heal_failures: list[str] = []
-    heal_dates = [r[0] for r in stuck_rows]
-    if not heal_dates:
-        print("  nothing to heal", flush=True)
-    else:
-        print(f"  heal days: {heal_dates}", flush=True)
-        for d in heal_dates:
-            try:
-                with Step(f"heal/{d}", crash=True):
-                    rep = regenerate_day_from_db(con, d, include_ai=True)
-                    still_stuck = con.execute(
-                        "SELECT COUNT(*) FROM day_channel WHERE date=? "
-                        "AND generator='ai' AND (error IS NOT NULL OR value_json IS NULL)",
-                        (d,),
-                    ).fetchone()[0]
-                    cost = con.execute(
-                        "SELECT COALESCE(SUM(cost_usd),0) FROM day_channel "
-                        "WHERE date=? AND generator='ai'", (d,)
-                    ).fetchone()[0]
-                    print(f"    events={rep.total_events}  still_stuck={still_stuck}  ai_cost=${cost:.4f}", flush=True)
-                    if still_stuck:
-                        heal_failures.append(d)
-            except Exception as e:
-                print(f"!!! heal {d} failed: {type(e).__name__}: {e}", flush=True)
-                heal_failures.append(d)
-
-    print(
-        f"\ncatchup done: "
-        f"pulls={len(pulls)-len(pull_failures)}/{len(pulls)} OK, "
-        f"regens={len(to_run)-len(regen_failures)}/{len(to_run)} OK, "
-        f"heals={len(heal_dates)-len(heal_failures)}/{len(heal_dates)} OK"
-        + (f"\n  pull_failures={pull_failures}" if pull_failures else "")
-        + (f"\n  regen_failures={regen_failures}" if regen_failures else "")
-        + (f"\n  heal_failures={heal_failures}" if heal_failures else ""),
-        flush=True,
-    )
-    return 1 if (pull_failures or regen_failures or heal_failures) else 0
+        raise ValueError("Local recovery does not connect to remote devices")
+    from datetime import date, timedelta
+    end = date.fromisoformat(args.date) if args.date else date.today()
+    start = end - timedelta(days=max(1,args.lookback_days)-1)
+    return run_cmd([sys.executable, "scripts/run_local.py", "--config", args.config,
+                    "--db",args.db,"--start",str(start),"--end",str(end)])
 
 
 def cmd_work_items_sync(args: argparse.Namespace) -> int:
-    """Pull the Feishu 任务 Bitable into local work_items + rebuild
-    event_work_item_links via URL / alias matching. Read-only on the
-    Feishu side; safe to run any time. Skipped silently if work_items
-    config is missing or disabled."""
+    """Compatibility alias: index local repositories, never contact Feishu."""
     from daytrace.db import connect, init_db
-    from daytrace import work_items as wi
-
-    cfg = wi.load_config(args.config) if args.config else wi.load_config()
-    if cfg is None:
-        print("work-items-sync: feature disabled (no enabled config); skipping.",
-              flush=True)
-        return 0
-
-    con = connect(args.db); init_db(con)
-    tables = [t["name"] for t in cfg.get("tables", [])]
-    print(f"work-items-sync: pulling {len(tables)} table(s): {tables}", flush=True)
-    sync_stats = wi.sync_from_feishu(con, cfg)
-    for entry in sync_stats.get("tables", []):
-        if entry.get("error"):
-            print(f"  ✗ {entry['name']}: {entry['error']}", flush=True)
-        else:
-            print(
-                f"  ✓ {entry['name']}: fetched={entry['fetched']} "
-                f"upserted={entry['upserted']}",
-                flush=True,
-            )
-
-    link_stats = wi.rebuild_links(con, lookback_days=args.lookback_days)
-    print(
-        f"  links: scanned={link_stats['events_scanned']} "
-        f"inserted={link_stats['links_inserted']} by={link_stats['by_type']}",
-        flush=True,
-    )
-
-    # Translate any newly-added or still-untranslated task titles. Idempotent;
-    # only touches rows where title_en is NULL/empty.
+    from daytrace.projects import sync_projects
+    import json
+    con=connect(args.db);init_db(con)
     try:
-        import subprocess as _sp
-        r = _sp.run(
-            ["python3", "scripts/translate_work_items.py", "--db", args.db],
-            capture_output=True, text=True, cwd=REPO_ROOT,
-        )
-        out_tail = (r.stdout or "").strip().splitlines()[-3:]
-        for line in out_tail:
-            print(f"  translate: {line}", flush=True)
-    except Exception as e:
-        print(f"  translate: skipped ({e})", flush=True)
+        print(json.dumps(sync_projects(con),ensure_ascii=False))
+    finally:
+        con.close()
     return 0
 
 
@@ -555,11 +340,11 @@ def main() -> int:
     # daytrace modules so catchup's remote step runs the latest logic.
     ws = sub.add_parser(
         "work-items-sync",
-        help="pull Feishu 任务 Bitable + rebuild event ↔ work_item links",
+        help="compatibility alias: index local repositories; no Feishu calls",
     )
     ws.add_argument("--db", default="data/daytrace.sqlite")
     ws.add_argument("--config", default=None,
-                    help="path to work_items.yaml (default config/work_items.yaml)")
+                    help="legacy option; local repo configuration is config/projects.yaml")
     ws.add_argument("--lookback-days", type=int, default=30,
                     help="scan this many days of events when rebuilding links")
     ws.set_defaults(func=cmd_work_items_sync)

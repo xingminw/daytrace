@@ -7,7 +7,7 @@ from typing import Iterable, Any
 
 from .schema import TraceEvent
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 DEFAULT_DEVICE_ID = "Mac"
 DEFAULT_LOCATION_ID = "unknown"
 DEFAULT_COLLECTOR_ID = "hub-local"
@@ -346,6 +346,8 @@ def init_db(con: sqlite3.Connection) -> None:
     # without joining on every render. Populated by _upsert_project_report.
     _ensure_column(con, "day_project_report", "tasks", "tasks TEXT")
     con.execute("CREATE INDEX IF NOT EXISTS idx_work_items_table_key ON work_items(table_key)")
+    from .projects import ensure_schema
+    ensure_schema(con)
     seed_single_machine_defaults(con)
     con.execute(
         "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
@@ -547,7 +549,7 @@ def query_events(
     )
     direction = "ASC" if order.lower() == "asc" else "DESC"
     sql = f"""
-        SELECT id, date, source, kind, start, end, title, summary, project_guess, sensitivity, evidence_json, raw_ref, device_id, location_id, collector_id, char_count
+        SELECT id, date, source, kind, start, end, title, summary, project_guess, sensitivity, evidence_json, raw_ref, device_id, location_id, collector_id, char_count, repo_project_id, original_project_guess
         FROM events
         {where}
         ORDER BY start {direction}, source, kind

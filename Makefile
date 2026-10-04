@@ -1,9 +1,9 @@
 # DayTrace convenience targets. Just a thin wrapper over the underlying
 # python scripts; everything works without `make` too.
 
-PY      ?= python3
+PY      ?= .venv/bin/python
 DB      ?= data/daytrace.sqlite
-PORT    ?= 8765
+PORT    ?= 8766
 DEVICE  ?= mac
 
 .PHONY: help install install-config dashboard daily weekly export-daily export-weekly \
@@ -22,24 +22,24 @@ install-config:        ## Copy config/*.example.yaml templates to their real loc
 	done
 
 dashboard:             ## Start the local dashboard at $(PORT)
-	$(PY) dashboard/server.py --db $(DB) --port $(PORT)
+	DAYTRACE_DISABLE_AI=1 DAYTRACE_TIMEZONE=Asia/Shanghai $(PY) dashboard/server.py --db $(DB) --port $(PORT)
 
 daily:                 ## Pull + import + regenerate yesterday on this hub
-	$(PY) scripts/run_daily.py catchup --config config/devices/$(DEVICE).yaml
+	DAYTRACE_TIMEZONE=Asia/Shanghai DAYTRACE_DISABLE_AI=1 $(PY) scripts/run_local.py
 
-weekly:                ## Render last completed ISO week + Feishu + email
-	$(PY) -m bash -c "scripts/daytrace-weekly.sh" || bash scripts/daytrace-weekly.sh
+weekly:                ## Render last completed ISO week locally
+	bash scripts/daytrace-weekly.sh
 
-export-daily:          ## One-off: render + upload yesterday's report
-	$(PY) scripts/export_report.py --upload-feishu
+export-daily:          ## One-off: render locally yesterday's report
+	DAYTRACE_DISABLE_AI=1 $(PY) scripts/export_report.py
 
-export-weekly:         ## One-off: render + upload + email last week's report
-	$(PY) scripts/export_report.py --upload-feishu --email
+export-weekly:         ## One-off: render locally last week's report
+	DAYTRACE_DISABLE_AI=1 $(PY) scripts/export_report.py
 
-sync-tasks:            ## Pull Feishu work_items + rebuild event links + translate titles
+sync-tasks:            ## Compatibility alias for local repository indexing
 	$(PY) scripts/run_daily.py work-items-sync
 
-translate-tasks:       ## (Re-)translate work_items.title → title_en via DeepSeek
+translate-tasks:       ## Retired: local repository names need no translation
 	$(PY) scripts/translate_work_items.py
 
 deploy:                ## rsync code to every remote in config/remotes.yaml
@@ -48,8 +48,11 @@ deploy:                ## rsync code to every remote in config/remotes.yaml
 status:                ## Dry-run: which (device, date) pairs are pending?
 	$(PY) scripts/run_daily.py status
 
-clean-feishu:          ## Drop stale revisions in the Feishu drive folders
+clean-feishu:          ## Retired: exits without contacting Feishu
 	$(PY) scripts/cleanup_feishu_reports.py --apply
 
 test:                  ## Run the pytest suite
 	$(PY) -m pytest -q
+
+sync-projects:         ## Index local Git repositories and rebuild attribution
+	$(PY) scripts/sync_projects.py

@@ -101,6 +101,8 @@ def is_available() -> bool:
     """Cheap pre-flight: have an API key set? Also lazily populates env
     from ~/.daytrace/secrets.env so launchd-spawned processes work the
     same as interactive shells."""
+    if os.environ.get("DAYTRACE_DISABLE_AI") == "1":
+        return False
     _load_secrets_into_environ()
     return bool(os.environ.get("DEEPSEEK_API_KEY", "").strip())
 
@@ -162,59 +164,10 @@ def call_json(
     timeout: float = 60.0,
     retries: int = 2,
 ) -> LLMResponse:
-    """POST to /chat/completions with JSON response mode. Returns parsed JSON.
-
-    Raises LLMError on any failure after `retries` retries.
-    """
-    _load_secrets_into_environ()
-    api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
-    if not api_key:
-        raise LLMError("DEEPSEEK_API_KEY not set in environment")
-
-    base_url = os.environ.get("DEEPSEEK_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
-    model_name = model or os.environ.get("DEEPSEEK_MODEL", DEFAULT_MODEL)
-    url = f"{base_url}/chat/completions"
-
-    payload = {
-        "model": model_name,
-        "messages": [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        "response_format": {"type": "json_object"},
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-        "stream": False,
-    }
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-    }
-
-    last_err: Exception | None = None
-    for attempt in range(retries + 1):
-        try:
-            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw_text = resp.read().decode("utf-8")
-            return _parse_response(raw_text, model_name)
-        except urllib.error.HTTPError as e:
-            # 4xx errors are usually permanent — don't waste retries on them
-            err_body = e.read().decode("utf-8", errors="replace")[:500] if hasattr(e, "read") else ""
-            if 400 <= e.code < 500:
-                raise LLMError(f"HTTP {e.code}: {err_body}") from e
-            last_err = LLMError(f"HTTP {e.code}: {err_body}")
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
-            last_err = LLMError(f"{type(e).__name__}: {e}")
-        if attempt < retries:
-            # Exponential backoff (0.5s, 1.5s, 4.5s, …) caps the burst when
-            # DeepSeek is briefly down, while staying well under any sensible
-            # outer timeout budget.
-            time.sleep(0.5 * (3 ** attempt))
-    assert last_err is not None
-    raise last_err
+    """Retired unbudgeted entry point; use the evidence-brief generator."""
+    if os.environ.get("DAYTRACE_DISABLE_AI") == "1":
+        raise LLMError("AI disabled by DAYTRACE_DISABLE_AI")
+    raise LLMError("Legacy AI generation retired; use scripts/generate_brief.py plan and execute with a reviewed plan and independent budget")
 
 
 def _parse_response(raw_text: str, model_name: str) -> LLMResponse:
@@ -252,3 +205,19 @@ def _parse_response(raw_text: str, model_name: str) -> LLMResponse:
         model=str(envelope.get("model") or model_name),
         raw=envelope,
     )
+
+
+def official_transport(payload):
+    # Single attempt only; persistent budget reservation is the caller's responsibility.
+    if os.environ.get("DAYTRACE_DISABLE_AI") == "1":
+        raise LLMError("AI disabled by DAYTRACE_DISABLE_AI")
+    _load_secrets_into_environ()
+    if os.environ.get('DEEPSEEK_BASE_URL',DEFAULT_BASE_URL).rstrip('/')!='https://api.deepseek.com':raise LLMError('non-official endpoint forbidden')
+    key=os.environ.get('DEEPSEEK_API_KEY','').strip()
+    if not key:raise LLMError('configured API key unavailable')
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self,*a,**kw):raise LLMError('API redirect forbidden')
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}),NoRedirect())
+    request=urllib.request.Request('https://api.deepseek.com/chat/completions',data=json.dumps(payload,ensure_ascii=False).encode(),headers={'Authorization':'Bearer '+key,'Content-Type':'application/json'},method='POST')
+    with opener.open(request,timeout=60) as response:
+        return json.loads(response.read(4*1024*1024))

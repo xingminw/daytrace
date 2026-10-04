@@ -77,8 +77,8 @@ _STRINGS: dict[str, dict[str, str]] = {
     "insights_pattern":   {"zh": "时间安排回顾",    "en": "Time pattern"},
     "insights_followup":  {"zh": "任务跟进提醒",    "en": "Follow-ups"},
     "insights_none":      {"zh": "(无)",             "en": "(none)"},
-    "tip_progress":  {"zh": "今天/本周在飞书任务上有哪些具体推进 —— 完成的、改的、提的代码。只看带任务标签的事件,零散杂活不放这里。",
-                      "en": "Concrete progress on Feishu tasks — what was finished, changed, or shipped. Only events linked to a task; ad-hoc work is excluded."},
+    "tip_progress":  {"zh": "今天/本周在本地仓库项目上有哪些具体推进 —— 完成的、改的、提的代码。只看带任务标签的事件,零散杂活不放这里。",
+                      "en": "Concrete progress on local repository projects — what was finished, changed, or shipped. Only events linked to a task; ad-hoc work is excluded."},
     "tip_pattern":   {"zh": "你今天的作息和最近 7 天平均比起来怎么样 —— 几点开工、几点收工、有没有大块专注、是不是切换太频繁。基于具体数字,不会写空话。",
                       "en": "How today's schedule compares to your 7-day baseline — start/end times, long focus blocks, context switching. Grounded in numbers, no fluff."},
     "tip_followup":  {"zh": "明天/下周该盯哪些任务 —— deadline 临近的、好几天没动的、还有未提交改动的。",
@@ -117,7 +117,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "audit_title":    {"zh": "未匹配项目审计",      "en": "Unlinked project audit"},
     "audit_tag":      {"zh": "Audit",                "en": "Audit"},
     "audit_window":   {"zh": "窗口",                "en": "window"},
-    "audit_summary":  {"zh": "{n} 个项目 / 共 {ev} 条事件未对应任务",
+    "audit_summary":  {"zh": "{n} 个项目 / 共 {ev} 条事件未归属仓库",
                         "en": "{n} projects / {ev} events with no task link"},
     "audit_pg":       {"zh": "project_guess",       "en": "project_guess"},
     "audit_events":   {"zh": "事件",                "en": "Events"},
@@ -148,7 +148,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "no_data_hint":   {"zh": "可以切换到有数据的日期,或先运行 collector/import。",
                        "en": "Switch to a day with data, or run a collector/import first."},
     "no_ai_overview": {"zh": "(AI 速读未生成)",    "en": "(AI overview not generated)"},
-    "ai_unavailable": {"zh": "(DEEPSEEK_API_KEY 未设置, 跳过 AI 速读)",
+    "ai_unavailable": {"zh": "(AI 速读尚未启用或未配置)",
                        "en": "(DEEPSEEK_API_KEY not set; AI overview skipped)"},
     "ai_failed":      {"zh": "AI 调用失败",       "en": "AI call failed"},
 
@@ -162,7 +162,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     # Dimension pills (DIMENSIONS list — what to stack the chart by)
     "dim_source":   {"zh": "来源",   "en": "Source"},
     "dim_project":  {"zh": "项目",   "en": "Project"},
-    "dim_task":     {"zh": "任务",   "en": "Task"},
+    "dim_task":     {"zh": "仓库",   "en": "Repository"},
     "dim_device":   {"zh": "设备",   "en": "Device"},
     "dim_activity": {"zh": "活动",   "en": "Activity"},
     "dim_tooltip":  {"zh": "按哪个维度堆叠/上色", "en": "Which dimension to stack / color by"},
@@ -252,7 +252,7 @@ _STRINGS: dict[str, dict[str, str]] = {
     "dp_th_project_task":{"zh": "项目 · 任务", "en": "Project · Tasks"},
     "dp_rowcount":       {"zh": "{n} 行",   "en": "{n} rows"},
     # additional table tabs (generic browser)
-    "db_tab_work_items": {"zh": "飞书任务",      "en": "Feishu tasks"},
+    "db_tab_work_items": {"zh": "历史工作项快照",      "en": "Legacy work-item snapshots"},
     "db_tab_links":      {"zh": "事件→任务",     "en": "Event→Task links"},
     "db_tab_labels":     {"zh": "活动标签",      "en": "Activity labels"},
     "db_tab_day_ch":     {"zh": "AI 每日缓存",   "en": "AI day cache"},
@@ -1613,7 +1613,7 @@ def _breakdown_fallback_name(field: str) -> str:
         "device_id": "unknown",
         "location_id": "unknown",
         "activity": "未分类",
-        "task": "未对应任务",
+        "task": "未归属仓库",
     }.get(field, "other")
 
 
@@ -1791,12 +1791,17 @@ def today_page(db_path: Path, date: str | None, mode: str | None = None, unit: s
 
     # Build the rich daily-report body (AI overview + continuity + facts).
     ai_overview = _safe_load_json(day_channels.get("ai_overview"))
+    from daytrace.briefings import load_brief
+    evidence_brief=load_brief(con,'daily',date,events=day_events) if date else None
+    if evidence_brief:ai_overview=evidence_brief
     ai_continuity = _safe_load_json(day_channels.get("ai_continuity_day"))
-    if day_report_row is None:
+    if day_report_row is None and evidence_brief:
+        rich_daily_body = _render_overview_section(evidence_brief)
+    elif day_report_row is None:
         rich_daily_body = (
             f"{daily_report_text(today, hours)}"
             "<div class='muted small' style='margin-top:8px'>(还没有 day_report 缓存；"
-            "运行 backfill 后可看到 AI 速读)</div>"
+            "可通过 generate_brief.py 离线规划并显式生成速读)</div>"
         )
     else:
         # v4 layout: Report card = Dashboard (4 tiles) + 总览 (headline +
@@ -2184,6 +2189,16 @@ def events_table(events, filters: dict[str, str | None], options: dict[str, Any]
 # `group` puts the tab into "core" (always visible) or "advanced" (folded
 # under a disclosure so the toolbar doesn't blow up).
 TABLE_VIEWS: dict[str, dict] = {
+    "repo_projects": {
+        "kind":"generic", "label_key":"dim_project", "group":"core",
+        "sql_table":"repo_projects", "default_order":"name",
+        "cols":[
+            {"name":"name","zh":"本地仓库","en":"Local repository","width":220},
+            {"name":"project_id","zh":"项目 ID","en":"Project ID","width":240},
+            {"name":"canonical_key","zh":"仓库身份","en":"Repository identity","width":340},
+            {"name":"last_seen_at","zh":"索引时间","en":"Indexed","width":180},
+        ],
+    },
     # ── Core (custom-rendered pages) ────────────────────────────────────
     "events": {
         "kind": "custom", "label_key": "db_tab_events", "group": "core",
@@ -2196,7 +2211,7 @@ TABLE_VIEWS: dict[str, dict] = {
     },
     # ── Core (generic, but user-relevant) ───────────────────────────────
     "work_items": {
-        "kind": "generic", "label_key": "db_tab_work_items", "group": "core",
+        "kind": "generic", "label_key": "db_tab_work_items", "group": "advanced",
         "sql_table": "work_items",
         "default_order": "title",
         "cols": [
@@ -2314,7 +2329,7 @@ def table_switcher_html(active: str, qs: dict[str, list[str]]) -> str:
         return f'<a class="{cls}" href="{esc(href)}">{esc(T(label_key))}</a>'
 
     # The first 3 entries (events / day_report / day_project_report) are
-    # the everyday tabs and always show. Everything else — Feishu tasks +
+    # the everyday tabs and always show. Everything else — local repository projects +
     # all advanced/debug tables — sits behind a single "更多 ▾" toggle so
     # the toolbar stays compact, but expands inline (same row) when the
     # user wants the debug surfaces.
@@ -2461,6 +2476,9 @@ def _render_overview_section(overview_payload: dict | None) -> str:
             _SECTION_SEP
             + f'<div class="dr-narrative muted">{esc(T("no_ai_overview"))}</div>'
         )
+    if overview_payload.get('briefing_version'):
+        from daytrace.briefings import render_brief
+        return _SECTION_SEP+render_brief(overview_payload,_CURRENT_LANG.get())
     headline = L(overview_payload.get("headline"))
     ov = overview_payload.get("overview")
     if isinstance(ov, dict):
@@ -2468,6 +2486,12 @@ def _render_overview_section(overview_payload: dict | None) -> str:
     else:
         narrative = L(overview_payload.get("narrative"))
     parts = [_SECTION_SEP]
+    if overview_payload.get('local_evidence_fallback'):
+        parts.append('<div class="muted">本地事实说明 · 非 AI 原文</div>')
+    elif overview_payload.get('_saved_origin')=='legacy_ai':
+        parts.append('<div class="muted">已保存的 AI 速读</div>')
+    if overview_payload.get('_stale'):
+        parts.append('<div class="muted">资料已变化；显示已有版本，未自动生成。</div>')
     if headline:
         parts.append(f'<div class="dr-headline">📰 {esc(headline)}</div>')
     if narrative:
@@ -2521,7 +2545,7 @@ def _render_recommendations_section(overview_payload: dict | None) -> str:
 # (zero JS); we let the prompt's internal jargon stay private.
 _INSIGHTS_TOOLTIPS = {
     "highlights":
-        "今天/本周在飞书任务上有哪些具体推进 —— 完成的、改的、提的代码。"
+        "今天/本周在本地仓库项目上有哪些具体推进 —— 完成的、改的、提的代码。"
         "只看带任务标签的事件,零散杂活不放这里。",
     "work_pattern":
         "你今天的作息和最近 7 天平均比起来怎么样 —— 几点开工、几点收工、"
@@ -2584,6 +2608,8 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
                 val = json.loads(row[0])
             except Exception:
                 val = None
+        from daytrace.briefings import load_brief
+        val=load_brief(con,'daily',d) or val
         if not val:
             cols.append(
                 '<div class="dt-col dt-empty">'
@@ -2602,6 +2628,9 @@ def _render_weekly_daily_timeline_card(con, days: list[str]) -> str:
             narrative = L(ov.get("narrative"))
         else:
             narrative = L(val.get("narrative"))
+
+        if val.get('briefing_version'):
+            narrative=('本地证据整理：' if val.get('origin')=='local_reviewed' else '已核对的 AI 速读：')+' '.join(c['text'] for p in val['projects'] for c in p['claims'])
 
         body_html = ""
         if narrative or headline:
@@ -3515,7 +3544,7 @@ def _stack_value_of(ev: dict, stack_by: str) -> str:
     if stack_by == "project":
         return _project_of(ev)
     if stack_by == "task":
-        _no_task = "Unlinked" if _lang == "en" else "未对应任务"
+        _no_task = "Unlinked" if _lang == "en" else "未归属仓库"
         return str(ev.get("task") or _no_task)
     if stack_by == "activity":
         _unc = "Unclassified" if _lang == "en" else "未分类"
@@ -3528,67 +3557,9 @@ def _stack_value_of(ev: dict, stack_by: str) -> str:
 
 
 def _enrich_events_with_tasks(con, events: list[dict]) -> list[dict]:
-    """Stamp `ev["task"]` with the linked work_item title — OR a collapsed
-    label when the work_item's table is flagged `collapse_in_dim` in
-    config/work_items.yaml.
-
-    Why collapse: the 审稿 table has 33+ individual manuscript rows; in
-    the Chart panel's 任务 dim those would each show up as separate
-    buckets and crowd out the real tasks. Collapsing folds them all to
-    "审稿" so the dim view stays readable. The Tasks panel still lists
-    each review row individually."""
-    if not events:
-        return events
-    has_wi = con.execute("SELECT 1 FROM work_items LIMIT 1").fetchone()
-    if not has_wi:
-        for ev in events:
-            ev.setdefault("task", None)
-        return events
-
-    # Build collapse map: table_key → collapsed_label
-    # In EN mode, prefer `collapsed_label_en` from work_items.yaml when set.
-    _lang = _CURRENT_LANG.get()
-    collapse_map: dict[str, str] = {}
-    try:
-        from daytrace.work_items import load_config
-        cfg = load_config()
-        for t in (cfg or {}).get("tables", []):
-            if t.get("collapse_in_dim"):
-                label = None
-                if _lang == "en":
-                    label = t.get("collapsed_label_en") or t.get("name_en")
-                label = label or t.get("collapsed_label") or t.get("name") or t["key"]
-                collapse_map[t["key"]] = label
-    except Exception:
-        pass
-
-    event_ids = [e["id"] for e in events if e.get("id")]
-    if not event_ids:
-        return events
-    title_map: dict[str, str] = {}
-    chunk = 900
-    for i in range(0, len(event_ids), chunk):
-        sub = event_ids[i:i+chunk]
-        ph = ",".join("?" * len(sub))
-        for r in con.execute(
-            f"""
-            SELECT l.event_id, w.title, w.title_en, w.table_key
-              FROM event_work_item_links l
-              JOIN work_items w ON w.record_id = l.record_id
-             WHERE l.event_id IN ({ph})
-            """, sub
-        ).fetchall():
-            tk = r["table_key"] or "tasks"
-            if tk in collapse_map:
-                title_map[r["event_id"]] = collapse_map[tk]
-            else:
-                if _lang == "en":
-                    en = (r["title_en"] or "").strip() if "title_en" in r.keys() else ""
-                    title_map[r["event_id"]] = en or r["title"]
-                else:
-                    title_map[r["event_id"]] = r["title"]
+    """Compatibility dimension name; current labels come only from local repos."""
     for ev in events:
-        ev["task"] = title_map.get(ev.get("id"))
+        ev["task"] = ev.get("project_guess") if ev.get("repo_project_id") else None
     return events
 
 
@@ -4407,18 +4378,15 @@ def _week_ai_cache_path(week: str) -> Path:
 
 
 def _events_hash(events: list[dict]) -> str:
-    """SHA1 over sorted event IDs. Cache invalidates when new events land."""
-    import hashlib
-    h = hashlib.sha1()
-    for eid in sorted(ev["id"] for ev in events if ev.get("id")):
-        h.update(eid.encode("utf-8"))
-    return h.hexdigest()[:16]
+    """Content-aware identity; edited evidence invalidates even stable event IDs."""
+    from daytrace.briefings import event_fingerprint
+    return event_fingerprint(events)
 
 
 def _load_week_daily_overviews(con, days: list[str]) -> str:
     """Pull each day's ai_overview from day_channel for the given days and
     format them into a compact per-day block the weekly prompt can use to
-    name real Feishu tasks (instead of inventing project names from
+    name real local repository projects (instead of inventing project names from
     by_project aggregates). Empty string when no AI overviews exist."""
     import json as _json
     lines: list[str] = []
@@ -4461,132 +4429,23 @@ def _ai_weekly_summary(
     last_week_total: int | None = None,
     last_week_active_minutes: float | None = None,
 ) -> dict | None:
-    """Return {headline, narrative, highlights, suggestions} or None if AI
-    unavailable / hash unchanged / call failed. Cached on disk by events_hash."""
+    """Read saved weekly results only. A GET never loads keys or calls an API."""
     import json as _json
-    from daytrace import ai_client
-    if not ai_client.is_available():
-        return {"_unavailable": True}
-
-    cache_path = _week_ai_cache_path(week)
-    ev_hash = _events_hash(events)
+    from daytrace.briefings import load_brief
+    stored=load_brief(con,'weekly',week,events=events)
+    if stored:return stored
+    cache_path=_week_ai_cache_path(week)
     if cache_path.exists():
         try:
-            cached = _json.loads(cache_path.read_text(encoding="utf-8"))
-            if cached.get("events_hash") == ev_hash:
-                return cached.get("value")
-        except Exception:
-            pass
-
-    if not events:
-        return None
-
-    # Compact summary the model can chew on cheaply
-    top_projects = "\n".join(
-        f"- {r['name']}: {r['count']} events ({r['share']*100:.0f}%)"
-        for r in by_project[:8]
-    )
-    # Per-day AI overviews — gives the weekly model real Feishu task names
-    # and concrete day-of-week landmarks instead of just aggregate stats.
-    daily_overviews_text = ""
-    if con is not None and days:
-        daily_overviews_text = _load_week_daily_overviews(con, days)
-    daily_overviews_block = (
-        f"【本周每日 AI 速读 — 真任务名 + 当天叙事, 用这个串成周叙事】\n"
-        f"{daily_overviews_text}\n\n"
-        if daily_overviews_text else ""
-    )
-    # Light week-over-week numeric reference for work_pattern
-    wow_lines: list[str] = []
-    if last_week_total is not None:
-        wow_lines.append(f"上周事件数 {last_week_total} → 本周 {len(events)}")
-    if last_week_active_minutes is not None:
-        wow_lines.append(f"上周活跃 {last_week_active_minutes/60:.1f}h → 本周 {total_minutes/60:.1f}h")
-    wow_block = ("【上周对比】\n" + "\n".join(wow_lines) + "\n\n") if wow_lines else ""
-
-    user = (
-        f"【本周】{week} · {len(events)} events · {active_days}/7 天活跃 · "
-        f"{total_minutes/60:.1f}h\n\n"
-        f"{wow_block}"
-        f"【项目分布 (top 8, 仅供参考)】\n{top_projects}\n\n"
-        f"{daily_overviews_block}"
-        "请输出严格 JSON, 双语 schema (每个文本字段是 {\"zh\":..., \"en\":...}):\n"
-        "{\n"
-        '  "headline":   {"zh": "≤30 字, 一句话抓住本周主线",\n'
-        '                 "en": "≤40 chars, 1-sentence weekly headline"},\n'
-        '  "overview": {\n'
-        '    "narrative": {\n'
-        '      "zh": "**3-5 句, 150-250 字** 的**主题式**总结(不是日记式流水账)。识别本周的 2-4 条主线 (任务/方向), 每条说清楚: 推进到什么程度、卡点在哪、有什么阶段性产出。",\n'
-        '      "en": "**3-5 sentences, 220-360 chars**, theme-based (NOT a chronological recap). Identify 2-4 main threads of the week (tasks/directions); for each, say how far it moved, where it stalled, what shipped."\n'
-        '    }\n'
-        '  },\n'
-        '  "trend": {\n'
-        '    "direction": "rising | steady | dropping | new | paused | blocked",\n'
-        '    "comparison": {"zh": "1 句 (≤60 字) 工作重心/节奏 vs 上周怎么变",\n'
-        '                   "en": "1 sentence (≤90 chars) on how focus/pace shifted vs last week"}\n'
-        '  },\n'
-        '  "highlights":   [{"zh": "**3-5 条** 本周真正推进的飞书任务+动作 (用任务全名), 每条 ≤50 字",\n'
-        '                    "en": "3-5 task advances this week (full Feishu titles + concrete action), ≤80 chars each"}],\n'
-        '  "work_pattern": [{"zh": "**2-4 条** 本周节奏观察 (活跃时长 vs 上周、活跃天数、有没有大块专注/碎片化、收工节奏), 每条带数字",\n'
-        '                    "en": "2-4 pattern observations comparing this week to last (active hours, day coverage, deep blocks vs fragmentation, end-of-day timing), grounded in numbers"}],\n'
-        '  "suggestions":  [{"zh": "**2-4 条** 下周该盯的任务 (deadline 临近 / 已停 N 天 / 未提交), 用任务全名 + 具体行动",\n'
-        '                    "en": "2-4 tasks to watch next week (closing deadlines / N days idle / uncommitted), full task names + concrete next-step"}]\n'
-        "}"
-    )
-    system = (
-        "你是一位软件工程师的私人**周复盘助手** / weekly recap assistant. "
-        "读者是这位工程师本人 / the reader is the engineer themself.\n\n"
-        "**双语输出**: 每个文本字段都是 {\"zh\":..., \"en\":...},两种语言独立生成同一份内容(各自符合语言习惯)。\n\n"
-        "**任务视角硬规则**: narrative / highlights / suggestions 必须用"
-        "**完整任务标题** (例: ‘DayTrace 应用开发’, 不是 ‘daytrace’)。"
-        "上下文里的【每日 AI 速读】是真任务名的来源, **不要**从【项目分布】"
-        "里拿 daily-manager / misc / daytrace 这种 project_guess 当主体。\n\n"
-        "**narrative 是『主题式总结』, 不是『日记』**:\n"
-        "  • 把本周内容**按主线归类** (2-4 条), 然后讲每条主线的**推进程度**, "
-        "而不是按日期顺序背流水账。\n"
-        "  • 用户看 narrative 想知道 ‘这周 4 条主线各推到哪了, 哪些收尾了, "
-        "哪些还在挣扎, 哪些刚起头’ — 用对比和节奏感, 不要 ‘周一... 周二... 周三...’。\n"
-        "  • 注意: 逐日叙事会在专门的『每日时间轴』里展示, 不要在 narrative 里"
-        "重复, 你这里只做**主题/层次/对比**的总览。\n\n"
-        "**写作风格**:\n"
-        "  • bullet 写法多样化, 不要每条都是 ‘任务名: 动作’ 死板模板。\n\n"
-        "**禁止**:\n"
-        "  ❌ 用项目名代替任务名\n"
-        "  ❌ 编造任务名 (只能用每日速读里出现过的真任务)\n"
-        "  ❌ narrative 写成 ‘周一... 周二... 周三...’ 的日记体\n"
-        "  ❌ narrative 写成 ‘本周完成了 X, Y, Z’ 的通报体\n"
-        "  ❌ 对数据/系统/工具提建议\n"
-        "  ❌ 泛化效率说教、数字复述\n\n"
-        "严格只输出 JSON, 不要 Markdown。"
-    )
-
-    def _validator(payload):
-        """Weekly validator now mirrors the daily v14 bilingual normalizer.
-        Accepts either plain-string fields (legacy v13 cache) or bilingual
-        {"zh": ..., "en": ...} dicts (v14); shape comes out canonicalized
-        as bilingual dicts so the renderers can L() everything."""
-        from daytrace.ai_client import ShapeError
-        # Reuse daytrace's daily validator — its _bilingual_str / _bilingual_list
-        # already handle both shapes.
-        from daytrace.ai_report import validate_overview as _validate
-        return _validate(payload)
-
-    try:
-        resp = ai_client.call_json_validated(
-            system=system, user=user, validator=_validator, max_tokens=4500,
-        )
-    except Exception as e:
-        return {"_error": f"{type(e).__name__}: {e}"}
-
-    value = resp.json
-    cache_path.parent.mkdir(parents=True, exist_ok=True)
-    cache_path.write_text(
-        _json.dumps({"events_hash": ev_hash, "value": value,
-                     "cost_usd": resp.cost_usd, "tokens_in": resp.tokens_in,
-                     "tokens_out": resp.tokens_out}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return value
+            cached=_json.loads(cache_path.read_text(encoding='utf-8'))
+            value=cached.get('value')
+            if isinstance(value,dict):
+                value=dict(value)
+                value['_saved_origin']='legacy_ai'
+                value['_stale']=cached.get('events_hash')!=_events_hash(events)
+                return value
+        except (OSError,ValueError):pass
+    return {'_not_generated':True}
 
 
 def _weekly_stats_strip(
@@ -4633,8 +4492,8 @@ def _ai_summary_body(summary: dict | None) -> str:
     daily. The 3-column Insights row sits separately below."""
     if summary is None:
         return '<div class="dr-narrative muted">(本周 AI 速读还没生成)</div>'
-    if summary.get("_unavailable"):
-        return '<div class="dr-narrative muted">(DEEPSEEK_API_KEY 未设置, 跳过 AI 速读)</div>'
+    if summary.get("_not_generated") or summary.get("_unavailable"):
+        return '<div class="dr-narrative muted">本周尚无已保存的速读。浏览页面不会触发付费生成。</div>'
     if summary.get("_error"):
         return f'<div class="dr-narrative muted">AI 调用失败: {esc(summary["_error"])}</div>'
     return (
@@ -4645,7 +4504,7 @@ def _ai_summary_body(summary: dict | None) -> str:
 
 def _ai_insights_card_weekly(summary: dict | None) -> str:
     """Full-width Insights card for the weekly page. Hidden on error states."""
-    if summary is None or summary.get("_unavailable") or summary.get("_error"):
+    if summary is None or summary.get("_unavailable") or summary.get("_not_generated") or summary.get("_error"):
         return ""
     return _render_insights_card(summary)
 
@@ -4862,61 +4721,6 @@ def _daily_histogram_body(
     )
 
 
-def _compute_task_stats(
-    con, days: list[str], boundary_hour: int,
-) -> dict[str, dict]:
-    """Per-task stats over the given shifted-day range.
-    Returns {record_id: {event_count, minutes, last_activity_iso}}.
-
-    - event_count + minutes are scoped to `days` (passing days=[date] gives
-      a single-day view; passing the whole week gives weekly totals).
-    - last_activity_iso is all-time (so "未触碰" rows still tell you when
-      you last did anything on this task, even if it's outside the window).
-    """
-    if not days:
-        return {}
-    from collections import defaultdict
-    from daytrace.stats import _safe_minute
-
-    # Ranged: count + slot-union per record over the days
-    rows = con.execute(
-        """
-        SELECT e.id, e.date, e.start, l.record_id
-          FROM events e
-          JOIN event_work_item_links l ON l.event_id = e.id
-         WHERE e.date BETWEEN ? AND ?
-        """,
-        (min(days), max(days)),
-    ).fetchall()
-    event_count: dict[str, int] = defaultdict(int)
-    slots: dict[str, set] = defaultdict(set)
-    for r in rows:
-        rid = r["record_id"]
-        event_count[rid] += 1
-        m = _safe_minute(r["start"])
-        if m is not None:
-            slots[rid].add((r["date"], m // 5))
-
-    # All-time last activity per task
-    last_rows = con.execute(
-        """
-        SELECT l.record_id, MAX(e.start) AS last_start
-          FROM events e
-          JOIN event_work_item_links l ON l.event_id = e.id
-         GROUP BY l.record_id
-        """
-    ).fetchall()
-    last_map = {r["record_id"]: r["last_start"] for r in last_rows}
-
-    out: dict[str, dict] = {}
-    all_rids = set(event_count) | set(last_map)
-    for rid in all_rids:
-        out[rid] = {
-            "event_count": event_count.get(rid, 0),
-            "minutes": len(slots.get(rid, set())) * 5,
-            "last_activity": last_map.get(rid),
-        }
-    return out
 
 
 def _format_time_ago(iso: str | None) -> str:
@@ -5018,501 +4822,13 @@ _TABLE_KEY_COLOR = {
 }
 
 
-def _tasks_panel_one(
-    con, days: list[str], boundary_hour: int, *, table_key: str, label: str, stats: dict,
-) -> str:
-    """Render ONE table's Tasks card (one entry per work_item row).
-    Returns "" if no rows for this table."""
-    from daytrace.work_items import list_work_items
-    items = list_work_items(con, table_key=table_key)
-    if not items:
-        return ""
-
-    table_labels = {"tasks": T("tasks_table_t"), "reviews": T("tasks_table_r")}
-
-    rows_html = []
-    for wi in items:
-        rid = wi["record_id"]
-        st = stats.get(rid, {})
-        minutes = st.get("minutes", 0)
-        ev_count = st.get("event_count", 0)
-        last_iso = st.get("last_activity")
-        status = wi.get("status") or ""
-        priority = wi.get("priority") or ""
-        table_key = wi.get("table_key") or "tasks"
-        # External link button
-        ext = wi.get("external_links") or []
-        link_html = ""
-        if isinstance(ext, list) and ext:
-            link_html = (
-                f'<a href="{esc(ext[0])}" target="_blank" rel="noopener" '
-                f'title="{esc(ext[0])}" style="color:#2f6fed; font-size:10px; '
-                f'margin-left:6px;">↗</a>'
-            )
-        # ⚠ when high-priority + stale in window
-        is_stale = (
-            status in ("进行中", "待办")
-            and priority in ("P0", "P1")
-            and ev_count == 0
-        )
-        subtitle = wi.get("subtitle") or wi.get("project_source") or ""
-        subtitle_html = (
-            f'<div style="font-size:10.5px; color:var(--muted); margin-top:2px;">{esc(subtitle)}</div>'
-            if subtitle else ""
-        )
-        title_html = (
-            '<div style="line-height:1.25;">'
-            f'<span style="font-weight:600; color:#3b352e;">{esc(_localized_task_title(dict(wi)))}</span>'
-            f'{link_html}'
-        )
-        if is_stale:
-            title_html += (
-                '<span style="margin-left:8px; color:#b32a2a; font-size:11px;" '
-                f'title="{esc(T("tasks_p_stale_tip"))}">⚠</span>'
-            )
-        title_html += f"{subtitle_html}</div>"
-
-        time_html = (
-            f'<span style="font-variant-numeric:tabular-nums; font-weight:700;">'
-            f'{_format_value(minutes / 60.0, "hours")}</span>'
-            if minutes > 0 else
-            '<span class="muted" style="font-variant-numeric:tabular-nums;">0</span>'
-        )
-        ev_html = (
-            f'<span style="font-variant-numeric:tabular-nums; color:var(--muted);">'
-            f'{ev_count}</span>'
-            if ev_count > 0 else
-            '<span class="muted">·</span>'
-        )
-
-        # Sortable data-* attrs: numeric where applicable, "" → fallback to bottom
-        due_sort = wi.get("due_date") or "9999-12-31"
-        priority_sort = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}.get(priority, 9)
-        status_sort = {"进行中": 0, "待办": 1, "完成": 2}.get(status, 9)
-        last_sort = last_iso or "0000"
-        rows_html.append(
-            f'<tr class="task-row" data-status="{esc(status)}" '
-            f'data-status-sort="{status_sort}" '
-            f'data-priority-sort="{priority_sort}" '
-            f'data-table="{esc(table_key)}" '
-            f'data-hours="{minutes / 60.0:.4f}" '
-            f'data-events="{ev_count}" '
-            f'data-due-sort="{esc(due_sort)}" '
-            f'data-last-sort="{esc(last_sort)}" '
-            f'data-title="{esc(wi.get("title") or "")}">'
-            f'<td>{_chip(table_labels.get(table_key, table_key), _TABLE_KEY_COLOR.get(table_key))}</td>'
-            f'<td>{_chip(priority, _PRIORITY_COLOR.get(priority)) or chr(0x2014)}</td>'
-            f'<td>{_chip(_localized_status(status), _STATUS_COLOR.get(status))}</td>'
-            f'<td class="tasks-title-cell">{title_html}</td>'
-            f'<td style="text-align:right;">{time_html}</td>'
-            f'<td class="col-events" style="text-align:right;">{ev_html}</td>'
-            f'<td class="col-last" style="font-size:11px; color:var(--muted);">{esc(_format_time_ago(last_iso))}</td>'
-            f'<td>{_due_chip_html(wi.get("due_date"))}</td>'
-            '</tr>'
-        )
-
-    active_p01_stale = sum(
-        1 for wi in items
-        if wi.get("status") in ("进行中", "待办")
-        and wi.get("priority") in ("P0", "P1")
-        and stats.get(wi["record_id"], {}).get("event_count", 0) == 0
-    )
-    completed_count = sum(1 for wi in items if wi.get("status") == "完成")
-    summary_bits = [T("tasks_n_rows", n=len(items))]
-    if active_p01_stale:
-        summary_bits.append(f'<span style="color:#b32a2a;">{esc(T("tasks_p_zero", n=active_p01_stale))}</span>')
-    summary_line = " · ".join(summary_bits)
-
-    toggle_html = (
-        '<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); cursor:pointer; user-select:none;">'
-        '<input type="checkbox" data-role="tasks-show-completed" style="cursor:pointer;">'
-        f'{esc(T("tasks_show_done"))} ({completed_count})'
-        '</label>'
-    )
-
-    def thead_cell(lab: str, sort_key: str, *, align: str = "left", default_dir: str = "asc", cls: str = "") -> str:
-        cls_attr = f' class="{cls}"' if cls else ""
-        return (
-            f'<th{cls_attr} data-sort="{sort_key}" data-default-dir="{default_dir}" '
-            f'style="text-align:{align}; cursor:pointer; user-select:none;">'
-            f'{esc(lab)} <span class="sort-arrow" style="color:var(--muted); font-size:10px;">↕</span>'
-            '</th>'
-        )
-    # Columns marked col-events / col-last are hidden in compact (2-col) mode
-    # via CSS, then shown when the user picks a single table.
-    if table_key == "tasks":
-        # data-col tokens drive the full-mode width overrides in CSS.
-        colgroup = (
-            '<colgroup>'
-            '<col data-col="priority" style="width:48px">'                       # P (was 36 — chip "P..." truncated)
-            '<col data-col="status"   style="width:64px">'                       # 状态
-            '<col data-col="title">'                                              # 任务 (auto in compact, capped in full)
-            '<col data-col="hours"    style="width:54px">'                       # 时长
-            '<col data-col="events"   class="col-events" style="width:48px">'    # 事件
-            '<col data-col="last"     class="col-last"   style="width:92px">'    # 最近活动
-            '<col data-col="due"      style="width:104px">'                      # 截止
-            '</colgroup>'
-        )
-        thead_html = (
-            '<tr>'
-            + thead_cell(T("tasks_col_p"),      "priority")
-            + thead_cell(T("tasks_col_status"), "status")
-            + thead_cell(T("tasks_col_title"),  "title")
-            + thead_cell(T("tasks_col_hours"),  "hours", align="right", default_dir="desc")
-            + thead_cell(T("tasks_col_events"), "events", align="right", default_dir="desc", cls="col-events")
-            + thead_cell(T("tasks_col_last"),   "last", default_dir="desc", cls="col-last")
-            + thead_cell(T("tasks_col_due"),    "due")
-            + '</tr>'
-        )
-    else:
-        colgroup = (
-            '<colgroup>'
-            '<col data-col="status"   style="width:64px">'                       # status
-            '<col data-col="title">'                                              # title (auto in compact, capped in full)
-            '<col data-col="hours"    style="width:54px">'                       # hours
-            '<col data-col="events"   class="col-events" style="width:48px">'    # events
-            '<col data-col="last"     class="col-last"   style="width:92px">'    # last activity
-            '<col data-col="due"      style="width:104px">'                      # due
-            '</colgroup>'
-        )
-        thead_html = (
-            '<tr>'
-            + thead_cell(T("tasks_col_status"), "status")
-            + thead_cell(T("tasks_col_topic"),  "title")
-            + thead_cell(T("tasks_col_hours"),  "hours", align="right", default_dir="desc")
-            + thead_cell(T("tasks_col_events"), "events", align="right", default_dir="desc", cls="col-events")
-            + thead_cell(T("tasks_col_last"),   "last", default_dir="desc", cls="col-last")
-            + thead_cell(T("tasks_col_due"),    "due")
-            + '</tr>'
-        )
-
-    # Per-card scoped JS (closes over its own panel root)
-    panel_id = f"tasks-{table_key}"
-    sort_filter_js = (
-        '<script>(function(){'
-        f'var panel=document.getElementById("{panel_id}");'
-        'if(!panel)return;'
-        'var tbody=panel.querySelector("tbody");if(!tbody)return;'
-        'var cb=panel.querySelector(\'[data-role="tasks-show-completed"]\');'
-        'function applyVis(){'
-        'var show=cb&&cb.checked;'
-        'panel.querySelectorAll(".task-row").forEach(function(r){'
-        'r.style.display=(!show&&r.dataset.status==="完成")?"none":"";});'
-        '}'
-        'if(cb)cb.addEventListener("change",applyVis);'
-        'var sortState={key:null,dir:1};'
-        'function getKey(row,key){'
-        'switch(key){'
-        'case"hours":return parseFloat(row.dataset.hours||"0");'
-        'case"events":return parseInt(row.dataset.events||"0",10);'
-        'case"priority":return parseInt(row.dataset.prioritySort||"9",10);'
-        'case"status":return parseInt(row.dataset.statusSort||"9",10);'
-        'case"due":return row.dataset.dueSort||"9999";'
-        'case"last":return row.dataset.lastSort||"0";'
-        'case"title":return (row.dataset.title||"").toLowerCase();'
-        '}return"";}'
-        'function applySort(key,dir){'
-        'var rows=Array.prototype.slice.call(panel.querySelectorAll(".task-row"));'
-        'rows.sort(function(a,b){'
-        'var va=getKey(a,key),vb=getKey(b,key);'
-        'if(va===vb)return 0;'
-        'return (va>vb?1:-1)*dir;});'
-        'rows.forEach(function(r){tbody.appendChild(r);});'
-        '}'
-        'panel.querySelectorAll("th[data-sort]").forEach(function(th){'
-        'th.addEventListener("click",function(){'
-        'var key=th.dataset.sort;'
-        'if(sortState.key===key){sortState.dir*=-1;}'
-        'else{sortState.key=key;sortState.dir=(th.dataset.defaultDir==="desc")?-1:1;}'
-        'panel.querySelectorAll(".sort-arrow").forEach(function(a){a.textContent="↕";});'
-        'var arrow=th.querySelector(".sort-arrow");if(arrow)arrow.textContent=sortState.dir>0?"↑":"↓";'
-        'applySort(sortState.key,sortState.dir);'
-        '});});'
-        'applyVis();'
-        '})();</script>'
-    )
-
-    chip_palette = _TABLE_KEY_COLOR.get(table_key)
-    chip_html = _chip(label, chip_palette)
-    # Re-render rows but drop the now-redundant "源" cell since the card itself is scoped
-    table_label = table_labels.get(table_key, table_key)
-    # Strip the leading source-chip cell from each row (each row currently
-    # opens with that <td>; remove the first <td>…</td> chunk)
-    import re as _re
-    if table_key == "tasks":
-        rows_html_scoped = [_re.sub(r"^(<tr[^>]*>)<td>[^<]*<span[^>]*>[^<]*</span>[^<]*</td>", r"\1", r, count=1) for r in rows_html]
-    else:
-        # For reviews: drop source-chip cell AND priority cell (审稿 has no P)
-        rows_html_scoped = []
-        for r in rows_html:
-            r = _re.sub(r"^(<tr[^>]*>)<td>[^<]*<span[^>]*>[^<]*</span>[^<]*</td>", r"\1", r, count=1)
-            # Now drop next <td>...</td> (priority)
-            r = _re.sub(r"^(<tr[^>]*>)<td>[^<]*(?:<span[^>]*>[^<]*</span>|—)?[^<]*</td>", r"\1", r, count=1)
-            rows_html_scoped.append(r)
-
-    return (
-        f'<section class="card tasks-card" id="{panel_id}" data-table-key="{esc(table_key)}">'
-        '<div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">'
-        f'<h3 style="margin:0;">{esc(T("tasks_panel_t") if table_key == "tasks" else T("tasks_panel_r"))}</h3>'
-        f'{chip_html}'
-        f'<span class="muted small">{summary_line}</span>'
-        f'<span style="margin-left:auto;">{toggle_html}</span>'
-        '</div>'
-        '<table class="mini-table" style="width:100%; table-layout:fixed;">'
-        f'{colgroup}'
-        f'<thead>{thead_html}</thead>'
-        f'<tbody>{"".join(rows_html_scoped)}</tbody>'
-        '</table>'
-        + sort_filter_js +
-        '</section>'
-    )
 
 
 def _alignment_audit_card(con, days: list[str]) -> str:
-    """Audit unmatched project_guess values + interactive dropdown to map
-    each to an existing work_item. POST → /api/work-items/alias persists to
-    config/work_item_aliases.yaml and rebuilds links so future catchups
-    follow the user's manual mapping.
-
-    Audit is a *config* surface, not a per-day stat — a single-day window
-    rarely has enough unmatched events to make the audit useful. We
-    always sweep at least the last 7 calendar days ending at max(days)
-    so the daily page and the weekly page both surface meaningful
-    alignment work to do."""
-    if not days:
-        return ""
-    from datetime import date as _date_mod, timedelta as _td_mod
-    end = max(days)
-    try:
-        end_dt = _date_mod.fromisoformat(end)
-    except ValueError:
-        end_dt = _date_mod.today()
-    start = (end_dt - _td_mod(days=6)).isoformat()  # 7-day inclusive window
-    # If the caller's window is already wider, honor it.
-    if min(days) < start:
-        start = min(days)
-    rows = con.execute(
-        """
-        SELECT
-            e.project_guess AS pg,
-            COUNT(*)        AS n,
-            MAX(e.start)    AS last_at,
-            COUNT(DISTINCT substr(e.start, 1, 10)) AS active_days
-          FROM events e
-          LEFT JOIN event_work_item_links l ON l.event_id = e.id
-         WHERE e.date BETWEEN ? AND ?
-           AND l.event_id IS NULL
-           AND e.project_guess IS NOT NULL
-           AND e.project_guess != ''
-         GROUP BY e.project_guess
-        HAVING n >= 3
-         ORDER BY n DESC
-         LIMIT 20
-        """, (start, end),
-    ).fetchall()
-    if not rows:
-        return ""
-
-    # Skip completed tasks/reviews whose deadline passed more than 7 days
-    # ago — those are historical and shouldn't clutter the audit dropdown.
-    # Tasks still 进行中/待办 always stay; recently-completed (≤7d) stay too
-    # so you can retro-link an event to something you just finished.
-    from datetime import date as _date_mod, timedelta as _td_mod
-    _cutoff = (_date_mod.today() - _td_mod(days=7)).isoformat()
-    wi_rows_all = con.execute(
-        "SELECT record_id, title, title_en, table_key, status, due_date FROM work_items "
-        "ORDER BY CASE table_key WHEN 'tasks' THEN 0 ELSE 1 END, title"
-    ).fetchall()
-    wi_rows = []
-    for w in wi_rows_all:
-        # 审稿 (reviews) items should already be auto-identifiable from the
-        # paper title — they don't belong in the manual audit dropdown.
-        if (w["table_key"] or "") == "reviews":
-            continue
-        if (w["status"] or "") == "完成":
-            due = w["due_date"] or ""
-            if not due or due < _cutoff:
-                continue
-        wi_rows.append(w)
-    if not wi_rows:
-        return ""
-
-    table_labels = {"tasks": T("task_prefix"), "reviews": T("review_prefix")}
-
-    # Existing aliases — pre-select in the dropdown if already mapped.
-    from daytrace.work_items import load_aliases
-    try:
-        existing_aliases = load_aliases()
-    except Exception:
-        existing_aliases = {}
-
-    def _suggest(pg: str) -> str | None:
-        """Auto-suggested record_id (fuzzy title/word match). None if no
-        decent match — user will leave dropdown at '-- 跳过 --'."""
-        pg_l = pg.lower()
-        for w in wi_rows:
-            t = (w["title"] or "").lower()
-            if not t:
-                continue
-            if pg_l in t or t in pg_l:
-                return w["record_id"]
-        import re as _re
-        pg_words = {w for w in _re.findall(r"[\w]+", pg_l) if len(w) > 2}
-        if not pg_words:
-            return None
-        best: tuple[float, str] | None = None
-        for w in wi_rows:
-            t = (w["title"] or "").lower()
-            t_words = {x for x in _re.findall(r"[\w]+", t) if len(x) > 2}
-            if not t_words:
-                continue
-            overlap = len(pg_words & t_words) / max(len(pg_words), 1)
-            if overlap >= 0.5:
-                if best is None or overlap > best[0]:
-                    best = (overlap, w["record_id"])
-        return best[1] if best else None
-
-    def _options_html(selected_rid: str | None) -> str:
-        parts = [f'<option value="">{esc(T("audit_skip"))}</option>']
-        for w in wi_rows:
-            rid = w["record_id"]
-            ttl = _localized_task_title(dict(w))
-            tk = w["table_key"] or "tasks"
-            sel = ' selected' if rid == selected_rid else ''
-            parts.append(
-                f'<option value="{esc(rid)}"{sel}>'
-                f'[{esc(table_labels.get(tk, tk))}] {esc(ttl[:60])}'
-                f'</option>'
-            )
-        return "".join(parts)
-
-    rows_html: list[str] = []
-    total_unmatched = 0
-    for r in rows:
-        pg = r["pg"]
-        n = r["n"]
-        total_unmatched += n
-        last_at = r["last_at"] or ""
-        active_days = r["active_days"] or 0
-        last_pretty = _format_time_ago(last_at) if last_at else "—"
-        days_label = T("n_days", n=active_days) if active_days else "—"
-        # Prefer existing alias > fuzzy suggestion > nothing
-        preselect = existing_aliases.get(pg) or _suggest(pg)
-        rows_html.append(
-            '<tr>'
-            f'<td class="audit-pg">{esc(pg)}</td>'
-            f'<td class="audit-num">{n}</td>'
-            f'<td class="audit-num muted">{esc(days_label)}</td>'
-            f'<td class="audit-time muted">{esc(last_pretty)}</td>'
-            '<td>'
-            f'<input type="hidden" name="project[]" value="{esc(pg)}">'
-            f'<select name="record[]" class="audit-select">'
-            f'{_options_html(preselect)}'
-            '</select>'
-            '</td>'
-            '</tr>'
-        )
-
-    window_label = f"{start} ~ {end}" if start != end else end
-    # Success banner — populated client-side from ?audit_applied=A_R_L
-    # the POST handler appends after a save. Hidden by default; the inline
-    # script reveals + fills it if the query param is present, then strips
-    # the param from the URL so refreshing doesn't re-show the toast.
-    import json as _json
-    banner_template = T("audit_applied", a="__A__", r="__R__", l="__L__")
-    audit_banner = (
-        '<div id="audit-applied-banner" hidden '
-        'style="margin:0 0 10px; padding:8px 12px; border-radius:10px; '
-        'background:#e7f4ec; border:1px solid #b8e0c9; color:#1f6b3b; '
-        'font-size:13px; font-weight:600;"></div>'
-        '<script>(function(){'
-        'var p=new URLSearchParams(location.search).get("audit_applied");'
-        'if(!p)return;'
-        'var m=p.split("_");if(m.length<3)return;'
-        'var el=document.getElementById("audit-applied-banner");'
-        f'el.textContent={_json.dumps(banner_template, ensure_ascii=False)}'
-        '.replace("__A__",m[0]).replace("__R__",m[1]).replace("__L__",m[2]);'
-        'el.hidden=false;'
-        'var u=new URL(location.href);u.searchParams.delete("audit_applied");'
-        'history.replaceState(null,"",u.toString());'
-        '})();</script>'
-    )
-    audit_summary_hint = f'{T("audit_summary", n=len(rows), ev=total_unmatched)} · {T("audit_window")} {window_label}'
-    return (
-        '<section class="card" id="alignment-audit">'
-        + audit_banner
-        + _card_head(T("audit_title"), tag=T("audit_tag"), tag_color="config", hint=audit_summary_hint)
-        + '<form method="POST" action="/api/work-items/alias" '
-        'style="margin:0;">'
-        '<table class="mini-table audit-table" style="width:100%; table-layout:fixed;">'
-        '<colgroup>'
-        '<col style="width:30%">'    # project_guess
-        '<col style="width:72px">'   # events
-        '<col style="width:88px">'   # active days
-        '<col style="width:128px">'  # last activity
-        '<col>'                       # match-to-task dropdown (auto)
-        '</colgroup>'
-        '<thead><tr>'
-        f'<th class="audit-pg">{esc(T("audit_pg"))}</th>'
-        f'<th class="audit-num">{esc(T("audit_events"))}</th>'
-        f'<th class="audit-num">{esc(T("audit_days"))}</th>'
-        f'<th class="audit-time">{esc(T("audit_last"))}</th>'
-        f'<th>{esc(T("audit_match"))}</th>'
-        '</tr></thead>'
-        f'<tbody>{"".join(rows_html)}</tbody>'
-        '</table>'
-        '<div style="display:flex; align-items:center; gap:12px; padding-top:10px; margin-top:8px; border-top:1px dashed var(--line);">'
-        f'<span class="muted small">{esc(T("audit_save_hint"))}</span>'
-        '<button type="submit" style="margin-left:auto; padding:6px 14px; background:var(--ink); color:white; border:none; border-radius:8px; font-weight:650; cursor:pointer; font-size:13px;">'
-        f'{esc(T("audit_save_btn"))}'
-        '</button>'
-        '</div>'
-        '</form>'
-        '</section>'
-    )
+    from daytrace.projects_ui import audit_panel
+    return audit_panel(con, days, _CURRENT_LANG.get())
 
 
-def _latest_ai_summary_per_work_item(
-    con, days: list[str],
-) -> dict[str, dict]:
-    """For each work_item record_id, find its most recent ai_summary
-    payload in the given shifted-day window. Joins event_work_item_links
-    → events → day_project_channel via (date, project)."""
-    if not days:
-        return {}
-    days_ph = ",".join("?" for _ in days)
-    try:
-        rows = con.execute(
-            f"""
-            SELECT
-                l.record_id,
-                c.date,
-                c.project,
-                c.value_json
-              FROM event_work_item_links l
-              JOIN events e ON e.id = l.event_id
-              JOIN day_project_channel c
-                ON c.date = e.date
-               AND c.project = e.project_guess
-               AND c.channel = 'ai_summary'
-             WHERE e.date IN ({days_ph})
-             ORDER BY l.record_id, c.date DESC
-            """,
-            days,
-        ).fetchall()
-    except sqlite3.OperationalError:
-        return {}
-    out: dict[str, dict] = {}
-    for r in rows:
-        rid = r["record_id"]
-        if rid in out:
-            continue  # already kept the most recent row (ORDER BY date DESC)
-        if r["value_json"]:
-            try:
-                out[rid] = json.loads(r["value_json"])
-            except json.JSONDecodeError:
-                continue
-    return out
 
 
 def _ai_list(items: Any) -> list[str]:
@@ -5609,277 +4925,8 @@ def _ai_project_summary_view(latest: dict | None) -> dict[str, Any]:
 
 
 def _tasks_panel(con, days: list[str], boundary_hour: int) -> str:
-    """┃ Tasks panel ┃ — unified single-table view of all work_items
-    (任务 + 审稿 in one rows-list), with a top tab bar to filter by
-    source (all/tasks/reviews). Each row now carries the per-(date,
-    project) AI summary's latest progress + next-step as two extra
-    columns, so per-project AI lives inline with its parent task
-    instead of needing a separate Projects card."""
-    has_wi = con.execute("SELECT 1 FROM work_items LIMIT 1").fetchone()
-    if not has_wi:
-        return ""
-    from daytrace.work_items import list_work_items
-    stats = _compute_task_stats(con, days, boundary_hour)
-    ai_summaries = _latest_ai_summary_per_work_item(con, days)
-    table_labels = {"tasks": T("tasks_table_t"), "reviews": T("tasks_table_r")}
-
-    # Pull all work_items (任务 + 审稿 等) into a single ordered list.
-    all_items = list_work_items(con)
-    if not all_items:
-        return ""
-
-    # Stable sort: by table_key (tasks first, reviews next, others last),
-    # then by event_count desc within the window, then by due_date.
-    def _sort_key(wi):
-        tk = wi.get("table_key") or "tasks"
-        tk_order = {"tasks": 0, "reviews": 1}.get(tk, 2)
-        rid = wi.get("record_id")
-        ev = stats.get(rid, {}).get("event_count", 0) if rid else 0
-        due = wi.get("due_date") or "9999-12-31"
-        return (tk_order, -ev, due)
-    all_items.sort(key=_sort_key)
-
-    rows_html: list[str] = []
-    for idx, wi in enumerate(all_items):
-        rid = wi["record_id"]
-        st = stats.get(rid, {})
-        minutes = st.get("minutes", 0)
-        ev_count = st.get("event_count", 0)
-        last_iso = st.get("last_activity")
-        status = wi.get("status") or ""
-        priority = wi.get("priority") or ""
-        tk = wi.get("table_key") or "tasks"
-
-        ext = wi.get("external_links") or []
-        link_html = ""
-        if isinstance(ext, list) and ext:
-            link_html = (
-                f'<a href="{esc(ext[0])}" target="_blank" rel="noopener" '
-                f'title="{esc(ext[0])}" style="color:#2f6fed; font-size:10px; '
-                f'margin-left:6px;">↗</a>'
-            )
-        is_stale = (
-            status in ("进行中", "待办")
-            and priority in ("P0", "P1")
-            and ev_count == 0
-        )
-        subtitle = wi.get("subtitle") or wi.get("project_source") or ""
-        subtitle_html = (
-            f'<div style="font-size:10.5px; color:var(--muted); margin-top:2px;">{esc(subtitle)}</div>'
-            if subtitle else ""
-        )
-        title_html = (
-            '<div style="line-height:1.25;">'
-            f'<span style="font-weight:600; color:#3b352e;">{esc(_localized_task_title(dict(wi)))}</span>'
-            f'{link_html}'
-        )
-        if is_stale:
-            title_html += (
-                '<span style="margin-left:8px; color:#b32a2a; font-size:11px;" '
-                f'title="{esc(T("tasks_p_stale_tip"))}">⚠</span>'
-            )
-        title_html += f"{subtitle_html}</div>"
-
-        time_html = (
-            f'<span style="font-variant-numeric:tabular-nums; font-weight:700;">'
-            f'{_format_value(minutes / 60.0, "hours")}</span>'
-            if minutes > 0 else
-            '<span class="muted" style="font-variant-numeric:tabular-nums;">0</span>'
-        )
-
-        # AI summary columns: pull from latest ai_summary for this record's
-        # (date, project) over the window. The cell shows a compact lead
-        # line and expands to the original generated fields.
-        latest = ai_summaries.get(rid) if isinstance(ai_summaries.get(rid), dict) else None
-        ai_view = _ai_project_summary_view(latest)
-        progress_text = ai_view["progress"]
-        next_text = ai_view["next"]
-        progress_cell = (
-            f'<div class="ai-cell-text" title="{esc(progress_text)}">{esc(progress_text)}</div>'
-            if progress_text else '<span class="muted">—</span>'
-        )
-        next_cell = (
-            f'<div class="ai-cell-text" title="{esc(next_text)}">{esc(next_text)}</div>'
-            if next_text else '<span class="muted">—</span>'
-        )
-        ai_row_id = f"task-ai-{idx}"
-        expandable_class = " expandable" if ai_view["has_details"] else ""
-        ai_row_attr = f' data-ai-row="{ai_row_id}"' if ai_view["has_details"] else ""
-
-        due_sort = wi.get("due_date") or "9999-12-31"
-        priority_sort = {"P0": 0, "P1": 1, "P2": 2, "P3": 3}.get(priority, 9)
-        status_sort = {"进行中": 0, "待办": 1, "完成": 2}.get(status, 9)
-        last_sort = last_iso or "0000"
-
-        rows_html.append(
-            f'<tr class="task-row{expandable_class}" data-status="{esc(status)}" '
-            f'data-status-sort="{status_sort}" '
-            f'data-priority-sort="{priority_sort}" '
-            f'data-table="{esc(tk)}" '
-            f'data-hours="{minutes / 60.0:.4f}" '
-            f'data-events="{ev_count}" '
-            f'data-due-sort="{esc(due_sort)}" '
-            f'data-last-sort="{esc(last_sort)}" '
-            f'data-title="{esc(wi.get("title") or "")}"'
-            f'{ai_row_attr}>'
-            f'<td>{_chip(table_labels.get(tk, tk), _TABLE_KEY_COLOR.get(tk))}</td>'
-            f'<td>{_chip(priority, _PRIORITY_COLOR.get(priority)) or chr(0x2014)}</td>'
-            f'<td>{_chip(_localized_status(status), _STATUS_COLOR.get(status))}</td>'
-            f'<td class="tasks-title-cell">{title_html}</td>'
-            f'<td style="text-align:right;">{time_html}</td>'
-            f'<td>{_due_chip_html(wi.get("due_date"))}</td>'
-            f'<td class="col-ai-progress">{progress_cell}</td>'
-            f'<td class="col-ai-next">{next_cell}</td>'
-            '</tr>'
-            + (
-                f'<tr class="task-ai-row" id="{ai_row_id}" hidden '
-                f'data-parent-table="{esc(tk)}" data-parent-status="{esc(status)}">'
-                f'<td colspan="8">{ai_view["details"]}</td></tr>'
-                if ai_view["has_details"] else ""
-            )
-        )
-
-    # Tab bar (全部 / 任务 / 审稿) filters rows by data-table attr in JS.
-    present_table_keys = list(dict.fromkeys(
-        (wi.get("table_key") or "tasks") for wi in all_items
-    ))
-    pills = [f'<button type="button" class="dim-tab active" data-table-pick="all">{esc(T("tasks_all"))}</button>']
-    for tk in present_table_keys:
-        pills.append(
-            f'<button type="button" class="dim-tab" data-table-pick="{esc(tk)}">'
-            f'{esc(table_labels.get(tk, tk))}</button>'
-        )
-    pill_bar = (
-        '<div class="dim-tabs" data-role="tasks-table-pick" '
-        'style="margin-bottom:10px; display:inline-flex;">'
-        + "".join(pills) +
-        '</div>'
-    )
-
-    # Completed-tasks toggle
-    completed_count = sum(1 for wi in all_items if wi.get("status") == "完成")
-    completed_toggle = (
-        '<label class="tasks-show-done" style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); cursor:pointer; user-select:none; margin-left:auto;">'
-        '<input type="checkbox" data-role="tasks-show-completed" style="cursor:pointer;">'
-        f'{esc(T("tasks_show_done"))} ({completed_count})'
-        '</label>'
-    )
-
-    # Headers — sortable
-    def thead_cell(lab: str, sort_key: str, *, align: str = "left", default_dir: str = "asc") -> str:
-        return (
-            f'<th data-sort="{sort_key}" data-default-dir="{default_dir}" '
-            f'style="text-align:{align}; cursor:pointer; user-select:none;">'
-            f'{esc(lab)} <span class="sort-arrow" style="color:var(--muted); font-size:10px;">↕</span>'
-            '</th>'
-        )
-
-    colgroup = (
-        '<colgroup>'
-        '<col style="width:64px">'    # source chip
-        '<col style="width:48px">'    # P
-        '<col style="width:72px">'    # 状态
-        '<col>'                       # 任务 (auto)
-        '<col style="width:62px">'    # 时长
-        '<col style="width:108px">'   # 截止
-        '<col style="width:260px">'   # 本期进展
-        '<col style="width:220px">'   # 下一步
-        '</colgroup>'
-    )
-    thead = (
-        '<tr>'
-        + thead_cell(T("tasks_col_source") if "tasks_col_source" in _STRINGS else (T("dim_source") if _CURRENT_LANG.get() != "en" else "Source"), "table_key")
-        + thead_cell(T("tasks_col_p"),      "priority")
-        + thead_cell(T("tasks_col_status"), "status")
-        + thead_cell(T("tasks_col_title"),  "title")
-        + thead_cell(T("tasks_col_hours"),  "hours", align="right", default_dir="desc")
-        + thead_cell(T("tasks_col_due"),    "due")
-        + thead_cell(T("tasks_col_progress") if "tasks_col_progress" in _STRINGS else "本期进展", "progress")
-        + thead_cell(T("tasks_col_next") if "tasks_col_next" in _STRINGS else "下一步",          "nextstep")
-        + '</tr>'
-    )
-
-    sort_filter_js = (
-        '<script>(function(){'
-        'var panel=document.getElementById("tasks-unified");'
-        'if(!panel)return;'
-        'var tbody=panel.querySelector("tbody");'
-        'var bar=document.querySelector(\'[data-role="tasks-table-pick"]\');'
-        'var cb=panel.querySelector(\'[data-role="tasks-show-completed"]\');'
-        'var pick="all";'
-        'function detailRow(r){return r.dataset.aiRow?document.getElementById(r.dataset.aiRow):null;}'
-        'function rowVisible(r){return r.style.display!=="none";}'
-        'function applyVis(){'
-        'var showDone=cb&&cb.checked;'
-        'panel.querySelectorAll(".task-row").forEach(function(r){'
-        'var t=r.dataset.table;'
-        'var showTable=(pick==="all"||t===pick);'
-        'var doneOk=(showDone||r.dataset.status!=="完成");'
-        'var visible=showTable&&doneOk;'
-        'r.style.display=visible?"":"none";'
-        'var d=detailRow(r);if(d){d.hidden=!(visible&&r.classList.contains("row-expanded"));}'
-        '});'
-        '}'
-        'if(bar){bar.querySelectorAll(".dim-tab").forEach(function(btn){'
-        'btn.addEventListener("click",function(){'
-        'pick=btn.dataset.tablePick;'
-        'bar.querySelectorAll(".dim-tab").forEach(function(b){b.classList.toggle("active",b.dataset.tablePick===pick);});'
-        'applyVis();});});}'
-        'if(cb)cb.addEventListener("change",applyVis);'
-        'var sortState={key:null,dir:1};'
-        'function getKey(row,key){'
-        'switch(key){'
-        'case"hours":return parseFloat(row.dataset.hours||"0");'
-        'case"events":return parseInt(row.dataset.events||"0",10);'
-        'case"priority":return parseInt(row.dataset.prioritySort||"9",10);'
-        'case"status":return parseInt(row.dataset.statusSort||"9",10);'
-        'case"due":return row.dataset.dueSort||"9999";'
-        'case"last":return row.dataset.lastSort||"0";'
-        'case"title":return (row.dataset.title||"").toLowerCase();'
-        'case"table_key":return row.dataset.table||"";'
-        '}return"";}'
-        'function applySort(key,dir){'
-        'var rows=Array.prototype.slice.call(panel.querySelectorAll(".task-row"));'
-        'rows.sort(function(a,b){var va=getKey(a,key),vb=getKey(b,key);if(va===vb)return 0;return (va>vb?1:-1)*dir;});'
-        'rows.forEach(function(r){tbody.appendChild(r);var d=detailRow(r);if(d)tbody.appendChild(d);});}'
-        'panel.querySelectorAll(".task-row.expandable").forEach(function(r){'
-        'r.addEventListener("click",function(e){'
-        'if(e.target.closest("a,button,input,select,label"))return;'
-        'var d=detailRow(r);if(!d)return;'
-        'var open=!r.classList.contains("row-expanded");'
-        'r.classList.toggle("row-expanded",open);'
-        'd.hidden=!(open&&rowVisible(r));'
-        '});});'
-        'panel.querySelectorAll("thead th[data-sort]").forEach(function(th){'
-        'th.addEventListener("click",function(){'
-        'var key=th.dataset.sort;'
-        'if(sortState.key===key){sortState.dir*=-1;}'
-        'else{sortState.key=key;sortState.dir=(th.dataset.defaultDir==="desc")?-1:1;}'
-        'panel.querySelectorAll(".sort-arrow").forEach(function(a){a.textContent="↕";});'
-        'var arrow=th.querySelector(".sort-arrow");if(arrow)arrow.textContent=sortState.dir>0?"↑":"↓";'
-        'applySort(sortState.key,sortState.dir);});});'
-        'applyVis();'
-        '})();</script>'
-    )
-
-    summary_line = T("tasks_n_rows", n=len(all_items))
-    # Place segment-pill bar AND completed-toggle in the right slot so
-    # the header reads as one composed control row instead of two.
-    right_html = pill_bar + completed_toggle
-    return (
-        '<section class="card tasks-card" id="tasks-unified">'
-        + _card_head(
-            T("tasks_panel_t"), tag="Tasks", tag_color="data",
-            hint=summary_line, right_html=right_html,
-        )
-        + '<table class="mini-table" style="width:100%; table-layout:fixed;">'
-        + colgroup
-        + f'<thead>{thead}</thead>'
-        + f'<tbody>{"".join(rows_html)}</tbody>'
-        + '</table>'
-        + sort_filter_js
-        + '</section>'
-    )
+    from daytrace.projects_ui import projects_panel
+    return projects_panel(con, days, boundary_hour, _CURRENT_LANG.get())
 
 
 def weekly_page(
@@ -6362,67 +5409,17 @@ def weekly_page(
 
 
 def _apply_audit_aliases(db_path: Path, picks: list[tuple[str, str]]) -> dict:
-    """Persist audit dropdown picks to config/work_item_aliases.yaml + rebuild
-    event links. `picks` is a list of (project_guess, record_id_or_empty).
-    Empty record_id means "remove this alias if it exists".
-
-    Returns {"added": N, "removed": M, "links_inserted": K}.
-    """
-    from daytrace.work_items import DEFAULT_ALIASES, load_aliases, rebuild_links
-
-    existing = load_aliases()
-    added = removed = 0
-    for pg, rid in picks:
-        pg = (pg or "").strip()
-        rid = (rid or "").strip()
-        if not pg:
-            continue
-        if rid:
-            if existing.get(pg) != rid:
-                existing[pg] = rid
-                added += 1
-        else:
-            if pg in existing:
-                existing.pop(pg)
-                removed += 1
-
-    # Write back. Preserve the header comment by reading the file first
-    # and only replacing the aliases: section.
-    path = Path(DEFAULT_ALIASES)
-    if path.exists():
-        original = path.read_text(encoding="utf-8")
-        # Split into pre-aliases preamble + the aliases block
-        lines = original.splitlines()
-        keep_lines: list[str] = []
-        in_aliases = False
-        for ln in lines:
-            stripped = ln.strip()
-            if stripped.startswith("aliases:"):
-                in_aliases = True
-                continue
-            if in_aliases:
-                # Skip indented or commented continuation lines of the existing block
-                if ln.startswith(" ") or ln.startswith("\t") or stripped.startswith("#") or stripped == "":
-                    continue
-                in_aliases = False
-            keep_lines.append(ln)
-        preamble = "\n".join(keep_lines).rstrip() + "\n\n" if keep_lines else ""
-    else:
-        preamble = ""
-
-    out = preamble + "aliases:\n"
-    if not existing:
-        out += "  # (empty — use the audit panel on /today or /weekly to add mappings)\n"
-    else:
-        for k in sorted(existing.keys()):
-            out += f'  "{k}": {existing[k]}\n'
-    path.write_text(out, encoding="utf-8")
-
-    # Rebuild links (covers the 30-day window). Uses fresh aliases.
-    from daytrace.db import connect, init_db
-    con = connect(db_path); init_db(con)
-    stats = rebuild_links(con, lookback_days=30)
-    return {"added": added, "removed": removed, "links_inserted": stats["links_inserted"]}
+    from daytrace.projects import save_aliases
+    from daytrace.daily_report import regenerate_day_from_db
+    con = connect(db_path)
+    init_db(con)
+    try:
+        result = save_aliases(con, picks)
+        for row in con.execute("SELECT date FROM day_report").fetchall():
+            regenerate_day_from_db(con, row["date"], include_ai=False)
+        return result
+    finally:
+        con.close()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -6433,7 +5430,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        if parsed.path != "/api/work-items/alias":
+        if parsed.path == "/api/work-items/alias":
+            json_response(self, {"error": "Legacy Feishu mapping retired; use /api/projects/alias with a local repository ID"}, 410)
+            return
+        if parsed.path != "/api/projects/alias":
             self.send_response(404); self.end_headers(); return
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length).decode("utf-8")

@@ -25,7 +25,7 @@ from scripts.collect_git import collect_git_events  # noqa: E402
 from scripts.collect_hermes_sessions import collect_hermes_events  # noqa: E402
 from scripts.collect_claude_code import collect_claude_code_events  # noqa: E402
 
-LOCAL_TZ = ZoneInfo("America/Detroit")
+from daytrace.timezone import LOCAL_TZ
 
 
 def iter_days(end_day: str, lookback_days: int) -> list[str]:

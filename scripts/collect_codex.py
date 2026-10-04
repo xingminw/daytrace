@@ -16,7 +16,7 @@ from daytrace.io import write_events
 from daytrace.schema import TraceEvent
 
 
-LOCAL_TZ = ZoneInfo("America/Detroit")
+from daytrace.timezone import LOCAL_TZ
 
 
 def day_bounds(day: str) -> tuple[float, float]:
@@ -52,8 +52,8 @@ def iso_to_epoch(value: str | None) -> float | None:
 def guess_project(cwd: str | None, text: str = "") -> str | None:
     if cwd:
         parts = Path(cwd).parts
-        if "Projects" in parts:
-            i = parts.index("Projects")
+        if "Projects" in parts or "Codespace" in parts:
+            i = parts.index("Codespace") if "Codespace" in parts else parts.index("Projects")
             if i + 1 < len(parts):
                 return parts[i + 1]
     low = text.lower()
@@ -75,7 +75,7 @@ def guess_project(cwd: str | None, text: str = "") -> str | None:
 def load_threads(state_db: Path) -> dict[str, dict]:
     if not state_db.exists():
         return {}
-    con = sqlite3.connect(state_db)
+    con = sqlite3.connect(f"file:{state_db}?mode=ro", uri=True)
     con.row_factory = sqlite3.Row
     rows = con.execute(
         """
@@ -84,6 +84,7 @@ def load_threads(state_db: Path) -> dict[str, dict]:
         FROM threads
         """
     ).fetchall()
+    con.close()
     return {row["id"]: dict(row) for row in rows}
 
 
@@ -164,7 +165,7 @@ def collect_thread_summaries(
         if not first:
             continue
         if (
-            thread_source == "subagent"
+            thread_source in {"subagent", "guardian_review"}
             or "subagent" in source_repr
             or first.startswith("The following is the Codex agent history")
         ):
@@ -198,6 +199,24 @@ def collect_thread_summaries(
     return events
 
 
+def rollout_user_text(obj: dict) -> str:
+    """Support both legacy user_message and current Desktop message records."""
+    payload = obj.get("payload") or {}
+    if obj.get("type") == "event_msg" and payload.get("type") == "user_message":
+        return str(payload.get("message") or "").strip()
+    if obj.get("type") != "response_item" or payload.get("type") != "message" or payload.get("role") != "user":
+        return ""
+    context_prefixes = ("<environment_context>", "<external_codex_apps_open_page", "<in-app-browser-context", "<recommended_plugins>", "# AGENTS.md instructions", "<codex_delegation>")
+    parts = []
+    for part in payload.get("content") or []:
+        if not isinstance(part, dict):
+            continue
+        text = str(part.get("text") or "").strip()
+        if text and not text.startswith(context_prefixes):
+            parts.append(text)
+    return "\n".join(parts)
+
+
 def collect_rollout_user_messages(
     day: str, codex_home: Path, existing: int, limit: int
 ) -> list[TraceEvent]:
@@ -222,7 +241,7 @@ def collect_rollout_user_messages(
             continue
         thread_source = str(thread.get("thread_source") or "")
         source_repr = str(thread.get("source") or "")
-        if thread_source == "subagent" or "subagent" in source_repr:
+        if thread_source in {"subagent", "guardian_review"} or "subagent" in source_repr:
             continue
         rollout_path = thread.get("rollout_path")
         if not rollout_path:
@@ -235,6 +254,7 @@ def collect_rollout_user_messages(
         except Exception:
             continue
         cwd = thread.get("cwd")
+        seen_messages = set()
         for idx, line in enumerate(lines):
             if existing + len(events) >= limit:
                 break
@@ -242,17 +262,16 @@ def collect_rollout_user_messages(
                 obj = json.loads(line)
             except Exception:
                 continue
-            if obj.get("type") != "event_msg":
-                continue
-            payload = obj.get("payload") or {}
-            if payload.get("type") != "user_message":
-                continue
-            raw_text = str(payload.get("message") or "").strip()
+            raw_text = rollout_user_text(obj)
             if not raw_text or raw_text.startswith("<environment_context>"):
                 continue
             ts = iso_to_epoch(obj.get("timestamp"))
             if ts is None or not (start_ts <= ts <= end_ts):
                 continue
+            signature = (ts, raw_text)
+            if signature in seen_messages:
+                continue
+            seen_messages.add(signature)
             when = iso_from_epoch(ts)
             eid_seed = f"codex-app-input:{tid}:{idx}:{when}:{raw_text}"
             events.append(

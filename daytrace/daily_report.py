@@ -36,7 +36,7 @@ def regenerate_day_from_db(
     date: str,
     *,
     force: bool = False,
-    include_ai: bool = True,
+    include_ai: bool = False,
     boundary_hour: int | None = None,
 ) -> RegenerationReport:
     """Pull the day's events from the DB and run the full orchestrator.

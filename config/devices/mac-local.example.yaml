@@ -1,0 +1,18 @@
+# Copy to mac-local.yaml and replace the Git root with your checkout parent.
+device:
+  id: Mac
+  name: Local Mac
+  location_id: unknown
+  collector_id: hub-local
+sources:
+  codex:
+    enabled: true
+    home: ~/.codex
+    limit: 100000
+  git:
+    enabled: true
+    roots:
+      - ~/Projects
+    limit: 100000
+  hermes: {enabled: false}
+  claude_code: {enabled: false}

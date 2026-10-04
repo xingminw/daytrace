@@ -16,7 +16,7 @@ from daytrace.io import write_events
 from daytrace.schema import TraceEvent
 
 
-LOCAL_TZ = ZoneInfo("America/Detroit")
+from daytrace.timezone import LOCAL_TZ
 
 
 def day_bounds(day: str) -> tuple[float, float]:

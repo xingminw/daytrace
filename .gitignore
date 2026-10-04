@@ -65,3 +65,14 @@ deploy/*.plist
 # Committed branding + GitHub-Pages screenshots (override *.png / *.svg above).
 !docs/assets/**
 
+
+# Local repository index roots and manual aliases
+config/projects.yaml
+
+# Authorized per-device SSH collection registry
+config/remote_codex.json
+
+# Machine configuration, local recovery notes and manually reviewed private samples
+config/devices/mac-local.yaml
+docs/local-recovery-*.md
+scripts/prepare_brief_review.py

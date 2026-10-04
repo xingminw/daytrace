@@ -201,20 +201,8 @@ def _merge_en_into_payload(payload: dict, en: dict) -> dict:
 
 
 def _load_task_map(con) -> dict[str, str]:
-    """work_items.title → work_items.title_en map (only when both present)."""
-    out: dict[str, str] = {}
-    try:
-        for r in con.execute(
-            "SELECT title, title_en FROM work_items WHERE title IS NOT NULL "
-            "AND title_en IS NOT NULL AND title_en != ''"
-        ).fetchall():
-            zh = (r["title"] or "").strip()
-            en = (r["title_en"] or "").strip()
-            if zh and en and zh != en:
-                out[zh] = en
-    except Exception:
-        pass
-    return out
+    """Repository names are canonical and need no task-title translation."""
+    return {}
 
 
 def main() -> int:

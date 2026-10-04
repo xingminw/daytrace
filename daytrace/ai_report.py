@@ -16,9 +16,9 @@ the orchestrator writes accurate cost/usage to the channel rows. JSON-mode
 is requested at the API level; the prompt also pins the exact output shape
 so DeepSeek's JSON mode has something to validate against.
 
-Sensitivity redaction: events tagged `sensitive` are dropped from prompts
-entirely; events tagged `private` are kept with title/summary replaced by
-"[私密]" so AI still sees the temporal envelope.
+Current sensitivity policy: _redact_event passes events through. Titles and
+truncated summaries can contain private user prompts. AI must remain disabled
+until the user approves the provider, data categories, range and budget.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from .channels import (
 )
 
 # Bump this when prompts change so existing cached rows get superseded.
-AI_VERSION = "v19"  # v19 = bilingual per-project summaries / continuity
+AI_VERSION = "v20-local-repos"  # local repository context replaces Feishu tasks
 
 
 # ----- Shape validators ------------------------------------------------
@@ -269,7 +269,7 @@ def _format_events_inline(
         eid = red.get("id") or ""
         task_title = task_map.get(eid)
         if task_title:
-            label = f"[task:{task_title}]"
+            label = f"[repo:{task_title}]"
         else:
             proj = red.get("project") or red.get("project_guess") or "misc"
             label = f"[proj:{proj}]"
@@ -283,74 +283,13 @@ def _format_events_inline(
 
 
 def _load_event_task_map(con: sqlite3.Connection, date: str) -> dict[str, str]:
-    """For all events on `date` that have a row in event_work_item_links,
-    return {event_id: task_title}. Used to prefix events with their
-    Feishu task label."""
-    try:
-        rows = con.execute(
-            """
-            SELECT l.event_id AS eid, w.title AS title
-              FROM events e
-              JOIN event_work_item_links l ON l.event_id = e.id
-              JOIN work_items w           ON w.record_id = l.record_id
-             WHERE e.date = ?
-             """,
-            (date,),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        return {}
-    return {r["eid"]: r["title"] for r in rows if r["title"]}
+    rows = con.execute("SELECT id,project_guess FROM events WHERE date=? AND repo_project_id IS NOT NULL", (date,)).fetchall()
+    return {r["id"]:r["project_guess"] for r in rows}
 
 
 def _load_active_task_context(con: sqlite3.Connection) -> str:
-    """Build a compact bullet list of *active* tasks (status ≠ 完成, OR
-    completed within last 7 days). Excludes the `reviews` table — review
-    items are auto-identifiable from paper titles and would just bloat
-    the prompt. Returns "" when there are no tasks to show."""
-    from datetime import date as _date_mod, timedelta as _td_mod
-    cutoff = (_date_mod.today() - _td_mod(days=7)).isoformat()
-    try:
-        rows = con.execute(
-            """
-            SELECT title, title_en, status, due_date
-              FROM work_items
-             WHERE table_key = 'tasks'
-               AND (
-                    (status IS NOT NULL AND status != '完成')
-                 OR (status = '完成' AND due_date >= ?)
-               )
-             ORDER BY
-               CASE status
-                 WHEN '进行中' THEN 0
-                 WHEN '待办'   THEN 1
-                 WHEN '完成'   THEN 2
-                 ELSE 3
-               END,
-               COALESCE(due_date, '9999-12-31')
-            """,
-            (cutoff,),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        return ""
-    if not rows:
-        return ""
-    lines = []
-    for r in rows:
-        title = (r["title"] or "").strip()
-        title_en = (r["title_en"] or "").strip() if "title_en" in r.keys() else ""
-        status = (r["status"] or "").strip() or "?"
-        due = (r["due_date"] or "").strip()
-        suffix = f" · {status}"
-        if due:
-            suffix += f" · due {due}"
-        # When an English title is available, surface both so the AI
-        # has a direct map for bilingual output (en bullets should use
-        # the EN title, not embed the zh one).
-        if title_en and title_en != title:
-            lines.append(f"- {title} / {title_en}{suffix}")
-        else:
-            lines.append(f"- {title}{suffix}")
-    return "\n".join(lines)
+    from .projects import list_projects
+    return "\n".join("- " + p["name"] for p in list_projects(con))
 
 
 def _read_day_channel(con: sqlite3.Connection, date: str, channel: str):
@@ -511,7 +450,7 @@ OVERVIEW_SYSTEM = (
     "哪些 P0/P1 长期没碰、哪些任务该启动了。每条 1 个任务 + 1 个具体建议。"
     "不要回顾今天做了啥。\n\n"
     "**输入会按顺序给你**:\n"
-    "  1. 活跃任务清单 (飞书任务表)\n"
+    "  1. 活跃任务清单 (本地仓库项目表)\n"
     "  2. 今日 per-project 摘要 — 每个项目今天的概要 / 做了什么 / 下一步\n"
     "     (这是 narrative 的事实来源。narrative 引用项目时, 用这里的措辞统一性)\n"
     "  3. 近 N 天基线 (用于和今天对比)\n"
@@ -541,8 +480,8 @@ def _overview_user(
     baseline_text: str, project_summaries_text: str = "",
 ) -> str:
     tasks_block = (
-        f"【活跃任务清单 — 来自飞书任务表, 优先以任务视角描述】\n{tasks_text}\n\n"
-        if tasks_text else "【活跃任务清单】(无)\n\n"
+        f"【本地仓库索引 — 仓库存在不代表当前活跃、完成状态或截止日期】\n{tasks_text}\n\n"
+        if tasks_text else "【本地仓库索引】(无)\n\n"
     )
     project_block = (
         f"【今日 per-project 摘要 — narrative 的事实来源】\n{project_summaries_text}\n\n"

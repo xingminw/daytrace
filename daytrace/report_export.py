@@ -104,8 +104,8 @@ _LABELS = {
         "weekly_title": "周报",
         "tagline_daily":  "工作日复盘 · 数据来源:本机 + 远程设备 ssh catchup",
         "tagline_weekly": "ISO Week {w} · {days}/7 天活跃 · {h:.1f}h 总投入",
-        "no_overview":  "_(AI overview 未生成 — DEEPSEEK_API_KEY 未配置或 backfill 未跑)_",
-        "no_weekly":    "_(本周 AI 速读未生成 — 请先访问 /weekly?week={w} 触发)_",
+        "no_overview":  "_(尚无已保存速读；请通过 generate_brief.py 显式生成)_",
+        "no_weekly":    "_(本周尚无已保存速读；浏览页面不会触发付费生成)_",
         "footer_daily": "🌿 _DayTrace 归档 · 生成于 {t}_",
         "footer_weekly":"🌸 _DayTrace 归档 · 生成于 {t}_",
         "insights":     "💡 Insights",
@@ -132,7 +132,7 @@ _LABELS = {
         "weekly_title": "Weekly",
         "tagline_daily":  "Workday recap · source: this Mac + remote machines via ssh catchup",
         "tagline_weekly": "ISO Week {w} · {days}/7 days active · {h:.1f}h total",
-        "no_overview":  "_(AI overview not generated — DEEPSEEK_API_KEY not set or backfill not run)_",
+        "no_overview":  "_(No saved brief; use generate_brief.py for explicit generation)_",
         "no_weekly":    "_(weekly AI overview not generated — visit /weekly?week={w} first to trigger)_",
         "footer_daily": "🌿 _DayTrace archive · generated {t}_",
         "footer_weekly":"🌸 _DayTrace archive · generated {t}_",
@@ -272,9 +272,14 @@ def archive_markdown_for_date(db_path: Path, date: str, *,
         "SELECT * FROM day_report WHERE date = ?", (date,)
     ).fetchone()
     if row is None:
+        from .briefings import load_brief, markdown_brief
+        saved=load_brief(con,'daily',date)
+        con.close()
+        if saved:return f"# {_t('daily_title', lang)} · {date}\n\n"+markdown_brief(saved)+"\n"
         return f"# {_t('daily_title', lang)} · {date}\n\n{_t('no_data', lang)}\n"
     channels = _load_day_channels(con, date)
-    ai_overview = channels.get("ai_overview")
+    from .briefings import load_brief
+    ai_overview = load_brief(con,'daily',date) or channels.get("ai_overview")
     ai_cost = con.execute(
         "SELECT COALESCE(SUM(cost_usd), 0) FROM day_channel "
         "WHERE date=? AND generator='ai'", (date,)
@@ -291,7 +296,10 @@ def archive_markdown_for_date(db_path: Path, date: str, *,
         "",
     ]
 
-    if ai_overview:
+    if ai_overview and ai_overview.get('briefing_version'):
+        from .briefings import markdown_brief
+        parts.append(markdown_brief(ai_overview))
+    elif ai_overview:
         headline = _L(ai_overview.get("headline"), lang)
         ov = ai_overview.get("overview")
         narrative = _L((ov or {}).get("narrative") if isinstance(ov, dict) else ai_overview.get("narrative"), lang)
@@ -402,8 +410,9 @@ def archive_markdown_for_week(db_path: Path, week: str, *,
     ).fetchone()[0] or 0.0
 
     cache_path = _week_ai_cache_path(week)
-    summary: dict | None = None
-    if cache_path.exists():
+    from .briefings import load_brief
+    summary: dict | None = load_brief(con,'weekly',week)
+    if summary is None and cache_path.exists():
         try:
             summary = json.loads(cache_path.read_text(encoding="utf-8")).get("value")
         except Exception:
@@ -428,7 +437,10 @@ def archive_markdown_for_week(db_path: Path, week: str, *,
         "",
     ]
 
-    if summary:
+    if summary and summary.get('briefing_version'):
+        from .briefings import markdown_brief
+        parts.append(markdown_brief(summary))
+    elif summary:
         headline = _L(summary.get("headline"), lang)
         ov = summary.get("overview")
         narrative = _L((ov or {}).get("narrative") if isinstance(ov, dict) else summary.get("narrative"), lang)

@@ -89,22 +89,7 @@ def _save_feishu_config(cfg: dict) -> None:
 
 
 def _lark(args: list[str], *, cwd: Path | None = None) -> dict:
-    """Run lark-cli with --as user and return parsed JSON. Raises on
-    non-zero exit. Stdout is expected to be JSON."""
-    cmd = ["lark-cli", *args, "--as", "user"]
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"lark-cli failed ({' '.join(args[:2])}): "
-            f"exit {result.returncode}\nstderr: {result.stderr.strip()}"
-        )
-    out = result.stdout.strip()
-    if not out:
-        return {}
-    try:
-        return json.loads(out)
-    except json.JSONDecodeError:
-        raise RuntimeError(f"lark-cli returned non-JSON: {out[:300]}")
+    raise RuntimeError("Feishu delivery is disconnected; export reports locally")
 
 
 def _ensure_subfolder(parent_token: str | None, name: str) -> str:

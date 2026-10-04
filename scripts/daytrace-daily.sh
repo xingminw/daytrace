@@ -1,38 +1,7 @@
-#!/bin/bash
-# DayTrace daily wrapper — run by launchd at 04:30 (and re-runs on wake).
-#
-# SSH-direct model:
-#   - This Mac is the hub. For every pending (device, shifted-day) pair
-#     (per device_pull_log), it:
-#       a) collects its own sources into ./data/inbox/<this-device>/<date>/
-#       b) ssh's into each --remote, asks it to run collect_from_config locally
-#       c) rsyncs the remote's data/inbox/<dev>/<date>/ slice back to ./data/inbox/
-#       d) imports everything + regenerates day_report (incl. AI).
-#
-# If a remote is unreachable (WSL off, Tailscale not up, etc.) that
-# (device, date) attempt is recorded as failed in device_pull_log and
-# retried on the next run. Other devices / days still proceed.
-
-set -u
-
-cd "$(cd "$(dirname "$0")/.." && pwd)" || exit 1
-
-# launchd seeds PATH minimally; restore enough to find python3, ssh, rsync.
-export PATH="$HOME/.npm-global/bin:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin"
-
-echo "=== $(date -Iseconds) DayTrace daily start ==="
-
-# Keep every remote's checked-out code in sync with this hub before catchup
-# runs anything on them. Cheap when nothing changed.
-python3 scripts/run_daily.py deploy
-
-# Pulls every (device, date) pair in device_pull_log that still needs work,
-# then imports + regenerates. Remotes come from config/remotes.yaml.
-python3 scripts/run_daily.py catchup \
-  --config config/devices/mac.yaml
-
-# Export yesterday's report as standalone HTML + Markdown, upload to
-# Feishu drive. We don't email daily — weekly handles that to avoid spam.
-python3 scripts/export_report.py --upload-feishu
-
-echo "=== $(date -Iseconds) DayTrace daily end ==="
+#!/bin/sh
+# Local collection only. Scheduling requires explicit user approval.
+set -eu
+REPO="$(cd "$(dirname "$0")/.." && pwd)"
+export DAYTRACE_TIMEZONE="${DAYTRACE_TIMEZONE:-Asia/Shanghai}"
+export DAYTRACE_DISABLE_AI=1
+exec "$REPO/.venv/bin/python" "$REPO/scripts/run_local.py" "$@"

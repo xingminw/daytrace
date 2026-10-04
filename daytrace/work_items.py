@@ -32,77 +32,8 @@ DEFAULT_ALIASES = REPO_ROOT / "config" / "work_item_aliases.yaml"
 # ───────────────────────── config loading ─────────────────────────
 
 def load_config(path: str | Path = DEFAULT_CONFIG) -> dict | None:
-    """Returns the work_items config dict, or None if feature is
-    disabled / config missing. New schema (v12):
-        enabled: bool
-        tables:
-          - key: str            # local id ("tasks" / "reviews" / …)
-            name: str           # human label (任务 / 审稿)
-            app_token: str
-            table_id: str
-            as: user | bot
-            field_map:
-              title: <feishu col>
-              status: <feishu col>
-              priority: <feishu col>   # optional
-              subtitle: <feishu col>   # optional
-              tags: <feishu col>       # optional
-              due_date: <feishu col>   # optional
-              external_links: [<feishu col>, ...]
-              ...
-    Old single-table schema (top-level app_token / table_id) is auto-upgraded
-    to a one-entry tables list so existing configs keep working.
-    """
-    p = Path(path)
-    if not p.exists():
-        return None
-    try:
-        raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    except Exception:
-        return None
-    if not raw.get("enabled"):
-        return None
-
-    # Auto-upgrade legacy single-table format
-    tables = raw.get("tables")
-    if not tables and raw.get("app_token") and raw.get("table_id"):
-        tables = [{
-            "key": "tasks",
-            "name": raw.get("name") or "任务",
-            "app_token": raw["app_token"],
-            "table_id": raw["table_id"],
-            "as": raw.get("as", "user"),
-            "field_map": {
-                "title": "任务",
-                "status": "状态",
-                "priority": "重要程度",
-                "tags": "标签",
-                "subtitle": "项目来源",
-                "due_date": "截止时间",
-                "next_action_date": "下一步时间",
-                "weekly_hours": "每周预计投入",
-                "next_action": "下一步动作",
-                "agent_workspace": "Agent 工作区",
-                "external_links": ["外部链接 1", "外部链接 2", "外部链接 3"],
-            },
-        }]
-    if not tables:
-        return None
-
-    # Validate each table
-    cleaned: list[dict] = []
-    for t in tables:
-        if not t.get("app_token") or not t.get("table_id"):
-            continue
-        t.setdefault("key", "tasks")
-        t.setdefault("name", t["key"])
-        t.setdefault("as", "user")
-        t.setdefault("field_map", {})
-        cleaned.append(t)
-    if not cleaned:
-        return None
-
-    return {"enabled": True, "tables": cleaned}
+    """Legacy snapshot config is inactive; projects are indexed locally."""
+    return None
 
 
 def load_aliases(path: str | Path = DEFAULT_ALIASES) -> dict[str, str]:
@@ -192,16 +123,7 @@ def _extract_urls(value: Any) -> list[str]:
 # ───────────────────────── lark-cli runner ─────────────────────────
 
 def _run_lark(args: list[str], *, timeout: float = 60.0) -> str:
-    cmd = ["lark-cli", *args]
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    except FileNotFoundError:
-        raise RuntimeError(
-            "lark-cli not on PATH. Install with: npm i -g @larksuiteoapi/cli"
-        )
-    if proc.returncode != 0:
-        raise RuntimeError(f"lark-cli failed (rc={proc.returncode}): {proc.stderr[:500]}")
-    return proc.stdout
+    raise RuntimeError("Feishu integration is disconnected; use the local repository index")
 
 
 # ───────────────────────── sync ─────────────────────────
@@ -332,47 +254,8 @@ def sync_table(
     return {"fetched": len(rows), "upserted": upserted}
 
 
-def sync_from_feishu(
-    con: sqlite3.Connection,
-    cfg: dict | None = None,
-    *,
-    # legacy single-table args (kept for backwards compat with phase-1 callers)
-    app_token: str | None = None,
-    table_id: str | None = None,
-    as_identity: str = "user",
-    page_limit: int = 200,
-) -> dict[str, Any]:
-    """Sync every configured table. Returns {"tables": [{"key", "fetched",
-    "upserted", "error"?}, ...]}. Errors in one table don't block others."""
-    if cfg is None and app_token and table_id:
-        # legacy single-table mode
-        cfg = {"tables": [{
-            "key": "tasks", "name": "任务",
-            "app_token": app_token, "table_id": table_id,
-            "as": as_identity, "field_map": {
-                "title": "任务", "status": "状态", "priority": "重要程度",
-                "tags": "标签", "subtitle": "项目来源",
-                "due_date": "截止时间", "next_action_date": "下一步时间",
-                "weekly_hours": "每周预计投入", "next_action": "下一步动作",
-                "agent_workspace": "Agent 工作区",
-                "external_links": ["外部链接 1", "外部链接 2", "外部链接 3"],
-            },
-        }]}
-    if not cfg or not cfg.get("tables"):
-        return {"tables": []}
-
-    results = []
-    for tcfg in cfg["tables"]:
-        entry = {"key": tcfg["key"], "name": tcfg.get("name", "")}
-        try:
-            stats = sync_table(con, tcfg)
-            entry.update(stats)
-        except Exception as e:
-            entry["error"] = f"{type(e).__name__}: {e}"
-            entry["fetched"] = 0
-            entry["upserted"] = 0
-        results.append(entry)
-    return {"tables": results}
+def sync_from_feishu(con: sqlite3.Connection, cfg: dict | None = None, **kwargs) -> dict:
+    raise RuntimeError("Feishu sync is disconnected; legacy snapshots are preserved read-only")
 
 
 # ───────────────────────── linker ─────────────────────────
@@ -453,72 +336,11 @@ def _work_item_canon_keys(con: sqlite3.Connection) -> dict[str, str]:
     return out
 
 
-def rebuild_links(
-    con: sqlite3.Connection,
-    *,
-    aliases_path: str | Path = DEFAULT_ALIASES,
-    lookback_days: int = 30,
-) -> dict[str, int]:
-    canon = _work_item_canon_keys(con)
-    aliases = load_aliases(aliases_path)
-    con.execute(
-        "DELETE FROM event_work_item_links "
-        "WHERE match_type IN ('github_url','local_path','alias')"
-    )
-    rows = con.execute(
-        f"""
-        SELECT id, project_guess, evidence_json
-          FROM events
-         WHERE date >= date('now', '-{int(lookback_days)} days')
-        """
-    ).fetchall()
-    inserted = 0
-    by_type: dict[str, int] = {"github_url": 0, "local_path": 0, "alias": 0}
-    for row in rows:
-        ev_id = row["id"]
-        chosen_record: str | None = None
-        chosen_match: str | None = None
-        ev_json = row["evidence_json"] or "{}"
-        try:
-            ev = json.loads(ev_json)
-        except Exception:
-            ev = {}
-        candidates_paths: list[str] = []
-        for k in ("repo", "cwd", "repo_url", "remote_url", "url",
-                  "path", "rollout_path", "session_path"):
-            v = ev.get(k)
-            if isinstance(v, str) and v:
-                candidates_paths.append(v)
-        for c in candidates_paths:
-            key = _canon_url(c)
-            if key and key in canon:
-                chosen_record = canon[key]
-                chosen_match = "github_url" if key.startswith("github:") else "local_path"
-                break
-            key = _canon_localpath(c)
-            if key and key in canon:
-                chosen_record = canon[key]
-                chosen_match = "local_path"
-                break
-        if not chosen_record and row["project_guess"]:
-            rec = aliases.get(str(row["project_guess"]))
-            if rec:
-                chosen_record = rec
-                chosen_match = "alias"
-        if chosen_record:
-            con.execute(
-                """
-                INSERT OR REPLACE INTO event_work_item_links
-                    (event_id, record_id, match_type, confidence, matched_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-                """,
-                (ev_id, chosen_record, chosen_match,
-                 1.0 if chosen_match in ("github_url", "alias") else 0.9),
-            )
-            inserted += 1
-            by_type[chosen_match] = by_type.get(chosen_match, 0) + 1
-    con.commit()
-    return {"events_scanned": len(rows), "links_inserted": inserted, "by_type": by_type}
+def rebuild_links(con: sqlite3.Connection, **kwargs) -> dict:
+    """Legacy command compatibility; preserve old links and use local repos."""
+    from .projects import sync_projects
+    result = sync_projects(con)
+    return {"events_scanned":result["events"],"links_inserted":result["linked_events"],"by_type":{"local_repo":result["linked_events"]}}
 
 
 # ───────────────────────── helpers for consumers ─────────────────────────

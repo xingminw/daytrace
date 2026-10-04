@@ -91,43 +91,12 @@ def _load_events_for_range(con: sqlite3.Connection,
 
 
 def _load_task_map(con: sqlite3.Connection, event_ids: list[str]) -> dict[str, str]:
-    """For events linked to a work_item, return {event_id: task_title}.
-    Mirrors dashboard's _enrich_events_with_tasks but **with the user's
-    requested downgrade** — unlinked events are NOT bucketed under
-    "未对应任务"; the caller falls back to project_guess instead.
-
-    Also respects work_items.yaml `collapse_in_dim` so e.g. all 33
-    review rows fold into a single "审稿" label."""
-    if not event_ids:
-        return {}
-    collapse_map: dict[str, str] = {}
-    try:
-        from daytrace.work_items import load_config
-        cfg = load_config()
-        for t in (cfg or {}).get("tables", []):
-            if t.get("collapse_in_dim"):
-                collapse_map[t["key"]] = t.get("collapsed_label") or t.get("name") or t["key"]
-    except Exception:
-        pass
-
-    out: dict[str, str] = {}
-    chunk = 900
-    for i in range(0, len(event_ids), chunk):
-        sub = event_ids[i:i+chunk]
-        ph = ",".join("?" * len(sub))
-        for r in con.execute(
-            f"""
-            SELECT l.event_id, w.title, w.table_key
-              FROM event_work_item_links l
-              JOIN work_items w ON w.record_id = l.record_id
-             WHERE l.event_id IN ({ph})
-            """, sub
-        ).fetchall():
-            tk = r["table_key"] or "tasks"
-            if tk in collapse_map:
-                out[r["event_id"]] = collapse_map[tk]
-            elif r["title"]:
-                out[r["event_id"]] = r["title"]
+    out = {}
+    for i in range(0,len(event_ids),900):
+        ids = event_ids[i:i+900]
+        ph = ",".join("?" for _ in ids)
+        for r in con.execute(f"SELECT id,project_guess FROM events WHERE id IN ({ph}) AND repo_project_id IS NOT NULL",ids):
+            out[r["id"]] = r["project_guess"]
     return out
 
 

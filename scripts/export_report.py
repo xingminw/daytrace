@@ -75,6 +75,8 @@ def main() -> int:
                     help="Email the Markdown to the configured recipient (weekly only by default)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
+    if args.upload_feishu:
+        ap.error("Feishu is disconnected; omit --upload-feishu to export locally")
 
     # Resolve target
     if args.date and args.week:

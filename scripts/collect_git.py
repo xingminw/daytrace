@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from daytrace.io import write_events
 from daytrace.schema import TraceEvent
+from daytrace.timezone import LOCAL_TZ
 
 
 def find_repos(roots: list[Path]) -> list[Path]:
@@ -22,9 +23,18 @@ def find_repos(roots: list[Path]) -> list[Path]:
         if (root / ".git").exists():
             repos.append(root)
             continue
-        for child in root.iterdir():
-            if child.is_dir() and (child / ".git").exists():
-                repos.append(child)
+        def scan(parent, depth=0):
+            if depth >= 4:
+                return
+            for child in parent.iterdir():
+                if child.name.startswith('.') or child.name in {'node_modules','data','venv'} or child.is_symlink():
+                    continue
+                if child.is_dir():
+                    if (child / '.git').exists():
+                        repos.append(child)
+                    else:
+                        scan(child, depth+1)
+        scan(root)
     # de-dupe case-insensitive macOS aliases
     seen = set()
     out = []
@@ -41,8 +51,8 @@ def collect_git_events(
 ) -> list[TraceEvent]:
     events = []
     d = date.fromisoformat(day)
-    since = datetime.combine(d, time.min).isoformat()
-    until = datetime.combine(d, time.max).isoformat()
+    since = datetime.combine(d, time.min, tzinfo=LOCAL_TZ).isoformat()
+    until = datetime.combine(d, time.max, tzinfo=LOCAL_TZ).isoformat()
     for repo in find_repos(roots):
         project = repo.name
         try:
@@ -54,12 +64,12 @@ def collect_git_events(
                     "log",
                     f"--since={since}",
                     f"--until={until}",
-                    "--pretty=format:%H%x09%ad%x09%s",
+                    "--pretty=format:%H%x09%cI%x09%s",
                     # iso-strict → "2026-05-13T17:22:25-04:00" with T
                     # separator. Plain "iso" uses a space which breaks our
                     # lexicographic start_from/start_to filtering.
                     "--date=iso-strict",
-                    "--max-count=50",
+                    f"--max-count={limit}",
                 ],
                 capture_output=True,
                 text=True,
@@ -77,7 +87,7 @@ def collect_git_events(
                         id="git-commit-" + sha[:16],
                         source="git",
                         kind="commit",
-                        start=when[:19],
+                        start=datetime.fromisoformat(when).astimezone(LOCAL_TZ).replace(tzinfo=None).isoformat(timespec="seconds"),
                         end=None,
                         title=f"{project}: {subject}",
                         summary=f"Commit {sha[:7]} in {repo}",
@@ -87,6 +97,9 @@ def collect_git_events(
                         raw_ref=str(repo),
                     )
                 )
+            # A current working tree cannot reconstruct historical changes.
+            if d != datetime.now(LOCAL_TZ).date():
+                continue
             status = subprocess.run(
                 ["git", "-C", str(repo), "status", "--short"],
                 capture_output=True,
@@ -95,7 +108,7 @@ def collect_git_events(
             )
             lines = [line for line in status.stdout.splitlines() if line.strip()]
             if lines and len(events) < limit:
-                now = datetime.now().isoformat(timespec="seconds")
+                now = datetime.now(LOCAL_TZ).replace(tzinfo=None).isoformat(timespec="seconds")
                 eid = "git-status-" + hashlib.sha1(str(repo).encode()).hexdigest()[:16]
                 events.append(
                     TraceEvent(
